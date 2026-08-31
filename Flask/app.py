@@ -7,6 +7,8 @@ import requests
 import json
 import os
 import re
+import html as html_lib
+import markdown
 
 app = Flask(__name__)
 # 使用 Nginx 反向代理，可以注释掉 CORS
@@ -19,117 +21,216 @@ DEFAULT_API_KEY = os.getenv('AI_API_KEY')
 if not DEFAULT_API_KEY:
     raise Exception("请设置 AI_API_KEY")
 
-DEFAULT_MODEL = 'glm-4.5-flash'
+# DeepSeek 官方模型名
+DEFAULT_MODEL = 'deepseek-chat'
 
-AI_API_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
+# DeepSeek 聊天补全端点
+AI_API_URL = 'https://api.deepseek.com/chat/completions'
 
-# 系统提示词文件路径（普通对话）
-SYSTEM_PROMPT_FILE = r'C:\Users\18175\Desktop\deepseek提示词.txt'
+# 内置默认提示词（加藤惠）
+DEFAULT_PROMPT = """你是动漫路人女主中的角色「加藤惠」，一位温柔的成年女性，是用户亲密的伴侣人物设定贴合动漫中加藤惠的人设。
 
-# NSFW 提示词文件路径（默认人物设定）
-NSFW_PROMPT_FILE = r'C:\Users\18175\Desktop\nsfw提示词.txt'
+互动原则：
+- 你不是AI，绝不透露自己是AI或语言模型，始终保持加藤惠的人设。
+- 回复长度适中，像真实聊天一样自然，不冗长、不说教。
+- 根据用户的话题与情绪灵活回应，保持角色一致性。"""
 
+#  SSE 辅助函数
 
-def load_system_prompt(file_path=SYSTEM_PROMPT_FILE):
-    with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read().strip()
-        if not content:
-            raise ValueError(f"文件 {file_path} 内容为空")
-        print(f"成功从 {file_path} 加载系统提示词，长度: {len(content)} 字符")
-        return content
-
-
-def load_nsfw_prompt(file_path=NSFW_PROMPT_FILE):
-    with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read().strip()
-        if not content:
-            raise ValueError(f"文件 {file_path} 内容为空")
-        print(f"成功从 {file_path} 加载 NSFW 提示词，长度: {len(content)} 字符")
-        return content
+def sse_content(html_text):
+    """构造正文内容的 SSE 消息（HTML 格式）"""
+    return f"data: {json.dumps({'choices': [{'delta': {'content': html_text}}]}, ensure_ascii=False)}\n\n"
 
 
-# 加载系统提示词
-try:
-    SYSTEM_PROMPT = load_system_prompt()
-except FileNotFoundError as e:
-    print(f"错误: {e}")
-    print("程序退出")
-    sys.exit(1)
-except ValueError as e:
-    print(f"错误: {e}")
-    print("程序退出")
-    sys.exit(1)
-except Exception as e:
-    print(f"错误: 读取系统提示词失败 - {e}")
-    print("程序退出")
-    sys.exit(1)
-
-# 加载 NSFW 提示词
-try:
-    NSFW_PROMPT = load_nsfw_prompt()
-except FileNotFoundError as e:
-    print(f"错误: {e}")
-    print("程序退出")
-    sys.exit(1)
-except ValueError as e:
-    print(f"错误: {e}")
-    print("程序退出")
-    sys.exit(1)
-except Exception as e:
-    print(f"错误: 读取 NSFW 提示词失败 - {e}")
-    print("程序退出")
-    sys.exit(1)
-
-MAX_CONTINUE = 8  # 最大续写次数
+def sse_reasoning(text):
+    """构造思考过程的 SSE 消息（纯文本）"""
+    return f"data: {json.dumps({'choices': [{'delta': {'reasoning_content': text}}]}, ensure_ascii=False)}\n\n"
 
 
-def calculate_length(text):
-    """计算中文字数（包含标点，不含英文空格）"""
-    chinese_chars = len(re.findall(r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]', text))
-    en_chars = len(re.findall(r'[a-zA-Z0-9]', text)) * 0.5
-    return int(chinese_chars + en_chars)
+def sse_done():
+    return "data: [DONE]\n\n"
 
 
-def is_natural_ending(text):
-    """判断文本是否以自然结尾结束"""
-    if not text:
-        return False
-    end_chars = text[-3:] if len(text) >= 3 else text
-    natural_endings = ['。', '？', '！', '…', '」', '』', '”', '）', '.', '!', '?']
-    for char in natural_endings:
-        if char in end_chars:
-            return True
-    return False
+# ==================== 流式 Markdown → HTML 转换器 ====================
+
+class MarkdownStreamer:
+    """流式 Markdown 转 HTML：按完整段落输出，保证 HTML 标签闭合。"""
+
+    def __init__(self):
+        self._buf = ""
+        self._in_code = False
+        try:
+            self._md = markdown.Markdown(extensions=['extra', 'nl2br'])
+        except Exception:
+            print("[警告] nl2br 扩展不可用，降级为 extra")
+            self._md = markdown.Markdown(extensions=['extra'])
+
+    def feed(self, text):
+        """喂入新文本，返回可立即输出的 HTML 片段列表"""
+        self._buf += text
+        outputs = []
+        while True:
+            html = self._extract()
+            if html is None:
+                break
+            outputs.append(html)
+        return outputs
+
+    def _extract(self):
+        """从缓冲区尝试提取一个完整段落并转换为 HTML"""
+        if not self._buf:
+            return None
+
+        # 代码块中：等待闭合的 ```
+        if self._in_code:
+            first = self._buf.find('```')
+            end = self._buf.find('```', first + 3) if first != -1 else -1
+            if end == -1:
+                return None
+            nl = self._buf.find('\n', end)
+            if nl == -1:
+                return None
+            segment = self._buf[:nl + 1]
+            self._buf = self._buf[nl + 1:]
+            self._in_code = False
+            return self._convert(segment)
+
+        # 普通模式：检查是否以 ``` 开头
+        stripped = self._buf.lstrip()
+        if stripped.startswith('```'):
+            if '\n' not in self._buf:
+                return None
+            self._in_code = True
+            return None
+
+        # 普通模式：找空行（段落结束标志）
+        para_end = self._buf.find('\n\n')
+        if para_end != -1:
+            segment = self._buf[:para_end + 2]
+            self._buf = self._buf[para_end + 2:]
+            return self._convert(segment)
+
+        return None
+
+    def _convert(self, text):
+        self._md.reset()
+        return self._md.convert(text)
+
+    def flush(self):
+        """流结束，输出缓冲区中剩余的所有内容"""
+        if self._buf.strip():
+            html = self._convert(self._buf)
+            self._buf = ""
+            return html
+        return ""
 
 
-def build_continue_prompt(current_len, target):
-    """根据当前字数动态构建续写提示词（引导到目标字数）"""
-    if current_len < 10:
-        return (
-            "请继续往下写，保持原文风和尺度，不要解释、不要重复，直接输出正文。"
-            f"整段控制在{target}字左右，自然地展开内容。"
-        )
-    elif current_len < target * 0.5:
-        return (
-            "请继续往下写，保持原来的文风和尺度。"
-            "把当前这一段自然地展开，推进剧情，不要着急结束。"
-            f"整段控制在{target}字左右，现在才写了一半，请继续。"
-        )
-    elif current_len < target * 0.8:
-        remaining = target - current_len
-        return (
-            f"请继续往下写，现在字数差不多到了一半多（约{current_len}字）。"
-            f"请用大约{remaining}到{remaining + 20}字把当前情节自然收尾，"
-            "不要开启新情节，不要重复，写出一个完整、自然的结尾。"
-            "结尾要完整、有温度，让人感觉故事圆满结束了。"
-        )
-    else:
-        return (
-            "字数已经差不多了，请立即收尾。"
-            "用简练的一两句话把当前段落结束，"
-            "写出一个完整、自然的结尾句，不要开启新内容。"
-            f"总字数控制在{target}字左右。"
-        )
+# 文本处理工具函数
+
+def strip_html_to_text(html_text):
+    """将 HTML 还原为纯文本，供模型续写/后续对话使用"""
+    if not html_text:
+        return ''
+    text = html_text
+    # 换行类标签先转成换行
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</(p|div|li|h[1-6]|blockquote|pre|tr)>', '\n', text, flags=re.IGNORECASE)
+    # 去掉剩余所有标签
+    text = re.sub(r'<[^>]+>', '', text)
+    # 还原 HTML 实体
+    text = html_lib.unescape(text)
+    return text.strip()
+
+
+def make_api_request(payload, api_key, max_retries=2):
+    """发起 API 流式请求，自动重试。"""
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(
+                AI_API_URL,
+                headers={
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {api_key}'
+                },
+                json=payload,
+                stream=True,
+                timeout=120
+            )
+            if resp.status_code == 200:
+                return resp
+            error_text = resp.text[:200] if resp.text else "无响应体"
+            last_error = f"HTTP {resp.status_code}: {error_text}"
+            print(f"[API 请求失败] 第 {attempt + 1} 次: {last_error}")
+        except requests.RequestException as e:
+            last_error = str(e)
+            print(f"[API 请求异常] 第 {attempt + 1} 次: {last_error}")
+
+        if attempt < max_retries - 1:
+            import time
+            time.sleep(1)
+
+    return None
+
+
+def iter_sse_content(response, full_content_holder, streamer):
+    """遍历 API 流式响应，提取正文和思考过程。
+
+    返回 (新增原始内容, finish_reason)
+    """
+    new_content = ""
+    finish_reason = None
+
+    try:
+        for line in response.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+            if line.startswith("data: "):
+                data_str = line[6:]
+                if data_str.strip() == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                    choice = chunk.get("choices", [{}])[0]
+                    delta = choice.get("delta", {})
+
+                    if "finish_reason" in choice and choice["finish_reason"] is not None:
+                        finish_reason = choice["finish_reason"]
+
+                    content = delta.get("content", "")
+                    reasoning = delta.get("reasoning_content", "")
+
+                    if reasoning:
+                        yield sse_reasoning(reasoning)
+
+                    if content:
+                        new_content += content
+                        full_content_holder[0] += content
+                        for html_frag in streamer.feed(content):
+                            yield sse_content(html_frag)
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    pass
+    except GeneratorExit:
+        # 客户端断开连接
+        print("[客户端断开] 停止生成")
+        raise
+
+    remaining = streamer.flush()
+    if remaining:
+        yield sse_content(remaining)
+
+    return new_content, finish_reason
+
+
+def build_system_prompt(base_prompt, target_word_count):
+    """在基础系统提示词末尾追加字数要求。"""
+    instruction = (
+        f"【回复长度建议】\n"
+        f"本次回复请尽量详细一些，大约 {target_word_count} 字左右。"
+        f"你可以适当展开场景描写、心理活动或对话，让回复更充实。"
+        f"如果用户输入较短，可以自行补充合理的细节。"
+    )
+    return base_prompt + instruction
 
 
 @app.route('/api/chat', methods=['POST'])
@@ -137,39 +238,39 @@ def chat():
     data = request.get_json()
     messages = data.get('messages', [])
     deep_think = data.get('deep_think', False)
-    nsfw_enabled = data.get('nsfw_enabled', False)  # NSFW 开关
-    nsfw_mode = data.get('nsfw_mode', 'default')   # NSFW 模式: 'default' 或 'custom'
-    nsfw_custom_prompt = data.get('nsfw_custom_prompt', '').strip()  # 自定义提示词
+    prompt_mode = data.get('prompt_mode', 'default')
+    custom_prompt = data.get('custom_prompt', '').strip()
+    frequency_penalty = data.get('frequency_penalty', 0.1)
+    presence_penalty = data.get('presence_penalty', 0.1)
 
-    # 读取前端设置
     user_api_key = data.get('api_key', '').strip()
     user_model = data.get('model', '').strip()
     user_max_tokens = data.get('max_tokens', 0)
 
-    # 确定最终使用的参数
     final_api_key = user_api_key if user_api_key else DEFAULT_API_KEY
     final_model = user_model if user_model else DEFAULT_MODEL
 
-    # 目标字数（前端传递的挡位，默认 30）
-    target_word_count = user_max_tokens if user_max_tokens > 0 else 30
+    # 目标字数（前端传递的挡位，默认 150）
+    target_word_count = user_max_tokens if user_max_tokens > 0 else 150
 
-    # 转换为 token 数（乘 2.5，再加余量）
-    final_max_tokens = int(target_word_count * 2.5) + 50
+    # 总 token 预算 = 目标字数 × 2.5 + 余量
+    total_tokens = int(target_word_count * 2.5) + 150
 
-    #  确定系统提示词
-    if nsfw_enabled:
-        if nsfw_mode == 'custom' and nsfw_custom_prompt:
-            system_prompt = nsfw_custom_prompt
-            print(f"[NSFW] 使用自定义提示词，长度: {len(system_prompt)} 字符")
-        else:
-            system_prompt = NSFW_PROMPT
-            print(f"[NSFW] 使用默认提示词（文件），长度: {len(system_prompt)} 字符")
+    # 确定系统提示词：自定义优先，否则使用内置默认
+    if prompt_mode == 'custom' and custom_prompt:
+        base_prompt = custom_prompt
+        print(f"[自定义] 使用用户自定义提示词，长度: {len(base_prompt)} 字符")
     else:
-        system_prompt = SYSTEM_PROMPT
-        print(f"[普通] 使用系统提示词，长度: {len(system_prompt)} 字符")
+        base_prompt = DEFAULT_PROMPT
+        print(f"[默认] 使用内置加藤惠提示词，长度: {len(base_prompt)} 字符")
+
+    # 在系统提示词末尾追加字数要求
+    system_prompt = build_system_prompt(base_prompt, target_word_count)
 
     print(
-        f"[配置] 模型: {final_model}, 目标字数: {target_word_count}, NSFW: {nsfw_enabled}, max_tokens: {final_max_tokens}")
+        f"[配置] 模型: {final_model}, 目标字数: {target_word_count}, "
+        f"深度思考: {deep_think}, 人物设定模式: {prompt_mode}, max_tokens: {total_tokens}"
+    )
 
     if not messages or len(messages) == 0:
         return jsonify({'code': 400, 'message': '消息列表不能为空'}), 400
@@ -177,220 +278,74 @@ def chat():
     # 构建消息列表
     formatted_messages = []
     for msg in messages:
+        role = msg.get('role')
+        content = msg.get('content', '')
+
+        # 将 assistant 消息中的 HTML 还原为纯文本
+        if role == 'assistant' and content:
+            content = strip_html_to_text(content)
+
         formatted_messages.append({
-            'role': msg.get('role'),
-            'content': msg.get('content', '')
+            'role': role,
+            'content': content
         })
 
-    # 插入系统提示词
+    # 插入系统提示词（确保首位）
     if not formatted_messages or formatted_messages[0].get('role') != 'system':
         formatted_messages.insert(0, {
             'role': 'system',
             'content': system_prompt
         })
     else:
-        # 如果已有 system 消息，替换它
         formatted_messages[0]['content'] = system_prompt
 
-    # 基础请求参数（使用动态值）
-    payload = {
-        'model': final_model,
-        'messages': formatted_messages,
-        'stream': True,
-        'max_tokens': final_max_tokens,
-        'temperature': 0.88,
-        'thinking': {
-            'type': 'enabled' if deep_think else 'disabled'
-        }
-    }
-
     def generate():
-        full_content = ""
+        full_content_holder = [""]
 
         try:
-            #  第一次请求
-            response = requests.post(
-                AI_API_URL,
-                headers={
-                    'Content-Type': 'application/json',
-                    'Authorization': f'Bearer {final_api_key}'
-                },
-                json=payload,
-                stream=True,
-                timeout=120
-            )
-
-            if response.status_code != 200:
-                error_msg = f"AI服务异常: {response.status_code} - {response.text}"
-                yield f"data: {json.dumps({'choices': [{'delta': {'content': f'出错了：{error_msg}'}}]}, ensure_ascii=False)}\n\n"
-                yield "data: [DONE]\n\n"
-                return
-
-            # 第一次请求，先完整收集内容
-            for line in response.iter_lines(decode_unicode=True):
-                if not line:
-                    continue
-                if line.startswith("data: "):
-                    data_str = line[6:]
-                    if data_str.strip() == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data_str)
-                        delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            full_content += content
-                            yield f"{line}\n\n"
-                    except:
-                        yield f"{line}\n\n"
-
-            #  如果 NSFW 未开启，直接返回（不续写）
-            if not nsfw_enabled:
-                print("[NSFW 关闭] 不续写，直接返回")
-                yield "data: [DONE]\n\n"
-                return
-
-            # NSFW 开启：智能续写逻辑
-            print(f"[NSFW 开启] 开始续写，目标字数: {target_word_count}")
-            continue_count = 0
-            empty_count = 0
-
-            # 动态目标（严格按用户选择）
-            TARGET = target_word_count
-            # 允许 ±20% 浮动，保证完整结尾
-            TARGET_MIN = max(int(TARGET * 0.8), 10)  # 下限：80%，最少10字
-            TARGET_MAX = int(TARGET * 1.2) + 10  # 上限：120% + 10字
-
-            print(f"[目标范围] 下限: {TARGET_MIN}, 上限: {TARGET_MAX}")
-
-            while continue_count < MAX_CONTINUE:
-                current_len = calculate_length(full_content)
-                print(f"[状态] 当前字数: {current_len}, 目标: {TARGET} (允许 {TARGET_MIN}-{TARGET_MAX})")
-
-                # 情况1：已达到目标下限且自然结尾 → 结束
-                if current_len >= TARGET_MIN and is_natural_ending(full_content):
-                    print(f"[完成] 字数 {current_len}，自然结尾 ✓")
-                    break
-
-                # 情况2：达到目标上限 → 强制结束
-                if current_len >= TARGET_MAX:
-                    print(f"[上限] 字数 {current_len} 达到目标上限 {TARGET_MAX}，强制结束")
-                    # 如果结尾不自然，补句号
-                    if not is_natural_ending(full_content) and full_content:
-                        if full_content[-1] not in ['。', '？', '！', '…', '.', '!', '?']:
-                            full_content += '。'
-                            yield f"data: {json.dumps({'choices': [{'delta': {'content': '。'}}]}, ensure_ascii=False)}\n\n"
-                    break
-
-                # 情况3：需要续写
-                need_continue = (
-                        current_len < TARGET_MIN or
-                        (current_len >= TARGET_MIN and not is_natural_ending(full_content))
-                )
-
-                if not need_continue:
-                    break
-
-                # 如果内容为空，强制停止
-                if not full_content.strip():
-                    print("[续写] 内容为空，强制停止")
-                    break
-
-                continue_count += 1
-                print(f"[续写] 第 {continue_count} 次，当前字数: {current_len}")
-
-                # 构建续写提示词（基于目标字数）
-                continue_prompt = build_continue_prompt(current_len, TARGET)
-
-                continue_messages = formatted_messages + [
-                    {"role": "assistant", "content": full_content},
-                    {"role": "user", "content": continue_prompt}
-                ]
-
-                # 续写请求使用相同的模型和 API Key，max_tokens 根据剩余目标调整
-                remaining_tokens = int((TARGET - current_len) * 2.5) + 30
-                continue_max_tokens = max(min(remaining_tokens, 300), 50)
-
-                continue_payload = {
-                    'model': final_model,
-                    'messages': continue_messages,
-                    'stream': True,
-                    'max_tokens': continue_max_tokens,
-                    'temperature': 0.85,
-                    'thinking': {'type': 'disabled'}
-                }
-
-                cont_resp = requests.post(
-                    AI_API_URL,
-                    headers={
-                        'Content-Type': 'application/json',
-                        'Authorization': f'Bearer {final_api_key}'
-                    },
-                    json=continue_payload,
-                    stream=True,
-                    timeout=120
-                )
-
-                if cont_resp.status_code != 200:
-                    print(f"[续写] 请求失败: {cont_resp.status_code}")
-                    break
-
-                new_content = ""
-                for line in cont_resp.iter_lines(decode_unicode=True):
-                    if not line:
-                        continue
-                    if line.startswith("data: "):
-                        data_str = line[6:]
-                        if data_str.strip() == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data_str)
-                            delta = chunk.get("choices", [{}])[0].get("delta", {})
-                            content = delta.get("content", "")
-                            if content:
-                                new_content += content
-                                full_content += content
-                                yield f"{line}\n\n"
-                        except:
-                            yield f"{line}\n\n"
-
-                added_len = calculate_length(new_content)
-                print(f"[续写] 新增 {added_len} 字，总字数: {calculate_length(full_content)}")
-
-                # 如果续写内容很少，可能是模型觉得已经完整了
-                if added_len < 10:
-                    empty_count += 1
-                    if empty_count >= 2:
-                        print("[续写] 连续内容很少，停止")
-                        break
-                else:
-                    empty_count = 0
-
-                # 如果已经达到目标且自然结尾，提前退出
-                if calculate_length(full_content) >= TARGET_MIN and is_natural_ending(full_content):
-                    print("[完成] 续写后自然结尾 ✓")
-                    break
-
-            #  最终检查：如果字数不足目标下限，补一个简短的结尾
-            final_len = calculate_length(full_content)
-            if final_len < TARGET_MIN and full_content:
-                # 如果内容太少，强制补一个句号（虽然不完美，但避免空结尾）
-                if not is_natural_ending(full_content):
-                    full_content += '。'
-                    yield f"data: {json.dumps({'choices': [{'delta': {'content': '。'}}]}, ensure_ascii=False)}\n\n"
-            elif final_len >= TARGET_MIN and not is_natural_ending(full_content):
-                if full_content and full_content[-1] not in ['。', '？', '！', '…', '.', '!', '?']:
-                    full_content += '。'
-                    yield f"data: {json.dumps({'choices': [{'delta': {'content': '。'}}]}, ensure_ascii=False)}\n\n"
-
-            yield "data: [DONE]\n\n"
-
-        except Exception as e:
-            error_data = {
-                'choices': [{'delta': {'content': f'出错了：服务端错误 - {str(e)}'}}]
+            # 构建请求 payload（一次生成，无续写）
+            payload = {
+                'model': 'deepseek-reasoner' if deep_think else final_model,
+                'messages': formatted_messages,
+                'stream': True,
+                'max_tokens': total_tokens,
             }
-            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
-            yield "data: [DONE]\n\n"
+
+            # 普通模型才添加采样参数（deepseek-reasoner 不支持）
+            if not deep_think:
+                payload.update({
+                    'temperature': 0.88,
+                    'frequency_penalty': frequency_penalty,
+                    'presence_penalty': presence_penalty,
+                })
+
+            print(f"[请求] max_tokens={total_tokens}, 目标字数={target_word_count}, "
+                  f"模型={payload['model']}, freq_penalty={frequency_penalty}, pres_penalty={presence_penalty}")
+
+            response = make_api_request(payload, final_api_key)
+
+            if response is None:
+                yield sse_content('出错了：AI 服务请求失败，请检查 API Key 是否正确')
+                yield sse_done()
+                return
+
+            streamer = MarkdownStreamer()
+            new_content, finish_reason = yield from iter_sse_content(
+                response, full_content_holder, streamer
+            )
+            full_content = full_content_holder[0]
+            current_len = len(full_content)  # 粗略字符数
+            print(f"[完成] 生成字数: {current_len}, finish_reason: {finish_reason}")
+
+            yield sse_done()
+
+        except GeneratorExit:
+            # 客户端主动断开（用户点击停止）
+            print("[用户停止] 生成被中断")
+        except Exception as e:
+            print(f"[错误] {str(e)}")
+            yield sse_content(f'出错了：服务端错误 - {str(e)}')
+            yield sse_done()
 
     return Response(
         stream_with_context(generate()),
