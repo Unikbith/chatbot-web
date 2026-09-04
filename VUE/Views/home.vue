@@ -8,7 +8,7 @@ import katoImage from '@/assets/images/加藤惠.jpg';
 import natsumeImage from '@/assets/images/夏目贵志.jpg';
 
 const GREETING = '你好呀~';
-const TOKEN_OPTIONS = [150, 300, 500, 1000, 1200, 1500, 2000, 2500];
+const TOKEN_OPTIONS = [150, 300, 500, 1000];
 
 //聊天消息 
 const createMessage = (role, content = '') => ({ role, content, reasoning: '', showReasoning: false });
