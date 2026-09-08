@@ -1,0 +1,585 @@
+<template>
+  <div class="sidebar" :class="{ collapsed }">
+    <!-- 收起时的迷你模式 -->
+    <div v-if="collapsed" class="sidebar-mini">
+      <div class="mini-logo" @click="toggleCollapse">
+        <el-icon><ChatDotRound /></el-icon>
+      </div>
+      <div class="mini-new-chat" @click="createConversation">
+        <el-icon><Plus /></el-icon>
+      </div>
+      <div class="mini-icon" @click="toggleCollapse" :title="t('展开对话列表', 'Expand chat list')">
+        <el-icon><Menu /></el-icon>
+      </div>
+      <div class="mini-spacer"></div>
+      <div class="mini-user" @click="openUserMenu">
+        <el-avatar :size="32" :src="userAvatar || user?.avatar">
+          {{ user?.username?.charAt(0)?.toUpperCase() }}
+        </el-avatar>
+      </div>
+    </div>
+
+    <!-- 展开模式 -->
+    <template v-else>
+      <div class="sidebar-header">
+        <div class="logo">
+          <span class="logo-icon"><el-icon><ChatDotRound /></el-icon></span>
+          <span class="logo-text">{{ t('AI 角色聊天', 'AI Role Chat') }}</span>
+        </div>
+        <el-button 
+          class="collapse-btn" 
+          circle 
+          size="small" 
+          @click="toggleCollapse"
+          :title="t('收起侧边栏', 'Collapse sidebar')"
+        >
+          <el-icon><ArrowLeft /></el-icon>
+        </el-button>
+      </div>
+      
+      <el-button 
+        class="new-chat-btn" 
+        type="primary" 
+        @click="createConversation"
+      >
+        <el-icon class="btn-icon"><Plus /></el-icon>
+        {{ t('开启新对话', 'New Chat') }}
+      </el-button>
+
+      <!-- 角色选择 -->
+      <div class="persona-selector" @click="openPersonaPanel">
+        <el-avatar :size="28" :src="currentPersona?.avatar" class="persona-avatar">
+          <el-icon><MagicStick /></el-icon>
+        </el-avatar>
+        <span class="persona-name">{{ currentPersona?.name || t('选择角色', 'Select a persona') }}</span>
+        <el-icon class="persona-arrow"><ArrowRight /></el-icon>
+      </div>
+      
+      <div class="conversation-list">
+        <template v-if="groups.pinned.length > 0">
+          <div class="group-title">{{ t('置顶', 'Pinned') }}</div>
+          <div 
+            v-for="conv in groups.pinned" 
+            :key="conv.id"
+            class="conv-item"
+            :class="{ active: currentConvId == conv.id }"
+            @click="selectConversation(conv.id)"
+          >
+            <span class="conv-title" :title="conv.title">{{ conv.title }}</span>
+            <div class="conv-actions">
+              <el-button size="small" text @click.stop="togglePin(conv.id)">
+                <el-icon><Top /></el-icon>
+              </el-button>
+              <el-button size="small" text type="danger" @click.stop="confirmDelete(conv.id)">
+                <el-icon><Delete /></el-icon>
+              </el-button>
+            </div>
+          </div>
+        </template>
+        
+        <div class="group-title">{{ t('今天', 'Today') }}</div>
+        <div 
+          v-for="conv in groups.today" 
+          :key="conv.id"
+          class="conv-item"
+          :class="{ active: currentConvId == conv.id }"
+          @click="selectConversation(conv.id)"
+        >
+          <span class="conv-title" :title="conv.title">{{ conv.title }}</span>
+          <div class="conv-actions">
+            <el-button size="small" text @click.stop="togglePin(conv.id)">
+              <el-icon><Top /></el-icon>
+            </el-button>
+            <el-button size="small" text type="danger" @click.stop="confirmDelete(conv.id)">
+              <el-icon><Delete /></el-icon>
+            </el-button>
+          </div>
+        </div>
+        
+        <div v-if="groups.yesterday.length > 0" class="group-title">{{ t('昨天', 'Yesterday') }}</div>
+        <div 
+          v-for="conv in groups.yesterday" 
+          :key="conv.id"
+          class="conv-item"
+          :class="{ active: currentConvId == conv.id }"
+          @click="selectConversation(conv.id)"
+        >
+          <span class="conv-title" :title="conv.title">{{ conv.title }}</span>
+          <div class="conv-actions">
+            <el-button size="small" text @click.stop="togglePin(conv.id)">
+              <el-icon><Top /></el-icon>
+            </el-button>
+            <el-button size="small" text type="danger" @click.stop="confirmDelete(conv.id)">
+              <el-icon><Delete /></el-icon>
+            </el-button>
+          </div>
+        </div>
+        
+        <div v-if="groups.week.length > 0" class="group-title">{{ t('7天内', 'Past 7 days') }}</div>
+        <div 
+          v-for="conv in groups.week" 
+          :key="conv.id"
+          class="conv-item"
+          :class="{ active: currentConvId == conv.id }"
+          @click="selectConversation(conv.id)"
+        >
+          <span class="conv-title" :title="conv.title">{{ conv.title }}</span>
+          <div class="conv-actions">
+            <el-button size="small" text @click.stop="togglePin(conv.id)">
+              <el-icon><Top /></el-icon>
+            </el-button>
+            <el-button size="small" text type="danger" @click.stop="confirmDelete(conv.id)">
+              <el-icon><Delete /></el-icon>
+            </el-button>
+          </div>
+        </div>
+
+        <div v-if="groups.month.length > 0" class="group-title">{{ t('30天内', 'Past 30 days') }}</div>
+        <div 
+          v-for="conv in groups.month" 
+          :key="conv.id"
+          class="conv-item"
+          :class="{ active: currentConvId == conv.id }"
+          @click="selectConversation(conv.id)"
+        >
+          <span class="conv-title" :title="conv.title">{{ conv.title }}</span>
+          <div class="conv-actions">
+            <el-button size="small" text @click.stop="togglePin(conv.id)">
+              <el-icon><Top /></el-icon>
+            </el-button>
+            <el-button size="small" text type="danger" @click.stop="confirmDelete(conv.id)">
+              <el-icon><Delete /></el-icon>
+            </el-button>
+          </div>
+        </div>
+
+        <div v-if="groups.older.length > 0" class="group-title">{{ t('更早', 'Earlier') }}</div>
+        <div 
+          v-for="conv in groups.older" 
+          :key="conv.id"
+          class="conv-item"
+          :class="{ active: currentConvId == conv.id }"
+          @click="selectConversation(conv.id)"
+        >
+          <span class="conv-title" :title="conv.title">{{ conv.title }}</span>
+          <div class="conv-actions">
+            <el-button size="small" text @click.stop="togglePin(conv.id)">
+              <el-icon><Top /></el-icon>
+            </el-button>
+            <el-button size="small" text type="danger" @click.stop="confirmDelete(conv.id)">
+              <el-icon><Delete /></el-icon>
+            </el-button>
+          </div>
+        </div>
+
+        <div v-if="conversations.length === 0" class="empty-tip">
+          {{ t('暂无对话，点击上方按钮开始', 'No conversations yet. Click the button to start.') }}
+        </div>
+      </div>
+      
+      <div class="sidebar-footer">
+        <el-dropdown trigger="click" @command="handleCommand">
+          <div class="user-info">
+            <el-avatar :size="36" :src="userAvatar || user?.avatar" class="user-avatar">
+              {{ user?.username?.charAt(0)?.toUpperCase() }}
+            </el-avatar>
+            <div class="user-meta">
+              <span class="user-name">{{ user?.username || t('未登录', 'Not logged in') }}</span>
+              <span class="user-email" v-if="user?.email">{{ user.email }}</span>
+            </div>
+            <el-icon class="user-arrow"><ArrowUp /></el-icon>
+          </div>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item disabled v-if="user" class="user-info-item">
+                {{ user?.username }}
+              </el-dropdown-item>
+              <el-dropdown-item v-if="user" command="persona">
+                <el-icon><MagicStick /></el-icon> {{ t('角色人设', 'Personas') }}
+              </el-dropdown-item>
+              <el-dropdown-item v-if="user" command="provider">
+                <el-icon><Setting /></el-icon> {{ t('模型设置', 'Model Settings') }}
+              </el-dropdown-item>
+              <el-dropdown-item v-if="user" command="settings">
+                <el-icon><Tools /></el-icon> {{ t('系统设置', 'Settings') }}
+              </el-dropdown-item>
+              <el-dropdown-item v-if="user" command="logout" divided>
+                <el-icon><SwitchButton /></el-icon> {{ t('退出登录', 'Log out') }}
+              </el-dropdown-item>
+              <el-dropdown-item v-else command="login">
+                <el-icon><User /></el-icon> {{ t('登录', 'Log in') }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </div>
+    </template>
+  </div>
+</template>
+
+<script setup>
+import { computed } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  Plus, ArrowLeft, ArrowRight, ArrowUp, Top, Delete,
+  User, Setting, Tools, SwitchButton, MagicStick, Menu, ChatDotRound
+} from '@element-plus/icons-vue'
+import { t } from '../i18n'
+
+const props = defineProps({
+  conversations: { type: Array, default: () => [] },
+  groups: { type: Object, default: () => ({ pinned: [], today: [], yesterday: [], week: [], month: [], older: [] }) },
+  currentConvId: { type: [String, Number], default: null },
+  user: { type: Object, default: null },
+  userAvatar: { type: String, default: null },
+  collapsed: { type: Boolean, default: false },
+  currentPersona: { type: Object, default: null },
+})
+
+const emit = defineEmits([
+  'create', 'select', 'toggle-pin', 'delete',
+  'toggle-collapse', 'open-provider', 'open-settings',
+  'open-persona', 'login', 'logout', 'open-user-menu'
+])
+
+function createConversation() {
+  emit('create')
+}
+
+function selectConversation(id) {
+  emit('select', id)
+}
+
+function togglePin(id) {
+  emit('toggle-pin', id)
+}
+
+function confirmDelete(id) {
+  ElMessageBox.confirm(t('确定删除这个对话吗？', 'Delete this conversation?'), t('确认删除', 'Confirm Delete'), {
+    type: 'warning',
+    confirmButtonText: t('删除', 'Delete'),
+    cancelButtonText: t('取消', 'Cancel'),
+  }).then(() => {
+    emit('delete', id)
+  }).catch(() => {})
+}
+
+function toggleCollapse() {
+  emit('toggle-collapse')
+}
+
+function openPersonaPanel() {
+  emit('open-persona')
+}
+
+function handleCommand(cmd) {
+  switch (cmd) {
+    case 'persona':
+      emit('open-persona')
+      break
+    case 'provider':
+      emit('open-provider')
+      break
+    case 'settings':
+      emit('open-settings')
+      break
+    case 'logout':
+      emit('logout')
+      break
+    case 'login':
+      emit('login')
+      break
+  }
+}
+
+function openUserMenu() {
+  emit('open-user-menu')
+}
+</script>
+
+<style scoped>
+.sidebar {
+  width: 280px;
+  height: 100%;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  transition: width 0.3s ease;
+  flex-shrink: 0;
+}
+
+.sidebar.collapsed {
+  width: 60px;
+}
+
+/* Mini 模式 */
+.sidebar-mini {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 0;
+  height: 100%;
+  gap: 8px;
+}
+
+.mini-logo {
+  font-size: 24px;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.mini-logo:hover {
+  background: #e5e5e5;
+}
+
+.mini-new-chat {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand-gradient);
+  color: white;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 18px;
+  margin-top: 4px;
+}
+
+.mini-new-chat:hover {
+  opacity: 0.9;
+}
+
+.mini-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.mini-icon:hover {
+  background: #e5e5e5;
+}
+
+.mini-spacer {
+  flex: 1;
+}
+
+.mini-user {
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 50%;
+}
+
+.mini-user:hover {
+  background: #e5e5e5;
+}
+
+/* 展开模式 */
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 16px 8px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo-icon {
+  font-size: 22px;
+}
+
+.logo-text {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.collapse-btn {
+  opacity: 0.6;
+}
+
+.collapse-btn:hover {
+  opacity: 1;
+}
+
+.new-chat-btn {
+  margin: 8px 16px 12px;
+  height: 40px;
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--brand-gradient);
+  border: none;
+}
+
+.btn-icon {
+  color: var(--brand);
+  margin-right: 6px;
+}
+
+.persona-selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 16px 12px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.persona-selector:hover {
+  border-color: var(--brand);
+  background: var(--surface-hover);
+}
+
+.persona-avatar {
+  flex-shrink: 0;
+}
+
+.persona-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.persona-arrow {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.conversation-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px;
+}
+
+.group-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 12px 8px 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.conv-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background 0.15s;
+}
+
+.conv-item:hover {
+  background: var(--surface-hover);
+}
+
+.conv-item.active {
+  background: var(--surface-hover);
+}
+
+.conv-title {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-right: 8px;
+}
+
+.conv-actions {
+  display: none;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.conv-item:hover .conv-actions {
+  display: flex;
+}
+
+.empty-tip {
+  text-align: center;
+  color: #9ca3af;
+  font-size: 13px;
+  padding: 40px 16px;
+}
+
+.sidebar-footer {
+  border-top: 1px solid var(--border-color);
+  padding: 12px 16px;
+  background: var(--surface-hover);
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.user-info:hover {
+  background: var(--border-color);
+}
+
+.user-avatar {
+  flex-shrink: 0;
+}
+
+.user-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.user-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-email {
+  font-size: 11px;
+  color: #9ca3af;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-arrow {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.user-info-item {
+  font-weight: 600;
+  color: #1f2937;
+}
+</style>
