@@ -31,3 +31,16 @@ env/
 # 系统生成文件
 .DS_Store
 Thumbs.db
+
+# Flask
+Flask/instance/
+Flask/*.db
+Flask/migrations/versions/
+Flask/uploads/
+
+# Vue / Vite
+VUE/node_modules/
+VUE/dist/
+VUE/dist-ssr/
+VUE/.vite/
+VUE/*.local
