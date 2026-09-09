@@ -180,6 +180,41 @@ def _get_system_prompt(conv, user_id, persona_id=None, custom_prompt=None):
     return ''
 
 
+def _save_ai_message(conversation_id, user_id, content, reasoning=None,
+                     model_name=None, title_source=None, model_id=None):
+    """将 AI 回复落库（普通聊天与识图共用）。
+
+    独立于流式生成器之外可复用：正常流结束调用一次；
+    客户端断开（GeneratorExit）时内容已收集完整也调用一次，
+    保证回复不会因连接关闭而丢失。
+    """
+    if not conversation_id or not content:
+        return
+    try:
+        conv = Conversation.query.filter_by(id=conversation_id, user_id=user_id).first()
+        if not conv:
+            return
+        ai_msg = Message(
+            conversation_id=conv.id,
+            role='assistant',
+            content=strip_html_to_text(content),
+            reasoning_content=reasoning or None,
+            model=model_name
+        )
+        db.session.add(ai_msg)
+
+        if conv.title == '新对话' and title_source:
+            t = strip_html_to_text(title_source)
+            conv.title = t[:20] + '...' if len(t) > 20 else t
+
+        if model_id and not conv.model_id:
+            conv.model_id = model_id
+
+        conv.updated_at = db.func.now()
+        db.session.commit()
+    except Exception as e:
+        print(f"[保存消息失败] {type(e).__name__}: {e}", flush=True)
+
 @chat_bp.route('/status', methods=['GET'])
 @jwt_required()
 def chat_status():
@@ -326,6 +361,14 @@ def chat():
         full_content_holder = [""]
         reasoning_holder = [""]
         model_holder = [""]
+        saved = False
+
+        # 本次请求最后一条用户消息（用于自动命名标题）
+        last_user_text = ''
+        for msg in reversed(messages):
+            if msg.get('role') == 'user':
+                last_user_text = str(msg.get('content', '')) or ''
+                break
 
         try:
             model_name = effective_model or (
@@ -362,44 +405,34 @@ def chat():
                 response, full_content_holder, reasoning_holder, model_holder
             )
             full_content = full_content_holder[0]
+
+            # 先落库再下发最终事件：客户端收到 [DONE] 即断开连接，
+            # 若在最后一个 yield 之后才写库，生成器不再被推进，AI 回复会丢失（并发实测出现）
+            if conversation_id:
+                _save_ai_message(
+                    conversation_id, user_id, full_content,
+                    reasoning=reasoning_holder[0],
+                    model_name=model_holder[0] or model_name,
+                    title_source=last_user_text,
+                    model_id=effective_model,
+                )
+                saved = True
+
             # 流结束后一次性下发渲染好的（含白名单过滤）完整 HTML，前端替换流式原文
             yield sse_html(render_markdown(full_content))
             yield sse_done()
-
-            # 保存 AI 回复到对话（用户消息已在请求开始时就已落库）
-            if conversation_id:
-                try:
-                    conv = Conversation.query.filter_by(id=conversation_id, user_id=user_id).first()
-                    if conv:
-                        last_user_msg = None
-                        for msg in reversed(messages):
-                            if msg.get('role') == 'user':
-                                last_user_msg = msg
-                                break
-
-                        ai_msg = Message(
-                            conversation_id=conv.id,
-                            role='assistant',
-                            content=strip_html_to_text(full_content),
-                            reasoning_content=reasoning_holder[0] if reasoning_holder[0] else None,
-                            model=model_holder[0] or model_name
-                        )
-                        db.session.add(ai_msg)
-
-                        if conv.title == '新对话' and last_user_msg:
-                            text = strip_html_to_text(last_user_msg.get('content', ''))
-                            conv.title = text[:20] + '...' if len(text) > 20 else text
-
-                        if effective_model and not conv.model_id:
-                            conv.model_id = effective_model
-
-                        conv.updated_at = db.func.now()
-                        db.session.commit()
-                except Exception as e:
-                    print(f"[保存消息失败] {e}")
-
         except GeneratorExit:
+            # 客户端断开：内容已收集完整时尽力落库，避免回复丢失
+            if not saved and conversation_id and full_content_holder[0]:
+                _save_ai_message(
+                    conversation_id, user_id, full_content_holder[0],
+                    reasoning=reasoning_holder[0],
+                    model_name=model_holder[0] or model_name,
+                    title_source=last_user_text,
+                    model_id=effective_model,
+                )
             print("[用户停止] 生成被中断")
+            raise
         except Exception as e:
             print(f"[错误] {str(e)}")
             yield sse_content(f'出错了：服务端错误 - {str(e)}')
@@ -465,6 +498,7 @@ def vision_chat():
         full_content_holder = [""]
         reasoning_holder = [""]
         model_holder = [""]
+        saved = False
 
         try:
             response, error = AIService.vision_chat(
@@ -492,34 +526,29 @@ def vision_chat():
             yield from iter_sse_content(
                 response, full_content_holder, reasoning_holder, model_holder
             )
+            # 先落库再下发最终事件（与普通聊天一致，避免客户端断开后生成器不推进导致丢失）
+            if conversation_id:
+                _save_ai_message(
+                    conversation_id, user_id, full_content_holder[0],
+                    reasoning=reasoning_holder[0],
+                    model_name=model_holder[0],
+                    title_source=text,
+                )
+                saved = True
+
             yield sse_html(render_markdown(full_content_holder[0]))
             yield sse_done()
-
-            # 落库 AI 回复：识图对话同样保存到会话记录（用户消息已在请求开始时落库）
-            if conversation_id:
-                try:
-                    conv = Conversation.query.filter_by(id=conversation_id, user_id=user_id).first()
-                    if conv:
-                        ai_msg = Message(
-                            conversation_id=conv.id,
-                            role='assistant',
-                            content=strip_html_to_text(full_content_holder[0]),
-                            reasoning_content=reasoning_holder[0] if reasoning_holder[0] else None,
-                            model=model_holder[0]
-                        )
-                        db.session.add(ai_msg)
-
-                        if conv.title == '新对话':
-                            t = strip_html_to_text(text)
-                            conv.title = t[:20] + '...' if len(t) > 20 else t
-
-                        conv.updated_at = db.func.now()
-                        db.session.commit()
-                except Exception as e:
-                    print(f"[识图保存失败] {str(e)}")
-
         except GeneratorExit:
+            # 客户端断开：内容已收集完整时尽力落库
+            if not saved and conversation_id and full_content_holder[0]:
+                _save_ai_message(
+                    conversation_id, user_id, full_content_holder[0],
+                    reasoning=reasoning_holder[0],
+                    model_name=model_holder[0],
+                    title_source=text,
+                )
             print("[用户停止] 识图生成被中断")
+            raise
         except Exception as e:
             print(f"[识图错误] {str(e)}")
             yield sse_content(f'出错了：服务端错误 - {str(e)}')
