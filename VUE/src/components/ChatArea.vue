@@ -62,7 +62,7 @@ const greetingText = () => t('你好！有什么可以帮你的吗？', 'Hello! 
 
 // 消息
 const createMessage = (role, content = '', imageUrl = null) => ({ 
-  role, content, reasoning: '', showReasoning: false, imageUrl 
+  role, content, raw: '', streaming: false, reasoning: '', showReasoning: false, imageUrl 
 });
 
 const messages = ref([]);
@@ -206,9 +206,10 @@ const handleSend = async () => {
 
     const response = await chatApi.stream(requestBody, { signal: abortController.signal });
     await readStream(response, (data) => {
-      const { reasoning_content: reasoning = '', content = '' } = data.choices?.[0]?.delta || {};
+      const { reasoning_content: reasoning = '', content = '', html = '' } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
-      if (content) aiMsg.content += content;
+      if (content) { aiMsg.raw += content; aiMsg.streaming = true; }
+      if (html) { aiMsg.content = html; aiMsg.streaming = false; }
     });
 
     // 大模型输出带生图/改图标记时，自动代为调用图片生成
@@ -227,9 +228,11 @@ const handleSend = async () => {
 
   } catch (error) {
     if (error.name === 'AbortError') {
-      aiMsg.content += '（已中止）';
+      aiMsg.streaming = false;
+      aiMsg.raw += t('（已中止）', ' (aborted)');
     } else {
       console.error('发送失败', error);
+      aiMsg.streaming = false;
       aiMsg.content = `出错了：${error.message || '网络异常'}`;
     }
   } finally {
@@ -271,14 +274,16 @@ async function imageLlmToolsEnabled() {
 
 // 从模型回复里提取「生图/改图」标记并代为调用图片生成，结果以图片形式附到该消息
 async function handleLlmImageMarkers(msg) {
-  if (!msg || !msg.content) return;
-  const m2i = msg.content.match(/生图[:：]\s*([^\n]+)/);
-  const mImg = msg.content.match(/改图[:：]\s*([^\n]+)/);
+  const src = msg.raw || msg.content || '';
+  if (!src) return;
+  const m2i = src.match(/生图[:：]\s*([^\n]+)/);
+  const mImg = src.match(/改图[:：]\s*([^\n]+)/);
   const marker = m2i || mImg;
   if (!marker) return;
   const prompt = marker[1].trim();
-  // 移除标记行，保留可读文本；且仅当第一条标记满足
-  msg.content = msg.content.replace(marker[0], '');
+  // 移除标记行，保留可读文本；流式原文与最终 HTML 都去掉标记
+  msg.raw = ((msg.raw || '').replace(marker[0], '') || '').trim();
+  msg.content = ((msg.content || '').replace(marker[0], '') || '').trim();
   try {
     const res = await imageApi.generate({ prompt, references: [] });
     if (res.code === 200 && res.data?.url) {
@@ -375,16 +380,19 @@ const handleVisionChat = async (text) => {
 
     const response = await chatApi.vision(formData, { signal: abortController.signal });
     await readStream(response, (data) => {
-      const { reasoning_content: reasoning = '', content = '' } = data.choices?.[0]?.delta || {};
+      const { reasoning_content: reasoning = '', content = '', html = '' } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
-      if (content) aiMsg.content += content;
+      if (content) { aiMsg.raw += content; aiMsg.streaming = true; }
+      if (html) { aiMsg.content = html; aiMsg.streaming = false; }
     });
 
   } catch (error) {
     if (error.name === 'AbortError') {
-      aiMsg.content += '（已中止）';
+      aiMsg.streaming = false;
+      aiMsg.raw += t('（已中止）', ' (aborted)');
     } else {
       console.error('识图失败', error);
+      aiMsg.streaming = false;
       aiMsg.content = `出错了：${error.message || '网络异常'}`;
     }
   } finally {
@@ -483,14 +491,17 @@ const regenerate = async (assistantIndex = null) => {
 
     const response = await chatApi.stream(requestBody, { signal: abortController.signal });
     await readStream(response, (data) => {
-      const { reasoning_content: reasoning = '', content = '' } = data.choices?.[0]?.delta || {};
+      const { reasoning_content: reasoning = '', content = '', html = '' } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
-      if (content) aiMsg.content += content;
+      if (content) { aiMsg.raw += content; aiMsg.streaming = true; }
+      if (html) { aiMsg.content = html; aiMsg.streaming = false; }
     });
   } catch (error) {
     if (error.name === 'AbortError') {
-      aiMsg.content += '（已中止）';
+      aiMsg.streaming = false;
+      aiMsg.raw += t('（已中止）', ' (aborted)');
     } else {
+      aiMsg.streaming = false;
       aiMsg.content = `出错了：${error.message || '网络异常'}`;
     }
   } finally {
@@ -654,11 +665,13 @@ onUnmounted(() => {
                 <img :src="item.imageUrl" alt="生成图片" @click="previewImage(item.imageUrl)" />
               </div>
               
-              <!-- 消息内容 -->
-              <div v-if="item.content" class="content-text" v-html="item.content"></div>
-              
+              <!-- 消息内容：流式期间展示原文增量，流结束后展示渲染好的 HTML -->
+              <div v-if="item.streaming" class="content-text raw-streaming">{{ item.raw }}</div>
+              <div v-else-if="item.content" class="content-text" v-html="item.content"></div>
+              <div v-else-if="item.raw" class="content-text raw-streaming">{{ item.raw }}</div>
+
               <!-- 加载状态 -->
-              <div v-if="item.role === 'assistant' && !item.content && !item.reasoning && !item.imageUrl" class="loading-dots">
+              <div v-if="item.role === 'assistant' && !item.content && !item.raw && !item.reasoning && !item.imageUrl" class="loading-dots">
                 <span></span><span></span><span></span>
               </div>
 
@@ -1046,6 +1059,12 @@ onUnmounted(() => {
   line-height: 1.7;
   color: var(--text-primary);
   word-wrap: break-word;
+}
+
+/* 流式期间展示原文：保留换行与 Markdown 语法，随 token 逐块增量显示 */
+.content-text.raw-streaming {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .message-user .content-text {
