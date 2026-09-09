@@ -268,6 +268,25 @@ def chat():
         db.session.commit()
         conversation_id = conv.id
 
+    # 立即持久化最新用户消息：AI 仍在生成时切换对话也不丢消息。
+    # 通过与已存的最末用户消息比对去重，重试/重新生成时不会重复入库。
+    if conv:
+        last_user_content = ''
+        for msg in reversed(messages):
+            if msg.get('role') == 'user':
+                last_user_content = str(msg.get('content', '')) or ''
+                break
+        if last_user_content:
+            last_stored_user = Message.query.filter_by(
+                conversation_id=conv.id, role='user'
+            ).order_by(Message.created_at.desc(), Message.id.desc()).first()
+            plain = strip_html_to_text(last_user_content)
+            if not last_stored_user or last_stored_user.content != plain:
+                db.session.add(Message(
+                    conversation_id=conv.id, role='user', content=plain
+                ))
+                db.session.commit()
+
     # 构建消息列表
     formatted_messages = []
     for msg in messages:
@@ -349,7 +368,7 @@ def chat():
             full_content = full_content_holder[0]
             yield sse_done()
 
-            # 保存到对话
+            # 保存 AI 回复到对话（用户消息已在请求开始时就已落库）
             if conversation_id:
                 try:
                     conv = Conversation.query.filter_by(id=conversation_id, user_id=user_id).first()
@@ -359,13 +378,6 @@ def chat():
                             if msg.get('role') == 'user':
                                 last_user_msg = msg
                                 break
-                        if last_user_msg:
-                            user_msg = Message(
-                                conversation_id=conv.id,
-                                role='user',
-                                content=strip_html_to_text(last_user_msg.get('content', ''))
-                            )
-                            db.session.add(user_msg)
 
                         ai_msg = Message(
                             conversation_id=conv.id,
@@ -439,6 +451,18 @@ def vision_chat():
         {'role': 'user', 'content': text}
     ]
 
+    # 立即持久化识图的用户消息，避免生成过程中切换对话丢失（与普通聊天一致）
+    if conversation_id:
+        conv = Conversation.query.filter_by(id=conversation_id, user_id=user_id).first()
+        if conv:
+            last_stored_user = Message.query.filter_by(
+                conversation_id=conv.id, role='user'
+            ).order_by(Message.created_at.desc(), Message.id.desc()).first()
+            plain = strip_html_to_text(text)
+            if not last_stored_user or last_stored_user.content != plain:
+                db.session.add(Message(conversation_id=conv.id, role='user', content=plain))
+                db.session.commit()
+
     def generate():
         full_content_holder = [""]
         reasoning_holder = [""]
@@ -473,18 +497,11 @@ def vision_chat():
             )
             yield sse_done()
 
-            # 落库：识图对话同样保存到会话记录（与普通聊天保持一致）
+            # 落库 AI 回复：识图对话同样保存到会话记录（用户消息已在请求开始时落库）
             if conversation_id:
                 try:
                     conv = Conversation.query.filter_by(id=conversation_id, user_id=user_id).first()
                     if conv:
-                        user_msg = Message(
-                            conversation_id=conv.id,
-                            role='user',
-                            content=strip_html_to_text(text)
-                        )
-                        db.session.add(user_msg)
-
                         ai_msg = Message(
                             conversation_id=conv.id,
                             role='assistant',
