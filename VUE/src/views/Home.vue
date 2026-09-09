@@ -150,6 +150,7 @@ onMounted(async () => {
     try {
       await loadUserInfo()
       await loadAllData()
+      await ensureInitialConversation()
     } catch (e) {
       authModalVisible.value = true
     }
@@ -286,6 +287,16 @@ function personaOf(conv) {
 }
 
 // ========== 对话操作 ==========
+// 登录后确保存在一个可用对话：有对话则选中最近一条；无对话则自动新建首条，保证对话设置立即可用
+async function ensureInitialConversation() {
+  if (!chatAreaRef.value) return
+  if (conversations.value.length > 0) {
+    await handleSelectConversation(conversations.value[0].id)
+    return
+  }
+  await handleNewChat()
+}
+
 async function handleNewChat() {
   const personaId = ( personas.value.find(p => p.is_default) || personas.value[0] || currentPersona.value )?.id || null
   currentProviderId.value = pickEnabledChatProviderId()
@@ -346,7 +357,7 @@ async function handleTogglePin(convId) {
 
 async function handleDeleteConversation(convId) {
   try {
-    await conversationApi.remove(convId)
+    const res = await conversationApi.remove(convId)
     if (currentConvId.value == convId) {
       currentConv.value = null
       currentConvId.value = null
@@ -354,8 +365,10 @@ async function handleDeleteConversation(convId) {
       currentPersona.value = personas.value.find(p => p.is_default) || personas.value[0] || null
       chatAreaRef.value?.resetMessages()
     }
-    loadConversations()
+    await loadConversations()
     ElMessage.success(t('已删除', 'Deleted'))
+    // 删除的是当前对话时，自动选中最近一条或新建首条，保持始终有可用对话
+    if (!currentConvId.value) await ensureInitialConversation()
   } catch (e) {
     ElMessage.error(t('删除失败', 'Delete failed'))
   }
@@ -399,6 +412,7 @@ async function handleLoginSuccess(userData) {
   isLoggedIn.value = true
   authModalVisible.value = false
   await loadAllData()
+  await ensureInitialConversation()
 }
 
 function handleLogout() {

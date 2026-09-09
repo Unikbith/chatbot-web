@@ -65,7 +65,7 @@ const createMessage = (role, content = '', imageUrl = null) => ({
   role, content, reasoning: '', showReasoning: false, imageUrl 
 });
 
-const messages = ref([createMessage('assistant', greetingText())]);
+const messages = ref([]);
 const inputText = ref('');
 const loading = ref(false);
 const messageListRef = ref(null);
@@ -180,7 +180,8 @@ const handleSend = async () => {
   scrollToBottom();
 
   const aiIndex = messages.value.length;
-  messages.value.push(createMessage('assistant'));
+  const aiMsg = createMessage('assistant');
+  messages.value.push(aiMsg);
 
   loading.value = true;
   abortController = new AbortController();
@@ -206,16 +207,16 @@ const handleSend = async () => {
     const response = await chatApi.stream(requestBody, { signal: abortController.signal });
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '' } = data.choices?.[0]?.delta || {};
-      if (reasoning) messages.value[aiIndex].reasoning += reasoning;
-      if (content) messages.value[aiIndex].content += content;
+      if (reasoning) aiMsg.reasoning += reasoning;
+      if (content) aiMsg.content += content;
     });
 
     // 大模型输出带生图/改图标记时，自动代为调用图片生成
-    await handleLlmImageMarkers(messages.value[aiIndex]);
+    await handleLlmImageMarkers(aiMsg);
 
     // 自动播报 AI 回复（该对话开启时）
-    if (props.autoPlayVoice && messages.value[aiIndex]?.content && !messages.value[aiIndex].imageUrl) {
-      speakText(messages.value[aiIndex].content, aiIndex);
+    if (props.autoPlayVoice && aiMsg.content && !aiMsg.imageUrl) {
+      speakText(aiMsg.content, aiIndex);
     }
 
     // 更新对话标题（第一条用户消息）
@@ -226,10 +227,10 @@ const handleSend = async () => {
 
   } catch (error) {
     if (error.name === 'AbortError') {
-      messages.value[aiIndex].content += '（已中止）';
+      aiMsg.content += '（已中止）';
     } else {
       console.error('发送失败', error);
-      messages.value[aiIndex].content = `出错了：${error.message || '网络异常'}`;
+      aiMsg.content = `出错了：${error.message || '网络异常'}`;
     }
   } finally {
     abortController = null;
@@ -305,8 +306,8 @@ const handleImageGenerate = async (text, mode = 'text2img') => {
   imageUploadRef.value?.clearImage();
   scrollToBottom();
 
-  const aiIndex = messages.value.length;
-  messages.value.push(createMessage('assistant'));
+  const aiMsg = createMessage('assistant');
+  messages.value.push(aiMsg);
 
   loading.value = true;
   abortController = new AbortController();
@@ -316,18 +317,18 @@ const handleImageGenerate = async (text, mode = 'text2img') => {
       references: refDataUrl ? [refDataUrl] : [],
     });
     if (res.code === 200 && res.data?.url) {
-      messages.value[aiIndex].imageUrl = res.data.url;
+      aiMsg.imageUrl = res.data.url;
       if (res.data?.free) {
         ElMessage.info(t(`共享免费生图（剩余 ${res.data.remaining}/${res.data.limit} 次）`, `Shared free gen (${res.data.remaining}/${res.data.limit} left)`));
       }
     } else {
-      messages.value[aiIndex].content = `出错了：${res.message || '生成失败'}`;
+      aiMsg.content = `出错了：${res.message || '生成失败'}`;
     }
   } catch (error) {
     if (error.name === 'AbortError') {
-      messages.value[aiIndex].content += '（已中止）';
+      aiMsg.content += '（已中止）';
     } else {
-      messages.value[aiIndex].content = `出错了：${error.message || '网络异常'}`;
+      aiMsg.content = `出错了：${error.message || '网络异常'}`;
     }
   } finally {
     abortController = null;
@@ -353,8 +354,8 @@ const handleVisionChat = async (text) => {
   // 用户发送消息后立即定位到底部
   scrollToBottom();
 
-  const aiIndex = messages.value.length;
-  messages.value.push(createMessage('assistant'));
+  const aiMsg = createMessage('assistant');
+  messages.value.push(aiMsg);
 
   loading.value = true;
   abortController = new AbortController();
@@ -375,16 +376,16 @@ const handleVisionChat = async (text) => {
     const response = await chatApi.vision(formData, { signal: abortController.signal });
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '' } = data.choices?.[0]?.delta || {};
-      if (reasoning) messages.value[aiIndex].reasoning += reasoning;
-      if (content) messages.value[aiIndex].content += content;
+      if (reasoning) aiMsg.reasoning += reasoning;
+      if (content) aiMsg.content += content;
     });
 
   } catch (error) {
     if (error.name === 'AbortError') {
-      messages.value[aiIndex].content += '（已中止）';
+      aiMsg.content += '（已中止）';
     } else {
       console.error('识图失败', error);
-      messages.value[aiIndex].content = `出错了：${error.message || '网络异常'}`;
+      aiMsg.content = `出错了：${error.message || '网络异常'}`;
     }
   } finally {
     selectedImage.value = null;
@@ -462,8 +463,8 @@ const regenerate = async (assistantIndex = null) => {
   messages.value = messages.value.slice(0, userIndex + 1);
   
   // 重新发送
-  const aiIndex = messages.value.length;
-  messages.value.push(createMessage('assistant'));
+  const aiMsg = createMessage('assistant');
+  messages.value.push(aiMsg);
   
   loading.value = true;
   abortController = new AbortController();
@@ -483,14 +484,14 @@ const regenerate = async (assistantIndex = null) => {
     const response = await chatApi.stream(requestBody, { signal: abortController.signal });
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '' } = data.choices?.[0]?.delta || {};
-      if (reasoning) messages.value[aiIndex].reasoning += reasoning;
-      if (content) messages.value[aiIndex].content += content;
+      if (reasoning) aiMsg.reasoning += reasoning;
+      if (content) aiMsg.content += content;
     });
   } catch (error) {
     if (error.name === 'AbortError') {
-      messages.value[aiIndex].content += '（已中止）';
+      aiMsg.content += '（已中止）';
     } else {
-      messages.value[aiIndex].content = `出错了：${error.message || '网络异常'}`;
+      aiMsg.content = `出错了：${error.message || '网络异常'}`;
     }
   } finally {
     abortController = null;
@@ -543,7 +544,8 @@ defineExpose({
     scrollToBottom();
   },
   resetMessages: () => {
-    messages.value = [createMessage('assistant', greetingText())];
+    messages.value = [];
+    scrollToBottom();
   },
   getMessages: () => messages.value,
   scrollToBottom
@@ -594,6 +596,15 @@ onUnmounted(() => {
 
     <!-- 消息列表 -->
     <div class="chat-body">
+      <!-- 空对话开场白：任何对话无消息时始终展示，切换对话也不会消失 -->
+      <div v-if="messages.length === 0" class="chat-welcome">
+        <div class="welcome-avatar">
+          <img v-if="aiAvatar" :src="aiAvatar" class="avatar-img" alt="AI" />
+          <span v-else>AI</span>
+        </div>
+        <div class="welcome-text">{{ greetingText() }}</div>
+      </div>
+
       <el-scrollbar ref="messageListRef" class="message-scrollbar">
         <div class="message-container">
           <div
@@ -866,6 +877,48 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+/* 空对话开场白 */
+.chat-welcome {
+  max-width: 768px;
+  margin: 0 auto;
+  padding: 48px 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.welcome-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--brand-gradient);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.welcome-avatar .avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.welcome-text {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  background: rgba(163, 172, 190, var(--message-opacity, 0.9));
+  padding: 10px 16px;
+  border-radius: 14px;
+  border-top-left-radius: 4px;
 }
 
 .message-item {
