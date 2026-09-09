@@ -101,6 +101,14 @@
             </div>
 
             <div class="setting-item">
+              <div class="setting-label">{{ t('背景图片展示方式', 'Background Display') }}</div>
+              <el-radio-group v-model="localSettings.background_cover">
+                <el-radio-button value="contain">{{ t('完全可见', 'Full Visible') }}</el-radio-button>
+                <el-radio-button value="cover">{{ t('覆盖背景', 'Cover') }}</el-radio-button>
+              </el-radio-group>
+            </div>
+
+            <div class="setting-item">
               <div class="setting-label">{{ t('消息框透明度', 'Message Transparency') }}</div>
               <div class="slider-control">
                 <el-slider
@@ -121,7 +129,7 @@
 
             <div class="setting-item">
               <div class="setting-label">
-                {{ t('温度 (Temperature)', 'Temperature') }}
+                温度
                 <el-tooltip :content="t('较高值使输出更随机创意，较低值更确定保守', 'Higher is more creative, lower is more focused')" placement="top">
                   <el-icon class="help-icon"><QuestionFilled /></el-icon>
                 </el-tooltip>
@@ -134,7 +142,7 @@
 
             <div class="setting-item">
               <div class="setting-label">
-                {{ t('频率惩罚 (Frequency Penalty)', 'Frequency Penalty') }}
+                频率惩罚
                 <el-tooltip :content="t('减少重复内容，值越高越倾向于使用新词', 'Reduce repetition')" placement="top">
                   <el-icon class="help-icon"><QuestionFilled /></el-icon>
                 </el-tooltip>
@@ -147,7 +155,7 @@
 
             <div class="setting-item">
               <div class="setting-label">
-                {{ t('存在惩罚 (Presence Penalty)', 'Presence Penalty') }}
+                存在惩罚
                 <el-tooltip :content="t('增加谈论新话题的可能性', 'Increase chance of new topics')" placement="top">
                   <el-icon class="help-icon"><QuestionFilled /></el-icon>
                 </el-tooltip>
@@ -157,108 +165,51 @@
                 <span class="slider-value">{{ localSettings.presence_penalty.toFixed(1) }}</span>
               </div>
             </div>
-
-            <div class="setting-item">
-              <div class="setting-label">
-                {{ t('核采样 (Top P)', 'Top P') }}
-                <el-tooltip :content="t('从概率质量前 P% 的 token 中采样', 'Sample from top P% of tokens')" placement="top">
-                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                </el-tooltip>
-              </div>
-              <div class="slider-control">
-                <el-slider v-model="localSettings.top_p" :min="0" :max="1" :step="0.05" style="flex: 1; margin-right: 16px" />
-                <span class="slider-value">{{ localSettings.top_p.toFixed(2) }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="settings-section">
-            <div class="section-title">{{ t('语音', 'Voice') }}</div>
-
-            <div class="setting-item">
-              <div class="setting-label">{{ t('自动播报 AI 回复', 'Auto-play replies') }}</div>
-              <el-switch v-model="localSettings.auto_play_voice" />
-            </div>
-
-            <div class="setting-item">
-              <div class="setting-label">{{ t('默认音色', 'Default Voice') }}</div>
-              <el-select v-model="localSettings.default_voice" style="width: 200px">
-                <el-option label="Alloy (合金)" value="alloy" />
-                <el-option label="Echo (回响)" value="echo" />
-                <el-option label="Fable (寓言)" value="fable" />
-                <el-option label="Onyx (缟玛瑙)" value="onyx" />
-                <el-option label="Nova (新星)" value="nova" />
-                <el-option label="Shimmer (微光)" value="shimmer" />
-              </el-select>
-            </div>
           </div>
         </el-tab-pane>
 
         <!-- 账号管理 -->
         <el-tab-pane :label="t('账号管理', 'Account')" name="account">
-          <div class="settings-section">
-            <div class="section-title">{{ t('基本信息', 'Basic Info') }}</div>
-
+          <div class="settings-section account-flat">
             <div class="setting-item">
               <div class="setting-label">{{ t('用户名', 'Username') }}</div>
-              <div class="inline-edit">
-                <span v-if="!editingUsername" class="edit-value">{{ user?.username }}</span>
-                <el-input
-                  v-else
-                  v-model="newUsername"
-                  size="small"
-                  style="width: 200px"
-                  @keyup.enter="saveUsername"
-                />
-                <el-button
-                  size="small"
-                  type="primary"
-                  link
-                  @click="editingUsername ? saveUsername() : (editingUsername = true, newUsername = user?.username || '')"
-                >
-                  {{ editingUsername ? t('保存', 'Save') : t('修改', 'Edit') }}
-                </el-button>
-              </div>
+              <span class="static-value">{{ user?.username }}</span>
             </div>
 
             <div class="setting-item">
               <div class="setting-label">{{ t('邮箱', 'Email') }}</div>
               <span class="static-value">{{ user?.email }}</span>
             </div>
-          </div>
 
-          <div class="settings-section">
-            <div class="section-title">{{ t('安全', 'Security') }}</div>
             <div class="setting-item">
               <div class="setting-label">{{ t('修改密码', 'Change Password') }}</div>
               <el-button size="small" @click="showPwdDialog = true">{{ t('修改密码', 'Change Password') }}</el-button>
             </div>
-          </div>
 
-          <div class="settings-section danger-section">
-            <div class="section-title">{{ t('危险操作', 'Danger Zone') }}</div>
             <div class="setting-item">
               <div class="setting-label">{{ t('登出所有设备', 'Logout All Devices') }}</div>
-              <el-button size="small" type="warning" @click="logoutAllDevices">{{ t('登出所有设备', 'Logout') }}</el-button>
+              <el-button size="small" type="warning" plain @click="logoutAllDevices">{{ t('登出', 'Logout') }}</el-button>
             </div>
-            <div class="setting-item">
+
+            <div class="setting-item danger-item">
               <div class="setting-label">{{ t('注销账号', 'Delete Account') }}</div>
-              <el-button size="small" type="danger" @click="showDeleteDialog = true">{{ t('注销账号', 'Delete') }}</el-button>
-              <p class="danger-tip">{{ t('注销后所有数据将被永久删除，无法恢复', 'All data will be permanently deleted.') }}</p>
+              <el-button size="small" type="danger" plain @click="showDeleteDialog = true">{{ t('注销', 'Delete') }}</el-button>
             </div>
+            <p class="danger-tip">{{ t('注销后所有数据将被永久删除，无法恢复', 'All data will be permanently deleted.') }}</p>
           </div>
         </el-tab-pane>
       </el-tabs>
-
-      <div class="settings-footer">
-        <el-button @click="resetSettings">{{ t('恢复默认', 'Reset') }}</el-button>
-        <el-button type="primary" @click="saveSettings" :loading="saving">{{ t('保存设置', 'Save') }}</el-button>
-      </div>
     </div>
 
     <!-- 修改密码对话框 -->
-    <el-dialog v-model="showPwdDialog" :title="t('修改密码', 'Change Password')" width="400px">
-      <el-form :model="pwdForm" :label-width="t('原密码','Old').length * 14 + 20 + 'px'">
+    <el-dialog
+      v-model="showPwdDialog"
+      :title="t('修改密码', 'Change Password')"
+      width="440px"
+      class="pwd-dialog"
+      align-center
+    >
+      <el-form :model="pwdForm" :label-width="'100px'">
         <el-form-item :label="t('原密码', 'Old password')">
           <el-input v-model="pwdForm.old_password" type="password" show-password />
         </el-form-item>
@@ -268,7 +219,25 @@
         <el-form-item :label="t('确认密码', 'Confirm')">
           <el-input v-model="pwdForm.confirm_password" type="password" show-password />
         </el-form-item>
+        <el-form-item :label="t('邮箱验证', 'Email')">
+          <div class="pwd-code-group">
+            <el-input
+              v-model="pwdForm.code"
+              :placeholder="pwdCodeHint"
+              maxlength="6"
+              :disabled="!user?.email"
+            />
+            <el-button
+              :disabled="!user?.email || pwdCodeCountdown > 0"
+              :loading="pwdCodeLoading"
+              @click="sendPwdCode"
+            >
+              {{ pwdCodeCountdown > 0 ? `${pwdCodeCountdown}s` : t('获取验证码', 'Get code') }}
+            </el-button>
+          </div>
+        </el-form-item>
       </el-form>
+      <p class="pwd-tip">{{ t('修改密码需先验证邮箱，验证码将发送至当前绑定邮箱。', 'Email verification is required. A code will be sent to your bound email.') }}</p>
       <template #footer>
         <el-button @click="showPwdDialog = false">{{ t('取消', 'Cancel') }}</el-button>
         <el-button type="primary" @click="changePassword" :loading="pwdLoading">{{ t('确认', 'Confirm') }}</el-button>
@@ -294,7 +263,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { User, MagicStick, QuestionFilled } from '@element-plus/icons-vue'
 import { settingsApi, uploadApi, authApi } from '../utils/resAi'
@@ -316,12 +285,54 @@ const visible = computed({
 
 const activeTab = ref('general')
 const saving = ref(false)
-const editingUsername = ref(false)
-const newUsername = ref('')
+let _loadingSettings = false
+let _saveTimer = null
 
 const showPwdDialog = ref(false)
 const pwdLoading = ref(false)
-const pwdForm = reactive({ old_password: '', new_password: '', confirm_password: '' })
+const pwdCodeLoading = ref(false)
+const pwdCodeCountdown = ref(0)
+let pwdCodeTimer = null
+const pwdForm = reactive({ old_password: '', new_password: '', confirm_password: '', code: '' })
+
+const pwdCodeHint = computed(() => {
+  if (!props.user?.email) return t('未绑定邮箱', 'No email bound')
+  return t('验证码', 'Code')
+})
+
+function clearPwdCountdown() {
+  if (pwdCodeTimer) {
+    clearInterval(pwdCodeTimer)
+    pwdCodeTimer = null
+  }
+  pwdCodeCountdown.value = 0
+}
+
+async function sendPwdCode() {
+  if (!props.user?.email) {
+    ElMessage.warning(t('当前账号未绑定邮箱', 'No email bound'))
+    return
+  }
+  pwdCodeLoading.value = true
+  try {
+    const res = await authApi.sendCode(props.user.email, 'reset_password')
+    if (res.code === 200) {
+      ElMessage.success(res.message || t('验证码已发送', 'Code sent'))
+      pwdCodeCountdown.value = 60
+      clearPwdCountdown()
+      pwdCodeTimer = setInterval(() => {
+        pwdCodeCountdown.value--
+        if (pwdCodeCountdown.value <= 0) clearPwdCountdown()
+      }, 1000)
+    } else {
+      ElMessage.error(res.message || t('发送失败', 'Send failed'))
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || t('发送失败', 'Send failed'))
+  } finally {
+    pwdCodeLoading.value = false
+  }
+}
 
 const showDeleteDialog = ref(false)
 const deleteLoading = ref(false)
@@ -331,14 +342,13 @@ const defaultSettings = {
   theme: 'auto',
   language: 'auto',
   background_image: null,
+  background_cover: 'contain',
   message_opacity: 0.9,
   sidebar_collapsed: false,
   temperature: 0.8,
   frequency_penalty: 0.0,
   presence_penalty: 0.0,
   top_p: 0.95,
-  default_voice: 'alloy',
-  auto_play_voice: false,
 }
 
 const localSettings = reactive({ ...defaultSettings })
@@ -348,7 +358,7 @@ const aiAvatarUrl = computed(() => props.user?.ai_avatar || '')
 
 const bgPreviewStyle = computed(() => {
   if (localSettings.background_image) {
-    return { backgroundImage: `url(${localSettings.background_image})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+    return { backgroundImage: `url(${localSettings.background_image})`, backgroundSize: 'contain', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' }
   }
   return {}
 })
@@ -367,7 +377,19 @@ watch(() => props.modelValue, (val) => {
   }
 })
 
+// 关闭密码对话框时复位表单与倒计时，避免残留
+watch(() => showPwdDialog.value, (open) => {
+  if (!open) {
+    clearPwdCountdown()
+  }
+})
+
+onUnmounted(() => {
+  clearPwdCountdown()
+})
+
 async function loadSettings() {
+  _loadingSettings = true
   try {
     const res = await settingsApi.get()
     if (res.code === 200 && res.data) {
@@ -377,20 +399,33 @@ async function loadSettings() {
     }
   } catch (e) {
     console.error('加载设置失败', e)
+  } finally {
+    _loadingSettings = false
   }
 }
 
+// 设置项改动后自动保存（去除手动「保存设置」按钮）
+watch(localSettings, () => {
+  if (_loadingSettings) return
+  clearTimeout(_saveTimer)
+  _saveTimer = setTimeout(() => saveSettings(true), 500)
+}, { deep: true })
+
 function handleClose() {
+  clearTimeout(_saveTimer)
+  saveSettings(true)
   visible.value = false
 }
 
-async function saveSettings() {
+async function saveSettings(silent) {
   saving.value = true
   try {
     const payload = { ...localSettings }
     const res = await settingsApi.update(payload)
     if (res.code === 200) {
-      ElMessage.success(t('设置已保存', 'Settings saved'))
+      if (!silent) {
+        ElMessage.success(t('设置已保存', 'Settings saved'))
+      }
       emit('settings-updated', { ...localSettings })
       applyTheme(localSettings.theme)
       handleLanguageChange()
@@ -402,9 +437,8 @@ async function saveSettings() {
   }
 }
 
-function resetSettings() {
-  Object.assign(localSettings, defaultSettings)
-  applyTheme(localSettings.theme)
+function clearBgImage() {
+  localSettings.background_image = null
 }
 
 // 背景图片上传
@@ -419,10 +453,6 @@ async function handleBgUpload(file) {
     ElMessage.error(t('上传失败', 'Upload failed'))
   }
   return false
-}
-
-function clearBgImage() {
-  localSettings.background_image = null
 }
 
 // 头像上传
@@ -454,24 +484,7 @@ async function handleAiAvatarUpload(file) {
   return false
 }
 
-// 用户名修改
-function saveUsername() {
-  if (!newUsername.value.trim()) {
-    ElMessage.warning(t('用户名不能为空', 'Username cannot be empty'))
-    return
-  }
-  settingsApi.updateProfile({ username: newUsername.value.trim() }).then(res => {
-    if (res.code === 200) {
-      ElMessage.success(t('用户名已更新', 'Username updated'))
-      emit('user-updated', res.data)
-      editingUsername.value = false
-    }
-  }).catch(() => {
-    ElMessage.error(t('修改失败', 'Failed'))
-  })
-}
-
-// 修改密码
+// 修改密码（需邮箱验证码）
 async function changePassword() {
   if (!pwdForm.old_password || !pwdForm.new_password) {
     ElMessage.warning(t('请填写完整', 'Please fill in all fields'))
@@ -485,18 +498,23 @@ async function changePassword() {
     ElMessage.warning(t('两次密码不一致', 'Passwords do not match'))
     return
   }
+  if (!pwdForm.code) {
+    ElMessage.warning(t('请输入邮箱验证码', 'Enter the email verification code'))
+    return
+  }
   pwdLoading.value = true
   try {
-    const res = await authApi.changePassword(pwdForm.old_password, pwdForm.new_password)
+    const res = await authApi.changePassword(pwdForm.old_password, pwdForm.new_password, pwdForm.code)
     if (res.code === 200) {
-      ElMessage.success(t('密码修改成功', 'Password changed'))
+      ElMessage.success(res.message || t('密码修改成功', 'Password changed'))
       showPwdDialog.value = false
-      pwdForm.old_password = ''
-      pwdForm.new_password = ''
-      pwdForm.confirm_password = ''
+      clearPwdCountdown()
+      Object.assign(pwdForm, { old_password: '', new_password: '', confirm_password: '', code: '' })
+      // 密码修改成功需要重新登录
+      emit('logout')
     }
   } catch (e) {
-    ElMessage.error(t('修改失败', 'Failed'))
+    ElMessage.error(e.response?.data?.message || t('修改失败', 'Failed'))
   } finally {
     pwdLoading.value = false
   }
@@ -540,7 +558,8 @@ async function confirmDelete() {
 
 <style scoped>
 .system-settings {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -552,7 +571,20 @@ async function confirmDelete() {
 }
 
 .settings-section {
-  margin-bottom: 28px;
+  margin-bottom: 24px;
+  padding: 18px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+}
+
+/* 账号管理保持扁平，不套卡片 */
+.account-flat {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
 }
 
 .section-title {
@@ -671,17 +703,6 @@ async function confirmDelete() {
   gap: 6px;
 }
 
-.inline-edit {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.edit-value {
-  font-size: 14px;
-  color: var(--text-primary);
-}
-
 .static-value {
   font-size: 14px;
   color: var(--text-muted);
@@ -697,12 +718,61 @@ async function confirmDelete() {
   margin: 8px 0 0 0;
 }
 
-.settings-footer {
+/* ===== 移动端响应式 ===== */
+@media (max-width: 768px) {
+  .setting-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .setting-item .el-select,
+  .setting-item :deep(.el-select),
+  .setting-item .el-radio-group {
+    width: 100% !important;
+  }
+  .slider-control {
+    width: 100%;
+  }
+  .avatar-section .avatar-row {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .avatar-block {
+    width: 100%;
+  }
+  .bg-image-control {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .bg-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
+/* 修改密码：验证码行 + 提示 */
+.pwd-code-group {
   display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-color);
-  margin-top: auto;
+  gap: 10px;
+  width: 100%;
+}
+
+.pwd-code-group .el-input {
+  flex: 1;
+}
+
+.pwd-tip {
+  font-size: 12px;
+  color: #909399;
+  margin: 0 0 0 100px;
+}
+
+/* 抽屉滚动：限制 body 高度，保证内容超出时可滚动出滚动条 */
+.system-settings :deep(.el-drawer__body) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
 }
 </style>

@@ -4,6 +4,8 @@ import { ElMessage } from 'element-plus';
 import { User, Lock, Message, Close } from '@element-plus/icons-vue';
 import { authApi } from '../utils/resAi';
 
+import brandIcon from '../assets/icon/ChatBotIcon.png'
+
 const props = defineProps({
   modelValue: {
     type: Boolean,
@@ -14,10 +16,16 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'success']);
 
 const isLogin = ref(true);
+const inForgot = ref(false);
+const forgotStep = ref(1); // 1=邮箱+验证码，2=设置新密码
 const loading = ref(false);
 const codeLoading = ref(false);
+const forgotCodeLoading = ref(false);
+const forgotLoading = ref(false);
 const countdown = ref(0);
+const forgotCountdown = ref(0);
 let countdownTimer = null;
+let forgotCountdownTimer = null;
 
 const form = ref({
   username: '',
@@ -27,10 +35,20 @@ const form = ref({
   code: '',
 });
 
+const forgotForm = ref({
+  email: '',
+  code: '',
+  new_password: '',
+  confirm_password: '',
+});
+
 watch(() => props.modelValue, (val) => {
   if (!val) {
     form.value = { username: '', email: '', password: '', confirmPassword: '', code: '' };
     isLogin.value = true;
+    inForgot.value = false;
+    forgotStep.value = 1;
+    forgotForm.value = { email: '', code: '', new_password: '', confirm_password: '' };
     clearCountdown();
   }
 });
@@ -45,6 +63,11 @@ function clearCountdown() {
     countdownTimer = null;
   }
   countdown.value = 0;
+  if (forgotCountdownTimer) {
+    clearInterval(forgotCountdownTimer);
+    forgotCountdownTimer = null;
+  }
+  forgotCountdown.value = 0;
 }
 
 const handleClose = () => {
@@ -55,8 +78,114 @@ const toggleMode = () => {
   isLogin.value = !isLogin.value;
   form.value.confirmPassword = '';
   form.value.code = '';
+  inForgot.value = false;
+  forgotStep.value = 1;
   clearCountdown();
 };
+
+const goForgot = () => {
+  inForgot.value = true;
+  forgotStep.value = 1;
+  clearCountdown();
+};
+
+const backToLogin = () => {
+  inForgot.value = false;
+  isLogin.value = true;
+  forgotStep.value = 1;
+  forgotForm.value = { email: '', code: '', new_password: '', confirm_password: '' };
+  clearCountdown();
+};
+
+async function sendForgotCode() {
+  const email = forgotForm.value.email.trim();
+  if (!email) {
+    ElMessage.warning('请输入邮箱');
+    return;
+  }
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    ElMessage.warning('请输入有效的邮箱地址');
+    return;
+  }
+  forgotCodeLoading.value = true;
+  try {
+    const res = await authApi.sendCode(email, 'reset_password');
+    if (res.code === 200) {
+      ElMessage.success(res.message || '验证码已发送');
+      forgotCountdown.value = 60;
+      if (forgotCountdownTimer) clearInterval(forgotCountdownTimer);
+      forgotCountdownTimer = setInterval(() => {
+        forgotCountdown.value--;
+        if (forgotCountdown.value <= 0) {
+          clearInterval(forgotCountdownTimer);
+          forgotCountdownTimer = null;
+        }
+      }, 1000);
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || e.message || '发送失败');
+  } finally {
+    forgotCodeLoading.value = false;
+  }
+}
+
+async function submitForgotStep1() {
+  const email = forgotForm.value.email.trim();
+  if (!email) {
+    ElMessage.warning('请输入邮箱');
+    return;
+  }
+  if (!forgotForm.value.code) {
+    ElMessage.warning('请输入验证码');
+    return;
+  }
+  forgotLoading.value = true;
+  try {
+    const res = await authApi.verifyCode(email, forgotForm.value.code, 'reset_password');
+    if (res.code === 200) {
+      ElMessage.success(res.message || '验证通过');
+      forgotStep.value = 2;
+    } else {
+      ElMessage.error(res.message || '验证失败');
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || e.message || '验证失败');
+  } finally {
+    forgotLoading.value = false;
+  }
+}
+
+async function submitForgot() {
+  const newPwd = forgotForm.value.new_password;
+  if (newPwd.length < 6) {
+    ElMessage.warning('新密码至少6个字符');
+    return;
+  }
+  if (newPwd !== forgotForm.value.confirm_password) {
+    ElMessage.warning('两次密码输入不一致');
+    return;
+  }
+  forgotLoading.value = true;
+  try {
+    const res = await authApi.resetPassword(
+      forgotForm.value.email.trim(),
+      forgotForm.value.code,
+      newPwd,
+    );
+    if (res.code === 200) {
+      ElMessage.success(res.message || '密码重置成功');
+      backToLogin();
+      emit('update:modelValue', false);
+    } else {
+      ElMessage.error(res.message || '重置失败');
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || e.message || '重置失败');
+  } finally {
+    forgotLoading.value = false;
+  }
+}
 
 async function sendCode() {
   if (!form.value.email) {
@@ -105,6 +234,10 @@ const handleSubmit = async () => {
     }
     if (form.value.username.length < 2) {
       ElMessage.warning('用户名至少2个字符');
+      return;
+    }
+    if (!/^[A-Za-z0-9_]+$/.test(form.value.username)) {
+      ElMessage.warning('用户名只能包含字母、数字和下划线，且不能包含中文');
       return;
     }
     if (!form.value.email) {
@@ -174,21 +307,22 @@ const handleSubmit = async () => {
     @update:model-value="(val) => emit('update:modelValue', val)"
     width="420px"
     :close-on-click-modal="false"
+    :show-close="false"
     class="auth-modal"
     align-center
   >
     <template #header>
       <div class="auth-header">
         <div class="auth-logo">
-          <span class="logo-icon"><el-icon><Message /></el-icon></span>
-          <span class="logo-text">AI 角色聊天</span>
+          <img :src="brandIcon" class="logo-img" alt="ChatBot" />
+          <span class="logo-text">ChatBot</span>
         </div>
         <el-button class="close-btn" circle :icon="Close" @click="handleClose" />
       </div>
     </template>
 
     <div class="auth-body">
-      <div class="auth-tabs">
+      <div v-if="!inForgot" class="auth-tabs">
         <div class="auth-tab" :class="{ active: isLogin }" @click="isLogin = true">
           登录
         </div>
@@ -196,12 +330,20 @@ const handleSubmit = async () => {
           注册
         </div>
       </div>
+      <div v-else class="auth-forgot-title">
+        <el-icon><Lock /></el-icon>
+        <span>找回密码</span>
+      </div>
 
-      <p class="auth-subtitle">
+      <p v-if="!inForgot" class="auth-subtitle">
         {{ isLogin ? '欢迎回来，登录以继续聊天' : '创建账号，开启角色对话之旅' }}
       </p>
+      <p v-else class="auth-subtitle">
+        输入邮箱与验证码，找回你的账号密码
+      </p>
 
-      <el-form @submit.prevent="handleSubmit" class="auth-form">
+      <!-- 登录 / 注册 -->
+      <el-form v-if="!inForgot" @submit.prevent="handleSubmit" class="auth-form">
         <!-- 登录：用户名/邮箱 -->
         <el-form-item v-if="isLogin">
           <el-input
@@ -302,11 +444,94 @@ const handleSubmit = async () => {
         <span class="toggle-link" @click="toggleMode">
           {{ isLogin ? '立即注册' : '去登录' }}
         </span>
+        <span v-if="isLogin" class="forgot-link" @click="goForgot">忘记密码？</span>
       </div>
 
       <div v-if="!isLogin" class="register-tip">
         <el-icon><InfoFilled /></el-icon>
         <span>注册需要验证邮箱，未配置邮件服务时验证码为 123456</span>
+      </div>
+
+      <!-- 忘记密码：第一步 邮箱+验证码 -->
+      <div v-if="inForgot && forgotStep === 1" class="forgot-step">
+        <el-form-item>
+          <el-input
+            v-model="forgotForm.email"
+            placeholder="邮箱"
+            size="large"
+            :prefix-icon="Message"
+            type="email"
+            class="auth-input"
+          />
+        </el-form-item>
+        <el-form-item>
+          <div class="code-input-group">
+            <el-input
+              v-model="forgotForm.code"
+              placeholder="验证码"
+              size="large"
+              class="auth-input code-input"
+              maxlength="6"
+            />
+            <el-button
+              size="large"
+              :disabled="forgotCountdown > 0"
+              :loading="forgotCodeLoading"
+              @click="sendForgotCode"
+              class="code-btn"
+            >
+              {{ forgotCountdown > 0 ? `${forgotCountdown}s 后重发` : '获取验证码' }}
+            </el-button>
+          </div>
+        </el-form-item>
+        <el-button
+          type="primary"
+          size="large"
+          class="submit-btn"
+          :loading="forgotLoading"
+          @click="submitForgotStep1"
+        >
+          下一步
+        </el-button>
+      </div>
+
+      <!-- 忘记密码：第二步 设置新密码 -->
+      <div v-if="inForgot && forgotStep === 2" class="forgot-step">
+        <el-form-item>
+          <el-input
+            v-model="forgotForm.new_password"
+            type="password"
+            placeholder="新密码（至少6位）"
+            size="large"
+            :prefix-icon="Lock"
+            show-password
+            class="auth-input"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-input
+            v-model="forgotForm.confirm_password"
+            type="password"
+            placeholder="确认新密码"
+            size="large"
+            :prefix-icon="Lock"
+            show-password
+            @keyup.enter="submitForgot"
+            class="auth-input"
+          />
+        </el-form-item>
+        <el-button
+          type="primary"
+          size="large"
+          class="submit-btn"
+          :loading="forgotLoading"
+          @click="submitForgot"
+        >
+          重置密码
+        </el-button>
+        <div class="forgot-back">
+          <span class="toggle-link" @click="backToLogin">返回登录</span>
+        </div>
       </div>
     </div>
   </el-dialog>
@@ -340,8 +565,11 @@ const handleSubmit = async () => {
   gap: 10px;
 }
 
-.logo-icon {
-  font-size: 28px;
+.logo-img {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  object-fit: cover;
 }
 
 .logo-text {
@@ -458,5 +686,37 @@ const handleSubmit = async () => {
   padding: 8px 12px;
   background: #f4f4f5;
   border-radius: 6px;
+}
+
+.forgot-link {
+  float: right;
+  font-size: 13px;
+  color: var(--brand);
+  cursor: pointer;
+}
+
+.forgot-link:hover {
+  text-decoration: underline;
+}
+
+.auth-forgot-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.forgot-step {
+  display: flex;
+  flex-direction: column;
+}
+
+.forgot-back {
+  text-align: center;
+  margin-top: 16px;
+  font-size: 14px;
 }
 </style>

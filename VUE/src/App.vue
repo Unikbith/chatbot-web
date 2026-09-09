@@ -29,6 +29,20 @@ initThemeFromStorage()
   --input-bg: rgba(250, 247, 244, 0.96);
   --shadow-soft: 0 1px 2px rgba(60, 40, 25, 0.04), 0 6px 24px -12px rgba(60, 40, 25, 0.12);
   --radius: 14px;
+
+  /* Element Plus 组件主色与暖色主题对齐（按钮、选择器、开关、滑块等） */
+  --el-color-primary: #d96c4e;
+  --el-color-primary-rgb: 217, 108, 78;
+  --el-color-primary-light-3: #e49883;
+  --el-color-primary-light-5: #ecb6a7;
+  --el-color-primary-light-7: #f4d3ca;
+  --el-color-primary-light-8: #f7e2dc;
+  --el-color-primary-light-9: #fbf0ed;
+  --el-color-primary-dark-2: #ae563e;
+
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+
   color-scheme: light;
 }
 
@@ -50,6 +64,20 @@ html.dark {
   --input-bg: rgba(42, 37, 32, 0.92);
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 28px -14px rgba(0, 0, 0, 0.5);
   --radius: 14px;
+
+  /* 暗色下使用更亮的主色保证对比度 */
+  --el-color-primary: #e88b6f;
+  --el-color-primary-rgb: 232, 139, 111;
+  --el-color-primary-light-3: #efae9a;
+  --el-color-primary-light-5: #f4c5b7;
+  --el-color-primary-light-7: #f8dcd4;
+  --el-color-primary-light-8: #fae8e2;
+  --el-color-primary-light-9: #fdf3f1;
+  --el-color-primary-dark-2: #ba6f59;
+
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+
   color-scheme: dark;
 }
 

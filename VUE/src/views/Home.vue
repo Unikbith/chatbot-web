@@ -45,23 +45,38 @@ const temperature = ref(0.8)
 const personas = ref([])
 const currentPersona = ref(null)
 
+// 对话模型配置列表（用于对话内选择模型、判定已启用配置）
+const chatConfigs = ref([])
+
 // 用户设置
 const userSettings = reactive({
   theme: 'auto',
   language: 'auto',
   background_image: null,
+  background_cover: 'contain',
   message_opacity: 0.9,
   sidebar_collapsed: false,
   temperature: 0.8,
   frequency_penalty: 0.0,
   presence_penalty: 0.0,
   top_p: 0.95,
-  default_voice: 'alloy',
-  auto_play_voice: false,
 })
 
 // 聊天状态
 const chatStatus = ref({ has_provider: false, is_free: false, free_name: '', provider_name: '' })
+
+// 免费 API 提示条：每次打开网页展示一次、可点“知道了”消除；已配置自有模型的用户不展示
+const freeApiBannerDismissed = ref(false)
+// 是否已配置自有对话模型（任一启用的 chat 配置都视为已配置）
+const hasOwnChatProvider = computed(() =>
+  chatConfigs.value.some(p => p.provider_type === 'chat' && p.enabled !== false)
+)
+const showFreeApiBanner = computed(() =>
+  isLoggedIn.value && chatStatus.value.is_free && !hasOwnChatProvider.value && !freeApiBannerDismissed.value
+)
+function dismissFreeApiBanner() {
+  freeApiBannerDismissed.value = true
+}
 
 // 对话列表
 const conversations = ref([])
@@ -85,12 +100,14 @@ function updateViewport() {
 }
 
 // 默认头像回退
-const effectiveUserAvatar = computed(() => user.value?.avatar || defaultUserAvatar)
+const effectiveUserAvatar = computed(() => currentConv.value?.user_avatar || user.value?.avatar || defaultUserAvatar)
 // AI 头像优先级：对话独立 > 通用AI头像 > 角色头像 > 默认图
 const effectiveAiAvatar = computed(() => {
   const c = currentConv.value
   return c?.ai_avatar || user.value?.ai_avatar || currentPersona.value?.avatar || defaultAiAvatar
 })
+// 对话独立：AI 回复自动播报
+const autoPlayVoice = computed(() => !!currentConv.value?.auto_play_voice)
 
 // 对话独立背景 > 通用背景
 const effectiveBackground = computed(() => currentConv.value?.background_image || userSettings.background_image || null)
@@ -103,15 +120,20 @@ const effectiveOpacity = computed(() => {
   return userSettings.message_opacity
 })
 
-// 背景层样式（覆盖整个工作区，随侧边栏收起自动调整尺寸）
+// 背景层样式：仅覆盖聊天区域（红线标注区），随侧边栏收起自动铺满；
+// 展示方式由用户设置决定：contain=完整可见（完整展示原貌，不裁剪）/ cover=覆盖背景（铺满填充）
+const backgroundCover = computed(() =>
+  currentConv.value?.background_cover || userSettings.background_cover || 'contain'
+)
+
 const bgStyle = computed(() => {
   const url = effectiveBackground.value
   if (!url) return {}
   return {
     backgroundImage: `url(${url})`,
-    backgroundSize: 'cover',
+    backgroundSize: backgroundCover.value,
     backgroundPosition: 'center',
-    backgroundAttachment: 'fixed',
+    backgroundRepeat: 'no-repeat',
   }
 })
 
@@ -138,6 +160,11 @@ onMounted(async () => {
   window.addEventListener('auth:expired', handleAuthExpired)
 })
 
+// 打开/关闭模型配置面板后刷新对话配置列表，保证对话内模型选择为最新
+watch(providerPanelVisible, (val) => {
+  if (!val) loadDefaultProvider()
+})
+
 onUnmounted(() => {
   window.removeEventListener('resize', updateViewport)
   window.removeEventListener('auth:expired', handleAuthExpired)
@@ -150,6 +177,16 @@ function handleAuthExpired() {
   isLoggedIn.value = false
   user.value = null
   authModalVisible.value = true
+}
+
+// 需要登录的操作：未登录时直接弹登录框，避免请求 401 连环触发“登录已过期”toast
+function requireLogin(action) {
+  if (!isLoggedIn.value) {
+    ElMessage.info(t('请先登录', 'Please log in first'))
+    authModalVisible.value = true
+    return
+  }
+  action()
 }
 
 // ========== 用户数据加载 ==========
@@ -216,6 +253,7 @@ async function loadChatStatus() {
 async function loadDefaultProvider() {
   try {
     const res = await providersApi.list('chat')
+    chatConfigs.value = (res.data || []).filter(p => p.provider_type === 'chat')
     if (res.code === 200 && res.data?.length > 0) {
       const savedId = providersApi.getCurrentId('chat')
       let provider = res.data.find(p => p.id == savedId)
@@ -226,6 +264,16 @@ async function loadDefaultProvider() {
   } catch (e) {
     console.warn('加载提供商失败', e)
   }
+}
+
+// 取「应使用的默认对话配置」ID：本地保存的已启用配置 > 首个已启用配置 > null
+function pickEnabledChatProviderId() {
+  const list = chatConfigs.value
+  if (!list.length) return null
+  const enabled = list.filter(p => p.enabled !== false)
+  if (!enabled.length) return null
+  const saved = enabled.find(p => p.id == providersApi.getCurrentId('chat'))
+  return saved ? saved.id : enabled[0].id
 }
 
 // 根据对话 id 找到对应 persona（无则使用通用默认）
@@ -240,6 +288,7 @@ function personaOf(conv) {
 // ========== 对话操作 ==========
 async function handleNewChat() {
   const personaId = ( personas.value.find(p => p.is_default) || personas.value[0] || currentPersona.value )?.id || null
+  currentProviderId.value = pickEnabledChatProviderId()
   try {
     const res = await conversationApi.create({
       title: t('新对话', 'New Chat'),
@@ -255,6 +304,7 @@ async function handleNewChat() {
       currentConvTitle.value = res.data.title || '新对话'
       currentPersona.value = personaOf(res.data)
       systemPrompt.value = res.data.system_prompt || ''
+      currentProviderId.value = res.data.provider_id || pickEnabledChatProviderId()
       chatAreaRef.value?.resetMessages()
       loadConversations()
     }
@@ -274,6 +324,8 @@ async function handleSelectConversation(convId) {
       currentConvTitle.value = data.title || '新对话'
       systemPrompt.value = data.system_prompt || ''
       currentPersona.value = personaOf(data)
+      // 对话独立模型配置优先；未指定则回退到已启用的默认配置
+      currentProviderId.value = data.provider_id || pickEnabledChatProviderId()
 
       const msgList = data.messages || []
       chatAreaRef.value?.setMessages(msgList)
@@ -319,6 +371,20 @@ function handleTitleChange(newTitle) {
       loadConversations()
     }).catch(() => {})
   }
+}
+
+// 首次发送消息时前端自动创建会话（ChatArea 触发），同步到侧边栏
+function handleConversationCreated(conv) {
+  if (!conv || !conv.id) return
+  if (!currentConvId.value) {
+    currentConv.value = conv
+    currentConvId.value = conv.id
+    currentConvTitle.value = conv.title || '新对话'
+    currentPersona.value = personaOf(conv)
+    systemPrompt.value = conv.system_prompt || ''
+    currentProviderId.value = conv.provider_id || pickEnabledChatProviderId()
+  }
+  loadConversations()
 }
 
 // ========== 侧边栏 ==========
@@ -398,16 +464,28 @@ async function handleConvoSettingsSaved(payload) {
   }
   try {
     const update = {
+      provider_id: payload.provider_id,
+      model_id: payload.model_id,
       persona_id: payload.persona_id,
       ai_avatar: payload.ai_avatar,
+      user_avatar: payload.user_avatar,
       background_image: payload.background_image,
+      background_cover: payload.background_cover,
       message_opacity: payload.message_opacity,
+      temperature: payload.temperature,
+      frequency_penalty: payload.frequency_penalty,
+      presence_penalty: payload.presence_penalty,
+      auto_play_voice: payload.auto_play_voice,
     }
     const res = await conversationApi.update(currentConvId.value, update)
     if (res.code === 200) {
       const prevMessages = currentConv.value?.messages || []
       currentConv.value = { ...res.data, messages: prevMessages }
       systemPrompt.value = res.data.system_prompt || ''
+      // 更新当前对话使用的模型配置
+      currentProviderId.value = payload.provider_id != null
+        ? payload.provider_id
+        : pickEnabledChatProviderId()
       if (payload.persona_id) {
         currentPersona.value = personas.value.find(p => p.id == payload.persona_id) || currentPersona.value
       }
@@ -421,16 +499,22 @@ async function handleConvoSettingsSaved(payload) {
 </script>
 
 <template>
-  <div class="home-container">
-    <!-- 背景层：覆盖整个工作区，侧边栏收起时自动铺满 -->
+  <div
+    class="home-container"
+    :style="{ '--sidebar-width': sidebarCollapsed ? (isMobile ? '0px' : '60px') : (isMobile ? '0px' : '280px') }"
+  >
+    <!-- 背景层：仅覆盖聊天区域（红线标注区），侧边栏收起时自动铺满 -->
     <div class="bg-layer" :style="bgStyle"></div>
 
     <!-- 免费 API 提示条 -->
-    <div v-if="chatStatus.is_free && isLoggedIn" class="free-api-banner">
+    <div v-if="showFreeApiBanner" class="free-api-banner">
       <span class="free-icon"><el-icon><Present /></el-icon></span>
       <span>{{ t('当前使用', 'Now using') }} <strong>{{ chatStatus.free_name }}</strong>，{{ t('为获得更好体验建议配置自己的 API Key', 'configure your own API Key for a better experience') }}</span>
       <el-button size="small" type="primary" link @click="providerPanelVisible = true">
         {{ t('去配置', 'Configure') }}
+      </el-button>
+      <el-button size="small" text @click="dismissFreeApiBanner">
+        {{ t('知道了', 'Got it') }}
       </el-button>
     </div>
 
@@ -456,9 +540,9 @@ async function handleConvoSettingsSaved(payload) {
       @toggle-pin="handleTogglePin"
       @delete="handleDeleteConversation"
       @toggle-collapse="toggleSidebar"
-      @open-provider="providerPanelVisible = true"
-      @open-settings="settingsVisible = true"
-      @open-persona="personaPanelVisible = true"
+      @open-provider="requireLogin(() => providerPanelVisible = true)"
+      @open-settings="requireLogin(() => settingsVisible = true)"
+      @open-persona="requireLogin(() => personaPanelVisible = true)"
       @login="authModalVisible = true"
       @logout="handleLogout"
     />
@@ -477,12 +561,14 @@ async function handleConvoSettingsSaved(payload) {
       :user-avatar="effectiveUserAvatar"
       :ai-avatar="effectiveAiAvatar"
       :message-opacity="effectiveOpacity"
+      :auto-play-voice="autoPlayVoice"
       :is-free-api="chatStatus.is_free"
-      @open-settings="settingsVisible = true"
-      @open-provider="providerPanelVisible = true"
+      @open-settings="requireLogin(() => settingsVisible = true)"
+      @open-provider="requireLogin(() => providerPanelVisible = true)"
       @open-conversation-settings="openConversationSettings"
       @title-change="handleTitleChange"
       @new-chat="handleNewChat"
+      @conversation-created="handleConversationCreated"
     />
 
     <!-- 登录注册弹窗 -->
@@ -516,8 +602,12 @@ async function handleConvoSettingsSaved(payload) {
       v-model="convoSettingsVisible"
       :conversation="currentConv"
       :personas="personas"
+      :configs="chatConfigs"
       :user-avatar="effectiveUserAvatar"
       :general-opacity="userSettings.message_opacity"
+      :general-temperature="userSettings.temperature"
+      :general-frequency-penalty="userSettings.frequency_penalty"
+      :general-presence-penalty="userSettings.presence_penalty"
       @save="handleConvoSettingsSaved"
     />
   </div>
@@ -533,10 +623,10 @@ async function handleConvoSettingsSaved(payload) {
   position: relative;
 }
 
-/* 背景层固定在侧边栏之后、内容之后，随工作区尺寸变化 */
+/* 背景层：仅覆盖聊天区域（从侧边栏右侧开始），侧边栏收起时自动铺满 */
 .bg-layer {
   position: absolute;
-  inset: 0;
+  inset: 0 0 0 var(--sidebar-width, 0);
   z-index: 0;
   pointer-events: none;
   background-color: var(--app-bg);

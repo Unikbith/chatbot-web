@@ -54,16 +54,14 @@
           >
             <div class="provider-name">
               {{ p.name }}
-              <el-tag v-if="p.is_default" size="small" type="warning" effect="light" class="tag">默认</el-tag>
             </div>
             <div class="provider-actions" @click.stop>
-              <el-button
-                v-if="!p.is_default"
+              <el-switch
+                :model-value="p.enabled"
                 size="small"
-                text
-                @click="setDefault(p)"
-                title="设为默认"
-              ><el-icon><Star /></el-icon></el-button>
+                :title="p.enabled ? t('停用该配置', 'Disable') : t('启用该配置', 'Enable')"
+                @change="(v) => toggleEnabled(p, v)"
+              />
               <el-button
                 size="small"
                 text
@@ -103,7 +101,7 @@
           </div>
 
           <!-- 语音类厂商专属参数（动态渲染） -->
-          <template v-if="isAudio() && paramSchema.length">
+          <template v-if="(isAudio() || activeType === 'image') && paramSchema.length">
             <div v-for="f in paramSchema" :key="f.key" class="form-row">
               <label class="form-label">
                 {{ tLabel(f) }}
@@ -125,6 +123,15 @@
                   :value="op.value"
                 />
               </el-select>
+              <!-- 开关（布尔） -->
+              <el-switch
+                v-else-if="f.type === 'boolean'"
+                :model-value="!!fieldValue(f)"
+                @update:model-value="(v) => setFieldValue(f, v)"
+                :active-text="t('开启', 'On')"
+                inactive-text=""
+                inline-prompt
+              />
               <!-- 数字 -->
               <el-input-number
                 v-else-if="f.type === 'number'"
@@ -229,7 +236,7 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, ChatDotRound, Microphone, Headset, Star, Delete } from '@element-plus/icons-vue'
+import { Plus, ChatDotRound, Microphone, Headset, Delete, Picture } from '@element-plus/icons-vue'
 import { providersApi } from '@/utils/resAi'
 import { t } from '../i18n'
 
@@ -244,6 +251,7 @@ const tabs = [
   { key: 'chat', label: '对话模型', labelEn: 'Chat', icon: ChatDotRound },
   { key: 'stt', label: '语音转文字', labelEn: 'STT', icon: Microphone },
   { key: 'tts', label: '文字转语音', labelEn: 'TTS', icon: Headset },
+  { key: 'image', label: '图片生成', labelEn: 'Image', icon: Picture },
 ]
 
 const activeType = ref('chat')
@@ -326,7 +334,12 @@ const customModelId = ref('')
 async function loadVendors() {
   try {
     const res = await providersApi.vendors(activeType.value)
-    if (res.code === 200) vendors.value = res.data || []
+    vendors.value = res.data || []
+    // 未手动选厂商时，自动选中第一个，确保「新增配置」时专属参数（如图片生成的 Agnes 参数）能立即渲染
+    if (vendors.value.length) {
+      const current = vendors.value.find(v => v.brand === selectedVendorBrand.value)
+      if (!current) selectVendor(vendors.value[0])
+    }
   } catch (e) {
     vendors.value = []
   }
@@ -425,7 +438,7 @@ async function saveConfig() {
       brand: selectedVendorBrand.value || 'deepseek',
       provider_type: activeType.value,
     }
-    if (isAudio()) {
+    if (isAudio() || activeType.value === 'image') {
       // 由 schema 决定哪些字段进 model / params
       const params = {}
       for (const f of paramSchema.value) {
@@ -476,13 +489,17 @@ async function testConfig() {
   }
 }
 
-async function setDefault(p) {
+async function toggleEnabled(p, v) {
   try {
-    await providersApi.setDefault(p.id)
-    ElMessage.success(t('已设为默认', 'Set as default'))
-    loadProviders()
+    const res = await providersApi.update(p.id, { enabled: v })
+    if (res.code === 200) {
+      p.enabled = res.data.enabled
+      loadProviders()
+    } else {
+      ElMessage.error(res.message || t('操作失败', 'Failed'))
+    }
   } catch (e) {
-    ElMessage.error(t('设置失败', 'Failed'))
+    ElMessage.error(e.response?.data?.message || t('操作失败', 'Failed'))
   }
 }
 
@@ -839,4 +856,92 @@ onMounted(() => {
 .model-actions { display: flex; gap: 4px; flex-shrink: 0; }
 
 .custom-row { display: flex; gap: 10px; }
+
+/* ===== 移动端响应式 ===== */
+@media (max-width: 768px) {
+  .panel-body {
+    flex-direction: column;
+  }
+  .left-col {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px;
+    max-height: none;
+    flex: none;
+  }
+  .left-col .col-title {
+    width: 100%;
+    margin-bottom: 4px;
+  }
+  .left-col .col-title-gap {
+    margin-top: 4px;
+  }
+  /* 厂商列表横向滚动，节省纵向空间 */
+  .vendor-list {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .vendor-item {
+    flex: 0 0 auto;
+    width: 120px;
+    margin-bottom: 0;
+  }
+  /* 我的配置横向滚动卡片 */
+  .provider-list {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+    overflow-x: auto;
+    flex: none;
+  }
+  .provider-card {
+    flex: 0 0 auto;
+    width: 150px;
+    margin-bottom: 0;
+  }
+  .provider-actions {
+    gap: 6px;
+  }
+  .right-col {
+    padding: 12px;
+  }
+  .tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .tab-item {
+    flex: 1 0 auto;
+    justify-content: center;
+    padding: 10px 8px;
+  }
+  .config-card, .models-card {
+    padding: 12px;
+  }
+  .form-row {
+    margin-bottom: 12px;
+  }
+  .model-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .model-name {
+    flex: 1 1 auto;
+    min-width: 60%;
+  }
+  .model-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .custom-row {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
 </style>

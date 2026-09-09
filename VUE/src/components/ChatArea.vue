@@ -1,16 +1,17 @@
 <script setup>
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue';
-import { ElMessage, ElMessageBox, ElInput } from 'element-plus';
+import { ElMessage, ElInput } from 'element-plus';
 import { 
-  Setting, CopyDocument, RefreshLeft, Lightning, 
-  Bell, CircleClose, Upload, Edit, MagicStick
+  Setting, RefreshLeft, Lightning, 
+  Bell, CircleClose, Upload, Edit, MagicStick, Picture, Notebook
 } from '@element-plus/icons-vue';
-import { readStream, chatApi, audioApi, providersApi } from '@/utils/resAi';
+import { readStream, chatApi, audioApi, imageApi, providersApi, conversationApi } from '@/utils/resAi';
 import auth from '@/utils/auth';
 import { t } from '../i18n';
 
 import VoiceInput from '@/components/VoiceInput.vue';
 import ImageUpload from '@/components/ImageUpload.vue';
+import PromptToolPanel from '@/components/PromptToolPanel.vue';
 
 const props = defineProps({
   conversationId: {
@@ -38,7 +39,8 @@ const props = defineProps({
   aiAvatar: { type: String, default: '' },
   messageOpacity: { type: Number, default: 0.9 },
   settings: { type: Object, default: null },
-  isFreeApi: { type: Boolean, default: false }
+  isFreeApi: { type: Boolean, default: false },
+  autoPlayVoice: { type: Boolean, default: false }
 });
 
 const emit = defineEmits([
@@ -47,7 +49,8 @@ const emit = defineEmits([
   'openConversationSettings',
   'titleChange', 
   'newChat',
-  'updateConversation'
+  'updateConversation',
+  'conversationCreated'
 ]);
 
 const opacityVal = computed(() => {
@@ -72,18 +75,18 @@ let abortController = null;
 // 图片上传
 const imageUploadRef = ref(null);
 const selectedImage = ref(null);
+// 生图模式开关：'' 普通聊天 / 'text2img' 生图 / 'img2img' 改图（需附参考图）
+const genMode = ref('');
 
 // 语音播报
 const isSpeaking = ref(false);
+const speakingIndex = ref(null); // 正在播报的消息索引（用于显示「播报中」）
 let audioElement = null;
 
 // 编辑标题
 const editingTitle = ref(false);
 const editTitleInput = ref(null);
 const tempTitle = ref('');
-
-// 复制反馈
-const copiedIndex = ref(null);
 
 // 滚动到底部
 const scrollToBottom = async () => {
@@ -114,12 +117,56 @@ const handleVoiceText = (text) => {
   inputText.value = text;
 };
 
+// 发送前确保存在会话：无 conversationId 时先创建，保证聊天记录落库
+const ensureConversation = async () => {
+  if (props.conversationId) return props.conversationId;
+  try {
+    const res = await conversationApi.create({
+      title: t('新对话', 'New Chat'),
+      provider_id: props.providerId,
+      system_prompt: props.systemPrompt,
+      temperature: props.temperature,
+    });
+    if (res.code === 200) {
+      emit('conversationCreated', res.data);
+      return res.data.id;
+    }
+  } catch (e) {
+    console.error('创建对话失败', e);
+  }
+  return null;
+};
+
 // 发送消息
 const handleSend = async () => {
   if (loading.value) { abortRequest(); return; }
 
   const text = inputText.value.trim();
   if (!text && !selectedImage.value) return;
+
+  // 关键词触发：生图=文生图 / 改图=图生图（无需手动开启生图模式）
+  const imgCmd = matchImageCommand(text);
+  if (imgCmd) {
+    if (imgCmd.mode === 'img2img' && !selectedImage.value) {
+      ElMessage.warning(t('改图需要先上传/选择一张参考图片', 'Attach a reference image first to edit it'));
+    }
+    await handleImageGenerate(imgCmd.prompt, imgCmd.mode);
+    return;
+  }
+
+  // 图片生成模式（明确选择 生图/改图）
+  if (genMode.value === 'text2img') {
+    await handleImageGenerate(text, 'text2img');
+    return;
+  }
+  if (genMode.value === 'img2img') {
+    if (!selectedImage.value) {
+      ElMessage.warning(t('改图需要先上传/选择一张参考图片', 'Attach a reference image first to edit it'));
+      return;
+    }
+    await handleImageGenerate(text, 'img2img');
+    return;
+  }
 
   // 如果有图片，走识图接口
   if (selectedImage.value) {
@@ -129,6 +176,8 @@ const handleSend = async () => {
 
   messages.value.push(createMessage('user', text));
   inputText.value = '';
+  // 用户发送消息后立即定位到底部（AI 生成过程中不强制滚动）
+  scrollToBottom();
 
   const aiIndex = messages.value.length;
   messages.value.push(createMessage('assistant'));
@@ -136,14 +185,22 @@ const handleSend = async () => {
   loading.value = true;
   abortController = new AbortController();
 
+  const convId = await ensureConversation();
+
+  // 若打通了「大模型原生工具」，在系统提示中加一句图片生成约定，让模型可输出标记由前端代劳
+  const llmTools = await imageLlmToolsEnabled();
+  const sysPrompt = llmTools
+    ? (props.systemPrompt || '') + '\n\n[系统能力-图片生成] 当用户要求生成图片时只回复一行：`生图：<英文提示词>`；要求修改/结合参考图时只回复一行：`改图：<中文修改要求>`。不要输出其它解释。'
+    : props.systemPrompt;
+
   try {
     const requestBody = {
       messages: messages.value.slice(0, -1).map(({ role, content }) => ({ role, content })),
       deep_think: deepThink.value,
-      system_prompt: props.systemPrompt,
+      system_prompt: sysPrompt,
       temperature: props.temperature,
       provider_id: props.providerId,
-      conversation_id: props.conversationId,
+      conversation_id: convId,
     };
 
     const response = await chatApi.stream(requestBody, { signal: abortController.signal });
@@ -152,6 +209,14 @@ const handleSend = async () => {
       if (reasoning) messages.value[aiIndex].reasoning += reasoning;
       if (content) messages.value[aiIndex].content += content;
     });
+
+    // 大模型输出带生图/改图标记时，自动代为调用图片生成
+    await handleLlmImageMarkers(messages.value[aiIndex]);
+
+    // 自动播报 AI 回复（该对话开启时）
+    if (props.autoPlayVoice && messages.value[aiIndex]?.content && !messages.value[aiIndex].imageUrl) {
+      speakText(messages.value[aiIndex].content, aiIndex);
+    }
 
     // 更新对话标题（第一条用户消息）
     if (messages.value.filter(m => m.role === 'user').length === 1) {
@@ -169,8 +234,115 @@ const handleSend = async () => {
   } finally {
     abortController = null;
     loading.value = false;
+  }
+};
+
+// 关键词识别：返回 {mode:'text2img'|'img2img', prompt} 或 null
+function matchImageCommand(raw) {
+  const s = (raw || '').trim();
+  if (!s) return null;
+  // 文生图：生图 / 生成图片 / 画一张 ...
+  const t2i = s.match(/^(?:请|帮我|给我|帮我)?\s*(生图|生成图片|直接生图|画一张|画图)\s*[：:，,.\s]*/);
+  if (t2i) {
+    return { mode: 'text2img', prompt: s.slice(t2i[0].length).trim() || t('生成一张图片', 'Generate an image') };
+  }
+  // 图生图：改图 / 图生图 / 修改图片（word 级别，仅在开头才能命中，避免误伤正文）
+  const i2i = s.match(/^(?:请|帮我|给我)?\s*(改图|图生图|修改这张图|修改图片)\s*[：:，,.\s]*/);
+  if (i2i) {
+    return { mode: 'img2img', prompt: s.slice(i2i[0].length).trim() || t('请修改这张图', 'Edit this image') };
+  }
+  return null;
+}
+
+// 大模型原生工具：探测图片配置是否开启 llm_tools（缓存结果）
+let llmToolsCache = null;
+async function imageLlmToolsEnabled() {
+  if (llmToolsCache !== null) return llmToolsCache;
+  try {
+    const res = await providersApi.list('image');
+    const enabled = (res.data || []).find(p => p.enabled !== false);
+    llmToolsCache = !!(enabled && enabled.params && enabled.params.llm_tools);
+  } catch (e) {
+    llmToolsCache = false;
+  }
+  return llmToolsCache;
+}
+
+// 从模型回复里提取「生图/改图」标记并代为调用图片生成，结果以图片形式附到该消息
+async function handleLlmImageMarkers(msg) {
+  if (!msg || !msg.content) return;
+  const m2i = msg.content.match(/生图[:：]\s*([^\n]+)/);
+  const mImg = msg.content.match(/改图[:：]\s*([^\n]+)/);
+  const marker = m2i || mImg;
+  if (!marker) return;
+  const prompt = marker[1].trim();
+  // 移除标记行，保留可读文本；且仅当第一条标记满足
+  msg.content = msg.content.replace(marker[0], '');
+  try {
+    const res = await imageApi.generate({ prompt, references: [] });
+    if (res.code === 200 && res.data?.url) {
+      msg.imageUrl = res.data.url;
+      if (res.data?.free) {
+        ElMessage.info(t(`共享免费生图（剩余 ${res.data.remaining}/${res.data.limit} 次）`, `Shared free gen (${res.data.remaining}/${res.data.limit} left)`));
+      }
+      scrollToBottom();
+    } else if (res.message) {
+      msg.content = (msg.content + '\n' + t('图片生成失败', 'Image failed') + '：' + res.message).trim();
+    }
+  } catch (e) {
+    msg.content = (msg.content + '\n' + t('图片生成失败', 'Image failed') + '：' + (e.message || '')).trim();
+  }
+}
+
+// 图片生成（mode: 'text2img' 生图 / 'img2img' 改图）
+const handleImageGenerate = async (text, mode = 'text2img') => {
+  const isEdit = mode === 'img2img';
+  // 仅改图需要带上参考图；生图为文生图
+  const prompt = text || t('生成一张图片', 'Generate an image');
+  messages.value.push(createMessage('user', prompt, isEdit ? selectedImage.value?.dataUrl || null : null));
+  const refDataUrl = isEdit ? selectedImage.value?.dataUrl : null;
+  inputText.value = '';
+  imageUploadRef.value?.clearImage();
+  scrollToBottom();
+
+  const aiIndex = messages.value.length;
+  messages.value.push(createMessage('assistant'));
+
+  loading.value = true;
+  abortController = new AbortController();
+  try {
+    const res = await imageApi.generate({
+      prompt,
+      references: refDataUrl ? [refDataUrl] : [],
+    });
+    if (res.code === 200 && res.data?.url) {
+      messages.value[aiIndex].imageUrl = res.data.url;
+      if (res.data?.free) {
+        ElMessage.info(t(`共享免费生图（剩余 ${res.data.remaining}/${res.data.limit} 次）`, `Shared free gen (${res.data.remaining}/${res.data.limit} left)`));
+      }
+    } else {
+      messages.value[aiIndex].content = `出错了：${res.message || '生成失败'}`;
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      messages.value[aiIndex].content += '（已中止）';
+    } else {
+      messages.value[aiIndex].content = `出错了：${error.message || '网络异常'}`;
+    }
+  } finally {
+    abortController = null;
+    loading.value = false;
     scrollToBottom();
   }
+};
+
+// 图片大图预览（发出图片 / 生成图片均支持）
+const previewVisible = ref(false);
+const previewUrl = ref('');
+const previewImage = (url) => {
+  if (!url) return;
+  previewUrl.value = url;
+  previewVisible.value = true;
 };
 
 // 识图对话
@@ -178,12 +350,16 @@ const handleVisionChat = async (text) => {
   messages.value.push(createMessage('user', text, selectedImage.value.dataUrl));
   inputText.value = '';
   imageUploadRef.value?.clearImage();
+  // 用户发送消息后立即定位到底部
+  scrollToBottom();
 
   const aiIndex = messages.value.length;
   messages.value.push(createMessage('assistant'));
 
   loading.value = true;
   abortController = new AbortController();
+
+  const convId = await ensureConversation();
 
   try {
     const formData = new FormData();
@@ -192,8 +368,8 @@ const handleVisionChat = async (text) => {
     if (props.providerId) {
       formData.append('provider_id', props.providerId);
     }
-    if (props.conversationId) {
-      formData.append('conversation_id', props.conversationId);
+    if (convId) {
+      formData.append('conversation_id', convId);
     }
 
     const response = await chatApi.vision(formData, { signal: abortController.signal });
@@ -214,35 +390,38 @@ const handleVisionChat = async (text) => {
     selectedImage.value = null;
     abortController = null;
     loading.value = false;
-    scrollToBottom();
   }
 };
 
 // 语音播报
-const speakText = async (text) => {
+const speakText = async (text, index) => {
   stopSpeaking();
   
   const plainText = text.replace(/<[^>]+>/g, '').trim();
   if (!plainText) return;
 
   try {
-    const blob = await audioApi.textToSpeech(plainText, 'alloy', props.providerId);
+    // 音色使用 TTS 模型配置中的音色（不传 voice，由后端按提供商配置决定）
+    const blob = await audioApi.textToSpeech(plainText, '');
     const url = URL.createObjectURL(blob);
     
     audioElement = new Audio(url);
     audioElement.onended = () => {
       isSpeaking.value = false;
+      speakingIndex.value = null;
       URL.revokeObjectURL(url);
     };
     audioElement.onerror = () => {
       isSpeaking.value = false;
+      speakingIndex.value = null;
       console.error('语音播放失败');
     };
     isSpeaking.value = true;
+    speakingIndex.value = index;
     audioElement.play();
   } catch (e) {
     console.error('语音合成失败', e);
-    ElMessage.warning('语音播报失败');
+    ElMessage.warning(`语音播报失败：${e.message || ''}`);
   }
 };
 
@@ -252,31 +431,35 @@ const stopSpeaking = () => {
     audioElement = null;
   }
   isSpeaking.value = false;
+  speakingIndex.value = null;
 };
 
-// 复制消息
-const copyMessage = async (content, index) => {
-  try {
-    const plainText = content.replace(/<[^>]+>/g, '').trim();
-    await navigator.clipboard.writeText(plainText);
-    copiedIndex.value = index;
-    setTimeout(() => { copiedIndex.value = null; }, 2000);
-  } catch (e) {
-    ElMessage.warning('复制失败');
+// 仅“最新一条”AI 消息允许重新生成
+const isLatestAssistant = (index) => {
+  if (!messages.value[index] || messages.value[index].role !== 'assistant') return false
+  for (let i = messages.value.length - 1; i > index; i--) {
+    if (messages.value[i].role === 'assistant') return false
   }
+  return true
 };
 
 // 重新生成
-const regenerate = async () => {
-  // 找到最后一条用户消息
-  const lastUserIndex = [...messages.value].reverse().findIndex(m => m.role === 'user');
-  if (lastUserIndex === -1) return;
-  
-  const actualIndex = messages.value.length - 1 - lastUserIndex;
-  const userMessage = messages.value[actualIndex];
-  
-  // 删除 AI 回复
-  messages.value = messages.value.slice(0, actualIndex + 1);
+const regenerate = async (assistantIndex = null) => {
+  // 若点击的是某条 AI 消息的「重新生成」，定位到它对应的用户消息所在轮次；
+  // 否则（兜底）取最后一条用户消息。
+  let userIndex;
+  if (typeof assistantIndex === 'number' && assistantIndex > 0) {
+    userIndex = assistantIndex - 1;
+    while (userIndex >= 0 && messages.value[userIndex].role !== 'user') userIndex--;
+    if (userIndex < 0) return;
+  } else {
+    const lastUserIndex = [...messages.value].reverse().findIndex(m => m.role === 'user');
+    if (lastUserIndex === -1) return;
+    userIndex = messages.value.length - 1 - lastUserIndex;
+  }
+
+  // 删除该轮之后的 AI 回复（含该轮）
+  messages.value = messages.value.slice(0, userIndex + 1);
   
   // 重新发送
   const aiIndex = messages.value.length;
@@ -284,7 +467,9 @@ const regenerate = async () => {
   
   loading.value = true;
   abortController = new AbortController();
-  
+
+  const convId = await ensureConversation();
+
   try {
     const requestBody = {
       messages: messages.value.slice(0, -1).map(({ role, content }) => ({ role, content })),
@@ -292,7 +477,7 @@ const regenerate = async () => {
       system_prompt: props.systemPrompt,
       temperature: props.temperature,
       provider_id: props.providerId,
-      conversation_id: props.conversationId,
+      conversation_id: convId,
     };
 
     const response = await chatApi.stream(requestBody, { signal: abortController.signal });
@@ -310,7 +495,6 @@ const regenerate = async () => {
   } finally {
     abortController = null;
     loading.value = false;
-    scrollToBottom();
   }
 };
 
@@ -344,18 +528,11 @@ const cancelEditTitle = () => {
   editingTitle.value = false;
 };
 
-// 清空当前对话
-const handleClearChat = async () => {
-  if (loading.value) abortRequest();
-  
-  try {
-    await ElMessageBox.confirm('确定要清空当前对话吗？', '确认', { type: 'warning' });
-  } catch {
-    return;
-  }
-
-  messages.value = [createMessage('assistant', greetingText())];
-  inputText.value = '';
+// 提示词工具面板
+const promptToolOpen = ref(false);
+// 将生成结果插入输入框
+const handlePromptInsert = (text) => {
+  inputText.value = text;
   scrollToBottom();
 };
 
@@ -406,8 +583,8 @@ onUnmounted(() => {
         <el-tooltip :content="t('对话设置', 'Conversation Settings')">
           <el-button circle :icon="MagicStick" @click="emit('openConversationSettings')" />
         </el-tooltip>
-        <el-tooltip :content="t('清空对话', 'Clear Chat')">
-          <el-button circle :icon="RefreshLeft" @click="handleClearChat" />
+        <el-tooltip :content="t('提示词工具', 'Prompt Tool')">
+          <el-button circle :icon="Notebook" @click="promptToolOpen = true" />
         </el-tooltip>
         <el-tooltip :content="t('模型设置', 'Model Settings')">
           <el-button circle :icon="Setting" @click="emit('openProvider')" />
@@ -446,7 +623,7 @@ onUnmounted(() => {
             <div class="message-content">
               <!-- 用户消息中的图片 -->
               <div v-if="item.role === 'user' && item.imageUrl" class="message-image">
-                <img :src="item.imageUrl" alt="图片" />
+                <img :src="item.imageUrl" alt="图片" @click="previewImage(item.imageUrl)" />
               </div>
               
               <!-- 思考过程 -->
@@ -461,11 +638,16 @@ onUnmounted(() => {
                 </div>
               </div>
               
+              <!-- 图片生成结果（文生图 / 图生图） -->
+              <div v-if="item.role === 'assistant' && item.imageUrl" class="message-image generated">
+                <img :src="item.imageUrl" alt="生成图片" @click="previewImage(item.imageUrl)" />
+              </div>
+              
               <!-- 消息内容 -->
               <div v-if="item.content" class="content-text" v-html="item.content"></div>
               
               <!-- 加载状态 -->
-              <div v-if="item.role === 'assistant' && !item.content && !item.reasoning" class="loading-dots">
+              <div v-if="item.role === 'assistant' && !item.content && !item.reasoning && !item.imageUrl" class="loading-dots">
                 <span></span><span></span><span></span>
               </div>
 
@@ -474,19 +656,10 @@ onUnmounted(() => {
                 <el-button 
                   size="small" 
                   text 
-                  :icon="CopyDocument" 
-                  @click="copyMessage(item.content, index)"
-                  class="action-btn"
-                >
-                  {{ copiedIndex === index ? t('已复制', 'Copied') : t('复制', 'Copy') }}
-                </el-button>
-                <el-button 
-                  size="small" 
-                  text 
                   :icon="RefreshLeft" 
-                  @click="regenerate"
+                  @click="regenerate(index)"
                   class="action-btn"
-                  :disabled="loading"
+                  :disabled="loading || !isLatestAssistant(index)"
                 >
                   {{ t('重新生成', 'Regenerate') }}
                 </el-button>
@@ -494,10 +667,10 @@ onUnmounted(() => {
                   size="small" 
                   text 
                   :icon="Bell" 
-                  @click="speakText(item.content)"
+                  @click="speakText(item.content, index)"
                   class="action-btn"
                 >
-                  {{ t('语音播报', 'Speak') }}
+                  {{ speakingIndex === index ? t('播报中', 'Speaking') : t('语音播报', 'Speak') }}
                 </el-button>
               </div>
             </div>
@@ -546,6 +719,27 @@ onUnmounted(() => {
                 size="small"
               />
             </div>
+            <div
+              class="gen-mode-group"
+              :title="t('选择图片生成方式：生图=文字生成图片；改图=修改参考图（需先上传图片）。需先在模型配置中添加图片生成配置', 'Generate: text to image. Edit: modify a reference image (attach one first). Add an image config in Model Settings first.')"
+            >
+              <button
+                class="gen-mode-btn"
+                :class="{ active: genMode === 'text2img' }"
+                @click="genMode = genMode === 'text2img' ? '' : 'text2img'"
+              >
+                <el-icon><Picture /></el-icon>
+                <span>{{ t('生图', 'Image') }}</span>
+              </button>
+              <button
+                class="gen-mode-btn"
+                :class="{ active: genMode === 'img2img' }"
+                @click="genMode = genMode === 'img2img' ? '' : 'img2img'"
+              >
+                <el-icon><Edit /></el-icon>
+                <span>{{ t('改图', 'Edit') }}</span>
+              </button>
+            </div>
           </div>
           
           <div class="action-right">
@@ -560,10 +754,19 @@ onUnmounted(() => {
         </div>
       </div>
       
-      <div class="footer-hint">
-        {{ t('AI 可能会产生不准确的信息，请核实重要内容', 'AI may produce inaccurate information. Please verify important facts.') }}
-      </div>
     </div>
+
+    <!-- 提示词工具 -->
+    <PromptToolPanel v-model="promptToolOpen" @insert="handlePromptInsert" />
+
+    <!-- 图片大图预览：直接全屏展示单张大图，无额外标题/边框 -->
+    <el-image-viewer
+      v-if="previewVisible && previewUrl"
+      :url-list="[previewUrl]"
+      :zoom-rate="1.2"
+      hide-on-click-modal
+      @close="previewVisible = false"
+    />
   </div>
 </template>
 
@@ -722,7 +925,18 @@ onUnmounted(() => {
   max-height: 300px;
   border-radius: 12px;
   display: block;
+  cursor: zoom-in;
 }
+
+/* 生成的图片支持更大展示 */
+.message-image.generated img {
+  max-width: 480px;
+  max-height: 480px;
+  cursor: zoom-in;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+}
+
+/* 图片大图预览使用 el-image-viewer 全屏展示，无需额外样式 */
 
 /* 思考过程 */
 .reasoning-wrapper {
@@ -791,7 +1005,7 @@ onUnmounted(() => {
 
 .message-ai .content-text {
   color: var(--text-primary);
-  background: rgba(148, 163, 184, calc(var(--message-opacity, 0.9) * 0.16));
+  background: rgba(163, 172, 190, var(--message-opacity, 0.9));
   padding: 10px 16px;
   border-radius: 14px;
   border-top-left-radius: 4px;
@@ -840,8 +1054,20 @@ onUnmounted(() => {
   height: 24px;
 }
 
-.action-btn:hover {
+/* 有背景图片时也仅改变字体颜色，不出现白色/浅色背景，避免突兀 */
+.action-btn,
+.action-btn:active,
+.action-btn:focus,
+.action-btn.is-text,
+.action-btn.is-text:active,
+.action-btn.is-text:focus {
+  background: transparent !important;
+}
+
+.action-btn:hover,
+.action-btn.is-text:hover {
   color: var(--brand);
+  background: transparent !important;
 }
 
 /* 底部输入区 */
@@ -943,11 +1169,41 @@ onUnmounted(() => {
   margin-left: 8px;
 }
 
-.footer-hint {
-  text-align: center;
+.gen-mode-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+  padding: 2px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 130, 145, 0.18);
+  background: transparent;
+}
+
+.gen-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 999px;
   font-size: 12px;
-  color: #9ca3af;
-  margin-top: 8px;
+  color: #6b7280;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+}
+
+.gen-mode-btn:hover {
+  color: var(--brand);
+}
+
+.gen-mode-btn.active {
+  color: var(--brand);
+  background: rgba(120, 130, 145, calc(var(--message-opacity, 1) * 0.14));
 }
 
 /* Markdown 样式补充 */

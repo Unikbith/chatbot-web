@@ -3,7 +3,7 @@
     <!-- 收起时的迷你模式 -->
     <div v-if="collapsed" class="sidebar-mini">
       <div class="mini-logo" @click="toggleCollapse">
-        <el-icon><ChatDotRound /></el-icon>
+        <img :src="brandIcon" class="brand-img" alt="ChatBot" />
       </div>
       <div class="mini-new-chat" @click="createConversation">
         <el-icon><Plus /></el-icon>
@@ -23,8 +23,8 @@
     <template v-else>
       <div class="sidebar-header">
         <div class="logo">
-          <span class="logo-icon"><el-icon><ChatDotRound /></el-icon></span>
-          <span class="logo-text">{{ t('AI 角色聊天', 'AI Role Chat') }}</span>
+          <img :src="brandIcon" class="logo-img" alt="ChatBot" />
+          <span class="logo-text">ChatBot</span>
         </div>
         <el-button 
           class="collapse-btn" 
@@ -222,9 +222,11 @@ import { computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, ArrowLeft, ArrowRight, ArrowUp, Top, Delete,
-  User, Setting, Tools, SwitchButton, MagicStick, Menu, ChatDotRound
+  User, Setting, Tools, SwitchButton, MagicStick, Menu
 } from '@element-plus/icons-vue'
 import { t } from '../i18n'
+
+import brandIcon from '../assets/icon/ChatBotIcon.png'
 
 const props = defineProps({
   conversations: { type: Array, default: () => [] },
@@ -324,10 +326,21 @@ function openUserMenu() {
 }
 
 .mini-logo {
-  font-size: 24px;
+  width: 32px;
+  height: 32px;
   cursor: pointer;
-  padding: 8px;
+  padding: 4px;
   border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mini-logo .brand-img {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  object-fit: cover;
 }
 
 .mini-logo:hover {
@@ -395,8 +408,12 @@ function openUserMenu() {
   gap: 8px;
 }
 
-.logo-icon {
-  font-size: 22px;
+.logo-img {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
 }
 
 .logo-text {

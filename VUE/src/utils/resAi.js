@@ -9,6 +9,15 @@ const resAi = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+// 登录态失效通知去重：多个并发 401 只触发一次「登录过期」
+let authExpiredCooldown = 0;
+function notifyAuthExpired() {
+  const now = Date.now();
+  if (now - authExpiredCooldown < 1500) return;
+  authExpiredCooldown = now;
+  window.dispatchEvent(new CustomEvent("auth:expired"));
+}
+
 resAi.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("chatbot_token");
@@ -27,7 +36,7 @@ resAi.interceptors.response.use(
     if (error.response?.status === 401) {
       localStorage.removeItem("chatbot_token");
       localStorage.removeItem("chatbot_refresh_token");
-      window.dispatchEvent(new CustomEvent('auth:expired'));
+      notifyAuthExpired();
     }
     return Promise.reject(error);
   },
@@ -49,7 +58,7 @@ const fetchStream = async (url, data, options = {}) => {
   if (!response.ok) {
     if (response.status === 401) {
       localStorage.removeItem("chatbot_token");
-      window.dispatchEvent(new CustomEvent('auth:expired'));
+      notifyAuthExpired();
     }
     throw new Error(`HTTP error! status: ${response.status}`);
   }
@@ -72,7 +81,7 @@ const fetchStreamFormData = async (url, formData, options = {}) => {
   if (!response.ok) {
     if (response.status === 401) {
       localStorage.removeItem("chatbot_token");
-      window.dispatchEvent(new CustomEvent('auth:expired'));
+      notifyAuthExpired();
     }
     throw new Error(`HTTP error! status: ${response.status}`);
   }
@@ -137,9 +146,19 @@ const authApi = {
     return resAi.get('/api/auth/userinfo');
   },
 
-  // 修改密码
-  async changePassword(old_password, new_password) {
-    return resAi.put('/api/auth/password', { old_password, new_password });
+  // 修改密码（需邮箱验证码）
+  async changePassword(old_password, new_password, code) {
+    return resAi.put('/api/auth/password', { old_password, new_password, code });
+  },
+
+  // 忘记密码：邮箱 + 验证码 + 新密码
+  async resetPassword(email, code, new_password) {
+    return resAi.post('/api/auth/reset-password', { email, code, new_password });
+  },
+
+  // 校验邮箱验证码（忘记密码第一步）
+  async verifyCode(email, code, purpose = 'reset_password') {
+    return resAi.post('/api/auth/verify-code', { email, code, purpose });
   },
 
   // 注销账号
@@ -320,6 +339,98 @@ const chatApi = {
   },
 };
 
+// ========== 提示词工具 API（一键人物设定 / 生图改图提示词） ==========
+const promptToolApi = {
+  async options() {
+    return resAi.get('/api/chat/prompt-tool');
+  },
+  async generate(payload) {
+    return resAi.post('/api/chat/prompt-tool', payload);
+  },
+};
+
+// ========== 图片生成 API（Agnes 文生图 / 图生图） ==========
+const imageApi = {
+  async generate(data) {
+    return resAi.post('/api/image/generate', data);
+  },
+};
+
+// 管理后台专用请求实例：使用独立的管理员令牌（admin_token），避免与普通用户令牌冲突
+const adminReq = axios.create({
+  baseURL,
+  timeout: 30000,
+  headers: { "Content-Type": "application/json" },
+});
+adminReq.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem("admin_token");
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+    return config;
+  },
+  (error) => Promise.reject(error),
+);
+adminReq.interceptors.response.use(
+  (response) => response.data,
+  (error) => {
+    console.error("管理后台请求错误", error);
+    if (error.response?.status === 401) {
+      localStorage.removeItem("admin_token");
+    }
+    return Promise.reject(error);
+  },
+);
+
+// ========== 后台管理 API（管理员） ==========
+const adminApi = {
+  async login(username, password) {
+    return adminReq.post('/api/admin/login', { username, password });
+  },
+  async status() {
+    return adminReq.get('/api/admin/me');
+  },
+  async stats() {
+    return adminReq.get('/api/admin/stats');
+  },
+  async users() {
+    return adminReq.get('/api/admin/users');
+  },
+  async userConversations(userId) {
+    return adminReq.get(`/api/admin/users/${userId}/conversations`);
+  },
+  async conversationMessages(convId) {
+    return adminReq.get(`/api/admin/conversations/${convId}/messages`);
+  },
+  async exportConversation(convId) {
+    const token = localStorage.getItem("admin_token");
+    const response = await fetch(`${baseURL}/api/admin/conversations/${convId}/export`, {
+      method: "GET",
+      headers: { ...(token && { Authorization: `Bearer ${token}` }) },
+    });
+    if (!response.ok) {
+      let msg = `HTTP ${response.status}`;
+      try {
+        const body = await response.json();
+        if (body && body.message) msg = body.message;
+      } catch (e) { /* 非 JSON 响应，保留默认信息 */ }
+      throw new Error(msg);
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `conversation_${convId}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+  logout() {
+    localStorage.removeItem("admin_token");
+    localStorage.removeItem("admin_username");
+  },
+};
+
 // ========== 音频 API ==========
 const audioApi = {
   async speechToText(file, providerId = null) {
@@ -345,7 +456,14 @@ const audioApi = {
       },
       body: JSON.stringify({ text, voice, provider_id: providerId }),
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      let msg = `HTTP ${response.status}`;
+      try {
+        const body = await response.json();
+        if (body && body.message) msg = body.message;
+      } catch (e) { /* 非 JSON 响应，保留默认信息 */ }
+      throw new Error(msg);
+    }
     return response.blob();
   },
   async listVoices(providerId = null) {
@@ -368,6 +486,9 @@ export {
   uploadApi,
   conversationApi,
   chatApi,
+  promptToolApi,
   audioApi,
+  imageApi,
+  adminApi,
   baseURL
 };

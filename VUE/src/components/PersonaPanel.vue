@@ -70,7 +70,7 @@
     <el-dialog 
       v-model="editDialogVisible" 
       :title="editingPersona ? '编辑角色' : '新建角色'"
-      width="560px"
+      width="min(560px, 94vw)"
       @close="resetForm"
     >
       <el-form :model="form" label-width="80px" label-position="top">
@@ -372,5 +372,28 @@ function confirmDelete(id) {
 
 .form-avatar {
   border: 2px solid #ebeef5;
+}
+
+/* ===== 移动端响应式 ===== */
+@media (max-width: 768px) {
+  .persona-card {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  /* 移动端无 hover，操作按钮常驻显示 */
+  .persona-actions,
+  .persona-card:hover .persona-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    width: 100%;
+    margin-left: 56px;
+  }
+  .avatar-upload {
+    width: 100%;
+  }
+  .persona-desc {
+    white-space: normal;
+  }
 }
 </style>
