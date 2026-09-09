@@ -17,7 +17,7 @@ from services.ai_service import AIService
 
 provider_bp = Blueprint('provider', __name__, url_prefix='/api/providers')
 
-VALID_TYPES = ['chat', 'stt', 'tts']
+VALID_TYPES = ['chat', 'stt', 'tts', 'image']
 
 
 def _get_own_provider(provider_id, user_id):
@@ -179,6 +179,13 @@ def create_provider():
     if ModelProvider.query.filter_by(user_id=user_id, provider_type=provider_type).count() == 0:
         provider.is_default = True
 
+    # 图片生成配置：自动预置厂商默认模型（Agnes），无需用户手动拉取
+    if provider_type == 'image':
+        vendor = get_vendor(brand, provider_type)
+        default_models = (vendor or {}).get('models', [])
+        for mid in default_models:
+            provider.models.append(ProviderModel(model_id=mid, name=mid, enabled=True))
+
     # 并发下唯一约束兜底：极端竞态导致同名冲突时回滚并返回可读提示，避免 500
     try:
         db.session.commit()
@@ -222,6 +229,8 @@ def update_provider(provider_id):
         provider.model = (data.get('model') or '').strip() or None
     if 'params' in data:
         provider.set_params(data.get('params') or {})
+    if 'enabled' in data:
+        provider.enabled = bool(data['enabled'])
 
     db.session.commit()
 
@@ -351,6 +360,26 @@ def _generic_request_ok(provider, timeout=15):
         return False, f'无法连接 API: {str(e)}'
 
 
+def _tts_request_ok(provider, timeout=30):
+    """TTS 真实合成测试：用短文本实际合成一段音频，成功才算可用。
+
+    仅做连通性检查会误导用户（地址可达但协议/额度不对导致无法合成）。
+    """
+    params = provider.get_params() or {}
+    err = AIService._ssrf_error(provider.api_url)
+    if err:
+        return False, err
+    try:
+        audio, err = AIService.text_to_speech(provider, '你好')
+    except Exception as e:
+        return False, f'合成异常: {str(e)}'
+    if err:
+        return False, err
+    if not audio:
+        return False, '未返回音频数据'
+    return True, ''
+
+
 @provider_bp.route('/<int:provider_id>/test', methods=['POST'])
 @jwt_required()
 def test_provider(provider_id):
@@ -363,6 +392,8 @@ def test_provider(provider_id):
     try:
         if provider.provider_type == 'chat':
             ok, err = _chat_request_ok(provider, provider.model)
+        elif provider.provider_type == 'tts':
+            ok, err = _tts_request_ok(provider)
         else:
             ok, err = _generic_request_ok(provider)
         if ok:

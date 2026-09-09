@@ -15,7 +15,8 @@ from extensions import db, jwt, cors, migrate
 from models import User, ModelProvider, PersonaTemplate, UserSettings
 from routes import (
     auth_bp, chat_bp, audio_bp, provider_bp,
-    conversation_bp, settings_bp, persona_bp, upload_bp
+    conversation_bp, settings_bp, persona_bp, upload_bp,
+    admin_bp, image_bp,
 )
 
 
@@ -54,6 +55,8 @@ def create_app(config_name=None):
     app.register_blueprint(settings_bp)
     app.register_blueprint(persona_bp)
     app.register_blueprint(upload_bp)
+    app.register_blueprint(admin_bp)
+    app.register_blueprint(image_bp)
 
     # 健康检查
     @app.route('/api/health')
@@ -92,11 +95,15 @@ def create_app(config_name=None):
 
     @jwt.token_in_blocklist_loader
     def check_token_version(jwt_header, jwt_payload):
-        """token 版本校验：改密/注销后版本自增，旧 token 立即失效。"""
+        """token 版本校验：改密/注销后版本自增，旧 token 立即失效。
+        仅适用于普通用户令牌（sub 为数字）；管理员令牌（role=admin）不在此列。"""
+        sub = jwt_payload.get('sub')
+        if isinstance(sub, bool) or not str(sub).lstrip('-').isdigit():
+            return False
         try:
-            uid = int(jwt_payload.get('sub'))
+            uid = int(sub)
         except (TypeError, ValueError):
-            return True
+            return False
         user = User.query.get(uid)
         if not user or not user.is_active:
             return True
@@ -148,6 +155,11 @@ def _ensure_schema_columns(app):
                     with db.engine.begin() as conn:
                         conn.execute(text('ALTER TABLE model_providers ADD COLUMN params TEXT'))
                     print('[迁移] 已为 model_providers 增加 params 字段')
+                # model_providers.enabled - 配置启用开关（可多选）
+                if 'enabled' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text('ALTER TABLE model_providers ADD COLUMN enabled BOOLEAN DEFAULT 1'))
+                    print('[迁移] 已为 model_providers 增加 enabled 字段')
             # users.token_version - 令牌版本（改密/注销吊销旧 token）
             if 'users' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('users')}
@@ -155,6 +167,32 @@ def _ensure_schema_columns(app):
                     with db.engine.begin() as conn:
                         conn.execute(text('ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0'))
                     print('[迁移] 已为 users 增加 token_version 字段')
+            # user_settings.background_cover - 背景展示方式（contain/cover）
+            if 'user_settings' in inspector.get_table_names():
+                cols = {c['name'] for c in inspector.get_columns('user_settings')}
+                if 'background_cover' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE user_settings ADD COLUMN background_cover VARCHAR(20) DEFAULT 'contain'"))
+                    print('[迁移] 已为 user_settings 增加 background_cover 字段')
+            # conversations.background_cover - 对话独立背景展示方式
+            if 'conversations' in inspector.get_table_names():
+                cols = {c['name'] for c in inspector.get_columns('conversations')}
+                if 'background_cover' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE conversations ADD COLUMN background_cover VARCHAR(20)"))
+                    print('[迁移] 已为 conversations 增加 background_cover 字段')
+                # 对话独立：用户头像 / 频率惩罚 / 存在惩罚 / 自动播报
+                conv_add = {
+                    'user_avatar': 'VARCHAR(500)',
+                    'frequency_penalty': 'FLOAT',
+                    'presence_penalty': 'FLOAT',
+                    'auto_play_voice': 'BOOLEAN',
+                }
+                for cname, ctype in conv_add.items():
+                    if cname not in cols:
+                        with db.engine.begin() as conn:
+                            conn.execute(text(f'ALTER TABLE conversations ADD COLUMN {cname} {ctype}'))
+                        print(f'[迁移] 已为 conversations 增加 {cname} 字段')
     except Exception as e:
         print(f'[迁移] schema 检查/补列跳过: {e}')
 

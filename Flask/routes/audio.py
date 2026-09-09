@@ -12,7 +12,10 @@ audio_bp = Blueprint('audio', __name__, url_prefix='/api/audio')
 def _get_stt_provider(user_id, provider_id=None):
     """获取 STT 提供商（优先 stt 类型，没有则用 chat 类型）"""
     if provider_id:
-        return ModelProvider.query.filter_by(id=provider_id, user_id=user_id).first()
+        p = ModelProvider.query.filter_by(id=provider_id, user_id=user_id).first()
+        # 只接受 STT 类型提供商；前端误传聊天提供商 id 时忽略，回落到默认配置
+        if p and p.provider_type == 'stt':
+            return p
     stt = ModelProvider.query.filter_by(
         user_id=user_id, provider_type='stt', is_default=True
     ).first()
@@ -25,9 +28,12 @@ def _get_stt_provider(user_id, provider_id=None):
 
 
 def _get_tts_provider(user_id, provider_id=None):
-    """获取 TTS 提供商"""
+    """获取 TTS 提供商（优先 tts 类型，没有则用 chat 类型）"""
     if provider_id:
-        return ModelProvider.query.filter_by(id=provider_id, user_id=user_id).first()
+        p = ModelProvider.query.filter_by(id=provider_id, user_id=user_id).first()
+        # 只接受 TTS 类型提供商；前端误传聊天提供商 id 时忽略，回落到默认配置
+        if p and p.provider_type == 'tts':
+            return p
     tts = ModelProvider.query.filter_by(
         user_id=user_id, provider_type='tts', is_default=True
     ).first()
@@ -83,15 +89,17 @@ def text_to_speech():
     data = request.get_json()
     
     text = data.get('text', '').strip()
-    voice = data.get('voice', 'alloy')
     provider_id = data.get('provider_id')
-    
+
     if not text:
         return jsonify({'code': 400, 'message': '文本不能为空'}), 400
-    
+
     provider = _get_tts_provider(user_id, provider_id)
     if not provider:
         return jsonify({'code': 400, 'message': '请先配置语音合成模型提供商'}), 400
+
+    # 未显式指定音色时，优先使用 TTS 提供商自带配置的音色
+    voice = data.get('voice') or getattr(provider, 'voice', None) or 'alloy'
     
     try:
         audio_data, error = AIService.text_to_speech(provider, text, voice)

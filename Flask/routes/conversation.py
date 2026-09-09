@@ -73,18 +73,18 @@ def create_conversation():
     persona_id = data.get('persona_id')
     system_prompt = data.get('system_prompt')
     temperature = data.get('temperature')
-    
-    # 验证提供商归属
+
+    # 校验提供商归属；失效 id（已删除/残留）降级为 None，不阻断建会话
     if provider_id:
         provider = ModelProvider.query.filter_by(id=provider_id, user_id=user_id).first()
         if not provider:
-            return jsonify({'code': 400, 'message': '无效的模型提供商'}), 400
-    
-    # 验证角色模板归属
+            provider_id = None
+
+    # 校验角色模板归属；失效 id 同样降级
     if persona_id:
         persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first()
         if not persona:
-            return jsonify({'code': 400, 'message': '无效的角色模板'}), 400
+            persona_id = None
     
     conv = Conversation(
         user_id=user_id,
@@ -161,10 +161,20 @@ def update_conversation(conv_id):
         conv.temperature = data['temperature']
     if 'background_image' in data:
         conv.background_image = data['background_image'] or None
+    if 'background_cover' in data:
+        conv.background_cover = data['background_cover'] or None
     if 'ai_avatar' in data:
         conv.ai_avatar = data['ai_avatar'] or None
+    if 'user_avatar' in data:
+        conv.user_avatar = data['user_avatar'] or None
     if 'message_opacity' in data:
         conv.message_opacity = data['message_opacity']
+    if 'frequency_penalty' in data:
+        conv.frequency_penalty = data['frequency_penalty']
+    if 'presence_penalty' in data:
+        conv.presence_penalty = data['presence_penalty']
+    if 'auto_play_voice' in data:
+        conv.auto_play_voice = bool(data['auto_play_voice'])
     
     conv.updated_at = datetime.utcnow()
     db.session.commit()

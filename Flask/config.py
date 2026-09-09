@@ -14,23 +14,33 @@ class Config:
     JWT_ACCESS_TOKEN_EXPIRES = 86400  # 24小时
     JWT_REFRESH_TOKEN_EXPIRES = 2592000  # 30天
 
-    # 数据库
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///chatbot.db')
+    # 数据库：固定指向本文件同级 instance/chatbot.db，
+    # 避免因启动目录不同（Flask root_path 回退到 cwd）而连到错误的库文件
+    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL') or (
+        'sqlite:///' + str(Path(__file__).resolve().parent / 'instance' / 'chatbot.db').replace('\\', '/')
+    )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # 免费 API 配置（用户未配置时使用）
     FREE_API_ENABLED = os.getenv('FREE_API_ENABLED', 'true').lower() == 'true'
-    FREE_API_NAME = os.getenv('FREE_API_NAME', '免费 GLM-4.7-flash')
+    FREE_API_NAME = os.getenv('FREE_API_NAME', '免费 GLM-4-flash')
     FREE_API_URL = os.getenv('FREE_API_URL', '')
     FREE_API_KEY = os.getenv('FREE_API_KEY', '')
-    FREE_API_MODEL = os.getenv('FREE_API_MODEL', 'glm-4.7-flash')
+    FREE_API_MODEL = os.getenv('FREE_API_MODEL', 'glm-4-flash')
+
+    # 免费图片生成（共享 Key）：用户未配置图片生成时回退使用；
+    # IMAGE_FREE_LIMIT 表示每账号免费生成次数上限
+    IMAGE_FREE_API_URL = os.getenv('IMAGE_FREE_API_URL', 'https://apihub.agnes-ai.cn/v1')
+    IMAGE_FREE_API_KEY = os.getenv('IMAGE_FREE_API_KEY', '')
+    IMAGE_FREE_MODEL = os.getenv('IMAGE_FREE_MODEL', 'agnes-image-2.1-flash')
+    IMAGE_FREE_LIMIT = int(os.getenv('IMAGE_FREE_LIMIT', '5'))
 
     # 邮箱配置（QQ邮箱 SMTP）
     SMTP_HOST = os.getenv('SMTP_HOST', 'smtp.qq.com')
     SMTP_PORT = int(os.getenv('SMTP_PORT', '465'))
     SMTP_USER = os.getenv('SMTP_USER', '')
     SMTP_PASS = os.getenv('SMTP_PASS', '')
-    SENDER_NAME = os.getenv('SENDER_NAME', 'AI 聊天助手')
+    SENDER_NAME = os.getenv('SENDER_NAME', 'ChatBot')
 
     # 支持的 API 类型
     SUPPORTED_API_TYPES = ['openai', 'deepseek', 'zhipu', 'qwen', 'custom']
@@ -44,6 +54,10 @@ class Config:
     # 是否处于受信反向代理（Nginx/网关）之后：仅此时才信任 X-Forwarded-For；
     # 直连场景保持 false，避免伪造该头绕过登录/注册/验证码的每 IP 限流
     TRUST_PROXY_HEADERS = os.getenv('TRUST_PROXY_HEADERS', 'false').lower() == 'true'
+
+    # 管理员账号（独立于普通用户体系，仅由 .env 配置，登录走 /admin）
+    ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
+    ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', '')
 
     # CORS 允许的来源（逗号分隔）。默认仅本地开发 + 生产域名，可用环境变量覆盖，禁止任意源携带凭据
     CORS_ORIGINS = [o.strip() for o in os.getenv(

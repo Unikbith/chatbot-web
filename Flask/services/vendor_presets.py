@@ -101,12 +101,35 @@ TTS_VENDORS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# 图片生成厂商（仅支持 Agnes AI，国内官方主页 agnes-ai.cn 注册获取免费 Key）
+# ---------------------------------------------------------------------------
+IMAGE_VENDORS = [
+    {
+        'brand': 'agnes',
+        'name': 'Agnes AI',
+        'desc': '免费图像生成（文生图 / 图生图）· 前往 agnes-ai.cn 注册获取免费 Key',
+        'default_api_url': 'https://apihub.agnes-ai.cn/v1',
+        'models': ['agnes-image-2.1-flash', 'agnes-image-2.0-flash'],
+    },
+]
+
+# 生图参数预设
+IMAGE_RESOLUTIONS = ('1K', '2K', '4K')
+# 仅保留 Agnes 官方 2.1 长宽比列出的 8 种；4:5 / 5:4 官方不支持（会按 3:4 / 4:3 截取，比例失真）故移除
+IMAGE_ASPECT_RATIOS = (
+    '1:1', '16:9', '4:3', '3:2', '3:4', '2:3', '9:16', '21:9',
+)
+IMAGE_QUALITIES = ('auto', 'low', 'medium', 'high')
+
+
 def get_vendor(brand, provider_type='chat'):
     """按类型 + 厂商名查找厂商预设"""
     table = {
         'chat': CHAT_VENDORS,
         'stt': STT_VENDORS,
         'tts': TTS_VENDORS,
+        'image': IMAGE_VENDORS,
     }.get(provider_type, CHAT_VENDORS)
     for v in table:
         if v['brand'] == brand:
@@ -120,6 +143,7 @@ def get_vendors(provider_type='chat'):
         'chat': CHAT_VENDORS,
         'stt': STT_VENDORS,
         'tts': TTS_VENDORS,
+        'image': IMAGE_VENDORS,
     }.get(provider_type, CHAT_VENDORS)
     # 去掉内部模型/音色列表，仅返回供选择的基础信息
     return [
@@ -160,6 +184,14 @@ def _select(key, label, label_en='', default='', options=(), options_en=None,
         'type': 'select', 'default': default,
         'options': [{'label': o, 'value': o} for o in options],
         'options_en': options_en or [],
+        'help': help, 'help_en': help_en, 'target': 'params',
+    }
+
+
+def _boolean(key, label, label_en='', default=False, help='', help_en=''):
+    return {
+        'key': key, 'label': label, 'label_en': label_en or label,
+        'type': 'boolean', 'default': default,
         'help': help, 'help_en': help_en, 'target': 'params',
     }
 
@@ -213,11 +245,10 @@ def _bailian_tts_schema():
         _text('model', '模型 ID', 'Model ID', default='',
               placeholder='cosyvoice-v2...', required=True,
               help='语音合成模型', help_en='TTS model ID', target='model'),
-        _select('voice', '音色', 'Voice', default='',
-                options=['loongstella', 'longxiaochun', 'longxiaoyang', 'longxiaomu',
-                         'longxiaosen', 'longxiaohan', 'longxiaocheng', 'longxiaojing',
-                         'longwan', 'longchen', 'longjing', 'longlz', 'longshuo'],
-                help='CosyVoice 音色', help_en='CosyVoice voice'),
+        _text('voice', '音色', 'Voice', default='',
+              placeholder='输入自定义音色 ID，如 longxiaochun',
+              help='CosyVoice 音色 ID，可自定义输入',
+              help_en='CosyVoice voice ID, custom input'),
         _select('output_format', '输出格式', 'Format', default='mp3',
                 options=['mp3', 'wav', 'pcm'], help='音频输出格式',
                 help_en='Audio output format'),
@@ -235,9 +266,10 @@ def _mimotts_schema():
         _text('model', '模型 ID', 'Model ID', default='',
               placeholder='mimo-v2.5-tts...', required=True,
               help='语音合成模型', help_en='TTS model ID', target='model'),
-        _select('voice', '音色', 'Voice', default='',
-                options=['mimo_default', 'default_en', 'default_zh'],
-                help='声音角色', help_en='Voice / timbre'),
+        _text('voice', '音色', 'Voice', default='',
+              placeholder='输入自定义音色 ID，如 female-shaonv',
+              help='声音角色 ID，可自定义输入',
+              help_en='Voice / timbre ID, custom input'),
         _select('output_format', '输出格式', 'Format', default='mp3',
                 options=['wav', 'mp3', 'pcm'], help='音频输出格式',
                 help_en='Audio output format'),
@@ -259,6 +291,53 @@ def _mimotts_schema():
     ]
 
 
+# 图片生成 - Agnes AI 生图参数（文生图 / 图生图公用）
+# 参考 astrbot_plugin_agnes_image 的「生图设置」配置项
+def _agnes_image_schema():
+    return [
+        _text('proxy', '代理地址', 'Proxy', default='',
+              placeholder='留空不使用，支持 http/https/socks5，如 http://127.0.0.1:7890',
+              help='仅对该提供商生图请求生效，留空不走代理',
+              help_en='HTTP/HTTPS/SOCKS5 proxy for this provider only'),
+        _boolean('llm_tools', '启用大模型原生工具', 'Enable LLM Tools',
+                 default=False,
+                 help='开启后，可用自然语言让大模型调用图片/视频生成工具（对话中遇到「生图/改图」指令自动转图片生成）',
+                 help_en='Let the LLM call the image-generation tool via natural language'),
+        _select('resolution', '默认分辨率', 'Default Resolution',
+                default='2K', options=IMAGE_RESOLUTIONS,
+                help='1K / 2K / 4K（4K 仅 agnes-image-2.1-flash 支持，且尺寸较大不推荐）',
+                help_en='1K / 2K / 4K'),
+        _select('image_model', '默认生图模型', 'Default Model',
+                default='agnes-image-2.1-flash',
+                options=['agnes-image-2.1-flash', 'agnes-image-2.0-flash'],
+                help='文生图 / 图生图使用的图像模型',
+                help_en='Text / image-to-image generation model'),
+        _select('aspect_ratio', '默认长宽比', 'Default Aspect Ratio',
+                default='1:1', options=IMAGE_ASPECT_RATIOS,
+                help='生成图片的长宽比（10 种预设可选）',
+                help_en='Aspect ratio of the image'),
+        _select('quality', '默认质量档', 'Default Quality',
+                default='auto', options=IMAGE_QUALITIES,
+                help='为当前模型附加质量参数，auto=不附加',
+                help_en='auto / low / medium / high'),
+        _select('send_mode', '图片发送方式', 'Send Mode',
+                default='url', options=['url', 'file', 'base64'],
+                help='url=发送图片链接；base64=内嵌发送；file=作为文件上传',
+                help_en='How the generated image is delivered'),
+        _number('switch_threshold', '智能切换阈值 (MB)', 'Switch Threshold (MB)',
+                default=2, min=0.5, max=50, step=0.5, unit='MB',
+                help='send_mode 为 auto/智能切换时：文件小于该值走 base64，否则走 file',
+                help_en='File size threshold for base64/file auto switch'),
+        _boolean('ref_aspect_ratio', '改图按参考图原比例', 'Follow Reference Ratio',
+                 default=False,
+                 help='开启后，改图指令自动按第一张参考图的原始宽高比生图（匹配最接近的预设比例）',
+                 help_en='Generate at the reference image aspect ratio'),
+        _number('timeout', '请求超时', 'Timeout', default=120, min=10, max=300,
+                unit='秒', help='图像生成的最大超时时间，单位秒',
+                help_en='Timeout in seconds'),
+    ]
+
+
 CONFIG_SCHEMA = {
     'chat': {},
     'stt': {
@@ -269,6 +348,9 @@ CONFIG_SCHEMA = {
         'mimotts': _mimotts_schema,
         'bailian': _bailian_tts_schema,
         'volcengine': _volcengine_tts_schema,
+    },
+    'image': {
+        'agnes': _agnes_image_schema,
     },
 }
 

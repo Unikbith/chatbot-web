@@ -68,6 +68,8 @@ def update_settings():
         settings.language = data['language']
     if 'background_image' in data:
         settings.background_image = data['background_image'] or None
+    if 'background_cover' in data:
+        settings.background_cover = data['background_cover'] or 'contain'
     if 'sidebar_collapsed' in data:
         settings.sidebar_collapsed = bool(data['sidebar_collapsed'])
 
@@ -106,17 +108,11 @@ def update_profile():
     
     data = request.get_json() or {}
     
+    # 用户名与邮箱均为唯一且不可修改（注册后锁定）
     if 'username' in data:
-        raw_username = data['username']
-        new_username = (raw_username.strip() if isinstance(raw_username, str)
-                        else ('' if raw_username is None else str(raw_username))).strip()
-        if len(new_username) < 3:
-            return jsonify({'code': 400, 'message': '用户名至少3个字符'}), 400
-        # 检查是否被占用
-        existing = User.query.filter_by(username=new_username).first()
-        if existing and existing.id != user_id:
-            return jsonify({'code': 400, 'message': '用户名已被占用'}), 400
-        user.username = new_username
+        return jsonify({'code': 400, 'message': '用户名注册后不可修改'}), 400
+    if 'email' in data:
+        return jsonify({'code': 400, 'message': '邮箱注册后不可修改'}), 400
     
     if 'avatar' in data:
         user.avatar = data['avatar'] or None

@@ -6,6 +6,8 @@ from routes.conversation import conversation_bp
 from routes.settings import settings_bp
 from routes.persona import persona_bp
 from routes.upload import upload_bp
+from routes.admin import admin_bp
+from routes.image import image_bp
 
 __all__ = [
     'auth_bp',
@@ -15,5 +17,7 @@ __all__ = [
     'conversation_bp',
     'settings_bp',
     'persona_bp',
-    'upload_bp'
+    'upload_bp',
+    'admin_bp',
+    'image_bp',
 ]

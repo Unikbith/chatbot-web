@@ -89,6 +89,7 @@ class UserSettings(db.Model):
     theme = db.Column(db.String(20), default='auto')  # light/dark/auto
     language = db.Column(db.String(20), default='auto')  # zh-CN/en/auto
     background_image = db.Column(db.String(500), nullable=True)  # 背景图片
+    background_cover = db.Column(db.String(20), default='contain')  # 背景展示方式 contain=完整可见 / cover=覆盖背景
     message_opacity = db.Column(db.Float, default=0.9)  # 消息框透明度 0-1
     sidebar_collapsed = db.Column(db.Boolean, default=False)  # 侧边栏是否收起
 
@@ -110,6 +111,7 @@ class UserSettings(db.Model):
             'theme': self.theme,
             'language': self.language,
             'background_image': self.background_image,
+            'background_cover': self.background_cover or 'contain',
             'message_opacity': self.message_opacity,
             'sidebar_collapsed': self.sidebar_collapsed,
             'temperature': self.temperature,
@@ -178,6 +180,7 @@ class ModelProvider(db.Model):
     params = db.Column(db.Text, nullable=True)  # 厂商专属参数 JSON：timeout/proxy/appid/cluster/voice_type/speed/output_format/style_prompt/dialect/seed_text 等
     voice = db.Column(db.String(100), nullable=True)
     is_default = db.Column(db.Boolean, default=False)
+    enabled = db.Column(db.Boolean, default=True)  # 是否启用（未指定时作为候选配置，可多个同时启用）
     weight = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -232,6 +235,7 @@ class ModelProvider(db.Model):
             'voice': self.voice,
             'api_key_masked': self.mask_api_key(self.api_key) if self.api_key else '',
             'is_default': self.is_default,
+            'enabled': self.enabled,
             'weight': self.weight,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
@@ -290,9 +294,14 @@ class Conversation(db.Model):
     is_pinned = db.Column(db.Boolean, default=False)
     system_prompt = db.Column(db.Text, nullable=True)  # 单对话自定义提示词（覆盖模板）
     background_image = db.Column(db.String(500), nullable=True)  # 对话独立背景（覆盖通用）
+    background_cover = db.Column(db.String(20), nullable=True)  # 对话独立背景展示方式 contain/cover
     ai_avatar = db.Column(db.String(500), nullable=True)  # 对话独立 AI 头像（覆盖通用/角色）
+    user_avatar = db.Column(db.String(500), nullable=True)  # 对话独立用户头像（覆盖通用）
     message_opacity = db.Column(db.Float, nullable=True)  # 对话独立消息框透明度
     temperature = db.Column(db.Float, nullable=True)
+    frequency_penalty = db.Column(db.Float, nullable=True)
+    presence_penalty = db.Column(db.Float, nullable=True)
+    auto_play_voice = db.Column(db.Boolean, nullable=True)  # 对话独立：AI 回复自动播报
     settings = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -311,13 +320,34 @@ class Conversation(db.Model):
             'is_pinned': self.is_pinned,
             'system_prompt': self.system_prompt,
             'background_image': self.background_image,
+            'background_cover': self.background_cover,
             'ai_avatar': self.ai_avatar,
+            'user_avatar': self.user_avatar,
             'message_opacity': self.message_opacity,
             'temperature': self.temperature,
+            'frequency_penalty': self.frequency_penalty,
+            'presence_penalty': self.presence_penalty,
+            'auto_play_voice': self.auto_play_voice,
             'persona_name': self.persona.name if self.persona else None,
             'persona_avatar': self.persona.avatar if self.persona else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class ImageUsage(db.Model):
+    """免费图片生成用量（每账号共享 Key 免费次数）"""
+    __tablename__ = 'image_usage'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True, index=True)
+    free_count = db.Column(db.Integer, default=0, nullable=False)  # 免费生成累计次数
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'user_id': self.user_id,
+            'free_count': self.free_count,
         }
 
 
