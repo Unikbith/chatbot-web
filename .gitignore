@@ -44,3 +44,19 @@ VUE/dist/
 VUE/dist-ssr/
 VUE/.vite/
 VUE/*.local
+
+# 构建/调试临时产物
+*.timestamp-*.mjs
+*.timestamp-*.cjs
+VUE/_test_preview_server.cjs
+
+# 开发期临时脚本 / 自查脚本（非项目代码）
+Flask/_*.py
+Flask/tmp_*.py
+Flask/manage_admin.py
+Flask/_mkuser.py
+Flask/_mk_user.py
+
+# 本地遗留的审查报告草稿
+全面检测与质量审查报告_*.md
+质量审查报告.md

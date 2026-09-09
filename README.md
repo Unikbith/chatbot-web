@@ -1,6 +1,6 @@
 # AI 聊天助手 Web 版
 
-一个功能丰富的 AI 聊天 Web 应用，支持多模型 API、识图对话、语音交互、云端存档、邮箱注册等功能。
+一个功能丰富的 AI 聊天 Web 应用，支持多模型 API、识图对话、AI 文生图 / 图生图、语音交互、提示词工具、云端存档、邮箱注册与管理后台等功能。
 
 ## 功能特性
 
@@ -22,19 +22,33 @@
 - 上传图片，AI 理解图片内容
 - 基于图片进行多轮对话
 
+### AI 图片生成
+- 文生图 / 图生图，支持多分辨率、长宽比与质量档位
+- 支持按关键词触发：`生图` / `生成图片` / `画一张` 生成图片，`改图` / `图生图` / `修改图片` 修改图片
+- 未单独配置图片 API 时，使用内置免费 Key 并默认按 9:16 竖版生成
+- 免费用户有限量额度；超过后可自行在「模型配置-图片生成」中配置 API Key
+
+### 提示词工具
+- 一键生成人物设定提示词与图片提示词（文生图 / 图生图）
+- 支持自选已启用模型与自定义系统提示词，替代原「清空对话」入口
+
 ### 语音交互
 - 语音输入（STT），说话转文字
 - 语音播报（TTS），AI 回复朗读
-- 多种音色可选
+- 多种音色可选，音色跟随 TTS 模型配置
+- 会话内可独立开关「AI 回复自动语音播报」
 
 ### 用户系统
 - 邮箱注册 / 登录（JWT 认证，支持短信验证码式邮箱验证）
+- 用户名限普通字符串（字母、数字、下划线），注册后与邮箱一样不可修改
+- 独立管理后台 `/admin`（管理员登录、用户与对话审计）
 - 云端对话存档
 - 本地存储兼容模式
 
 ### 个性化设置
-- 自定义头像和背景
+- 自定义头像和背景（背景支持「完全可见 / 覆盖背景」两种展示方式）
 - 消息气泡透明度调节
+- 会话级独立配置：AI / 用户头像、AI 采样参数（温度、频率惩罚、存在惩罚）、自动播报
 - 响应式设计，支持移动端
 
 ## 项目结构
@@ -51,15 +65,18 @@ chatbot-web/
 │   ├── .gitignore          # 忽略本地敏感配置（.env）
 │   ├── routes/             # 路由层，按业务划分的接口
 │   │   ├── auth.py         # 认证：注册/登录/验证码/改密
-│   │   ├── chat.py         # 聊天与识图
+│   │   ├── chat.py         # 聊天与识图、提示词工具
 │   │   ├── audio.py        # 语音识别与合成
 │   │   ├── conversation.py # 对话存档
 │   │   ├── provider.py     # 模型供应商与密钥管理
 │   │   ├── persona.py      # 人设模板
 │   │   ├── settings.py     # 系统设置
+│   │   ├── image.py        # AI 图片生成
+│   │   ├── admin.py        # 管理后台
 │   │   └── upload.py       # 图片上传
 │   └── services/           # 服务层，业务逻辑与安全处理
 │       ├── ai_service.py         # AI 调用封装与 SSRF 防护
+│       ├── agnes_image.py        # 图片生成调用封装
 │       ├── email_service.py      # 邮件发送
 │       ├── html_sanitize.py      # 输出 HTML 消毒
 │       ├── markdown_streamer.py  # 流式渲染
@@ -76,14 +93,17 @@ chatbot-web/
         ├── App.vue         # 根组件
         ├── router/         # 路由配置
         ├── views/          # 页面
-        │   └── Home.vue    # 主页
+        │   ├── Home.vue            # 主页
+        │   ├── AdminLogin.vue      # 管理后台登录
+        │   └── AdminBackend.vue    # 管理后台
         ├── components/     # 组件
         │   ├── AuthModal.vue            # 登录/注册
         │   ├── ChatArea.vue             # 聊天区
         │   ├── ConversationSettings.vue # 会话设置
-        │   ├── ImageUpload.vue          # 图片上传
+        │   ├── PromptToolPanel.vue      # 提示词工具
         │   ├── PersonaPanel.vue         # 人设模板面板
         │   ├── ProviderPanel.vue        # 供应商配置面板
+        │   ├── AdminPanel.vue           # 管理后台面板
         │   ├── Sidebar.vue              # 侧边栏
         │   ├── SystemSettings.vue       # 系统设置
         │   └── VoiceInput.vue           # 语音输入
@@ -161,6 +181,13 @@ SENDER_NAME=AI 聊天助手
 | POST | `/api/chat/vision` | 识图聊天（SSE） |
 | GET | `/api/chat/models` | 获取模型列表 |
 | GET | `/api/chat/status` | 聊天服务状态 |
+| GET | `/api/chat/prompt-tool` | 提示词工具配置（候选模型/默认提示词） |
+| POST | `/api/chat/prompt-tool` | 生成人物设定 / 图片提示词 |
+
+### 图片生成
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/image/generate` | 文生图 / 图生图 |
 
 ### 语音相关
 | 方法 | 路径 | 说明 |
@@ -199,7 +226,18 @@ SENDER_NAME=AI 聊天助手
 |------|------|------|
 | GET | `/api/settings` | 获取系统设置 |
 | PUT | `/api/settings` | 更新系统设置 |
-| PUT | `/api/settings/profile` | 更新个人资料（头像等） |
+| PUT | `/api/settings/profile` | 更新个人资料（头像等；用户名与邮箱注册后不可修改） |
+
+### 管理后台
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/admin/login` | 管理后台登录 |
+| GET | `/api/admin/me` | 当前管理员信息 |
+| GET | `/api/admin/stats` | 平台概览统计 |
+| GET | `/api/admin/users` | 用户列表 |
+| GET | `/api/admin/users/:id/conversations` | 指定用户的对话列表 |
+| GET | `/api/admin/conversations/:id/messages` | 指定对话的消息内容 |
+| GET | `/api/admin/conversations/:id/export` | 导出指定对话 |
 
 ### 文件上传
 | 方法 | 路径 | 说明 |
@@ -234,9 +272,10 @@ SENDER_NAME=AI 聊天助手
 ## 使用说明
 
 1. 启动后端和前端服务
-2. 访问前端页面，注册账号或使用默认账号登录
-3. 进入设置，添加你的 AI 供应商
-4. 开始聊天
+2. 访问前端页面，注册账号（用户名仅限字母、数字、下划线，注册后不可修改）并登录
+3. 进入「模型配置」添加你的 AI 供应商（聊天、语音、图片生成可分别配置）
+4. 开始聊天，或使用提示词工具生成人物设定 / 图片提示词
+5. 管理后台入口为 `/admin`，需要使用 `.env` 中配置的 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录
 
 ## License
 
