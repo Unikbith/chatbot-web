@@ -264,6 +264,16 @@ def chat():
     presence_penalty = data.get('presence_penalty', settings.presence_penalty)
     top_p = data.get('top_p', settings.top_p)
 
+    # 设置行异常（历史数据/直插库导致 NULL）时回退默认值，避免下方数值钳制崩溃
+    if temperature is None:
+        temperature = 0.8
+    if frequency_penalty is None:
+        frequency_penalty = 0.0
+    if presence_penalty is None:
+        presence_penalty = 0.0
+    if top_p is None:
+        top_p = 0.95
+
     # 获取提供商
     provider = _get_chat_provider(user_id, provider_id)
     if not provider:
