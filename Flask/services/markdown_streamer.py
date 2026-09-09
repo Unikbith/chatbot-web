@@ -77,6 +77,17 @@ class MarkdownStreamer:
         return ""
 
 
+def render_markdown(text):
+    """将一段 Markdown 渲染为经过白名单过滤的 HTML（流结束后一次性渲染）"""
+    if not text:
+        return ''
+    try:
+        md = markdown.Markdown(extensions=['extra', 'nl2br'])
+    except Exception:
+        md = markdown.Markdown(extensions=['extra'])
+    return sanitize_html(md.convert(text))
+
+
 def strip_html_to_text(html_text):
     """将 HTML 还原为纯文本，供模型续写/后续对话使用"""
     if not html_text:
@@ -115,6 +126,11 @@ def sse_reasoning(text):
 
 def sse_done():
     return "data: [DONE]\n\n"
+
+
+def sse_html(html_text):
+    """构造最终渲染结果的 SSE 消息（HTML，前端据此替换流式原文）"""
+    return f"data: {json.dumps({'choices': [{'delta': {'html': html_text}}]}, ensure_ascii=False)}\n\n"
 
 
 import json

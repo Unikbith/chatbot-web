@@ -7,16 +7,17 @@ from extensions import db
 from models import ModelProvider, Conversation, Message, PersonaTemplate, UserSettings
 from services.ai_service import AIService, FreeAPIProvider
 from services.markdown_streamer import (
-    MarkdownStreamer, strip_html_to_text,
-    sse_content, sse_reasoning, sse_done
+    strip_html_to_text,
+    render_markdown,
+    sse_content, sse_reasoning, sse_done, sse_html
 )
 from services.upload_guard import check_upload, detect_image_type, MAX_IMAGE_SIZE
 
 chat_bp = Blueprint('chat', __name__, url_prefix='/api/chat')
 
 
-def iter_sse_content(response, full_content_holder, streamer, reasoning_holder, model_holder=None):
-    """遍历 API 流式响应，提取正文和思考过程。"""
+def iter_sse_content(response, full_content_holder, reasoning_holder, model_holder=None):
+    """遍历 API 流式响应，原文逐块透传（增量展示），思考过程单独下发。"""
     new_content = ""
     finish_reason = None
 
@@ -49,17 +50,13 @@ def iter_sse_content(response, full_content_holder, streamer, reasoning_holder, 
                     if content:
                         new_content += content
                         full_content_holder[0] += content
-                        for html_frag in streamer.feed(content):
-                            yield sse_content(html_frag)
+                        # 输出原文增量而非整段 Markdown，真正实现逐 token 流式
+                        yield sse_content(content)
                 except (json.JSONDecodeError, KeyError, IndexError):
                     pass
     except GeneratorExit:
         print("[客户端断开] 停止生成")
         raise
-
-    remaining = streamer.flush()
-    if remaining:
-        yield sse_content(remaining)
 
     return new_content, finish_reason
 
@@ -329,7 +326,6 @@ def chat():
         full_content_holder = [""]
         reasoning_holder = [""]
         model_holder = [""]
-        streamer = MarkdownStreamer()
 
         try:
             model_name = effective_model or (
@@ -363,9 +359,11 @@ def chat():
                 return
 
             new_content, finish_reason = yield from iter_sse_content(
-                response, full_content_holder, streamer, reasoning_holder, model_holder
+                response, full_content_holder, reasoning_holder, model_holder
             )
             full_content = full_content_holder[0]
+            # 流结束后一次性下发渲染好的（含白名单过滤）完整 HTML，前端替换流式原文
+            yield sse_html(render_markdown(full_content))
             yield sse_done()
 
             # 保存 AI 回复到对话（用户消息已在请求开始时就已落库）
@@ -467,7 +465,6 @@ def vision_chat():
         full_content_holder = [""]
         reasoning_holder = [""]
         model_holder = [""]
-        streamer = MarkdownStreamer()
 
         try:
             response, error = AIService.vision_chat(
@@ -493,8 +490,9 @@ def vision_chat():
                 return
 
             yield from iter_sse_content(
-                response, full_content_holder, streamer, reasoning_holder, model_holder
+                response, full_content_holder, reasoning_holder, model_holder
             )
+            yield sse_html(render_markdown(full_content_holder[0]))
             yield sse_done()
 
             # 落库 AI 回复：识图对话同样保存到会话记录（用户消息已在请求开始时落库）
