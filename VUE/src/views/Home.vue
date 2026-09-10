@@ -16,8 +16,8 @@ import SystemSettings from '../components/SystemSettings.vue'
 import PersonaPanel from '../components/PersonaPanel.vue'
 import ConversationSettings from '../components/ConversationSettings.vue'
 
-import defaultUserAvatar from '../assets/images/夏目贵志.jpg'
-import defaultAiAvatar from '../assets/images/加藤惠.jpg'
+import defaultUserAvatar from '../assets/images/avatar-takashi.jpg'
+import defaultAiAvatar from '../assets/images/avatar-megumi.jpg'
 
 const sidebarRef = ref(null)
 const chatAreaRef = ref(null)

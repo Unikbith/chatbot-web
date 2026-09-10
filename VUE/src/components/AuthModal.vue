@@ -338,9 +338,6 @@ const handleSubmit = async () => {
       <p v-if="!inForgot" class="auth-subtitle">
         {{ isLogin ? '欢迎回来，登录以继续聊天' : '创建账号，开启角色对话之旅' }}
       </p>
-      <p v-else class="auth-subtitle">
-        输入邮箱与验证码，找回你的账号密码
-      </p>
 
       <!-- 登录 / 注册 -->
       <el-form v-if="!inForgot" @submit.prevent="handleSubmit" class="auth-form">
@@ -439,17 +436,12 @@ const handleSubmit = async () => {
         </el-button>
       </el-form>
 
-      <div class="toggle-text">
+      <div class="toggle-text" v-if="!inForgot">
         {{ isLogin ? '还没有账号？' : '已有账号？' }}
         <span class="toggle-link" @click="toggleMode">
           {{ isLogin ? '立即注册' : '去登录' }}
         </span>
         <span v-if="isLogin" class="forgot-link" @click="goForgot">忘记密码？</span>
-      </div>
-
-      <div v-if="!isLogin" class="register-tip">
-        <el-icon><InfoFilled /></el-icon>
-        <span>注册需要验证邮箱，未配置邮件服务时验证码为 123456</span>
       </div>
 
       <!-- 忘记密码：第一步 邮箱+验证码 -->
@@ -493,6 +485,9 @@ const handleSubmit = async () => {
         >
           下一步
         </el-button>
+        <div class="forgot-back">
+          <span class="toggle-link" @click="backToLogin">返回登录</span>
+        </div>
       </div>
 
       <!-- 忘记密码：第二步 设置新密码 -->
@@ -674,18 +669,6 @@ const handleSubmit = async () => {
 
 .toggle-link:hover {
   text-decoration: underline;
-}
-
-.register-tip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #909399;
-  margin-top: 16px;
-  padding: 8px 12px;
-  background: #f4f4f5;
-  border-radius: 6px;
 }
 
 .forgot-link {
