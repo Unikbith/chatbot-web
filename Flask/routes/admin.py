@@ -148,6 +148,7 @@ def list_users():
             'username': u.username,
             'email': u.email,
             'avatar': u.avatar,
+            'gender': u.gender,
             'is_active': u.is_active,
             'created_at': u.created_at.isoformat() if u.created_at else None,
             'conversation_count': len(conv_ids),

@@ -23,6 +23,7 @@
               {{ persona.name }}
               <el-tag v-if="persona.is_default" size="small" type="success" effect="light" class="default-tag">默认</el-tag>
               <el-tag v-if="persona.is_system" size="small" type="info" effect="light" class="system-tag">系统</el-tag>
+              <el-tag v-if="persona.persona_type === 'user'" size="small" type="warning" effect="light" class="system-tag">用户</el-tag>
             </div>
             <div class="persona-desc">{{ persona.description || '暂无描述' }}</div>
           </div>
@@ -114,6 +115,12 @@
         <el-form-item v-if="!editingPersona || !editingPersona.is_system">
           <el-checkbox v-model="form.is_default">设为默认角色</el-checkbox>
         </el-form-item>
+        <el-form-item label="人设类型">
+          <el-radio-group v-model="form.persona_type">
+            <el-radio-button value="ai">AI 人设</el-radio-button>
+            <el-radio-button value="user">用户人设</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editDialogVisible = false">取消</el-button>
@@ -153,6 +160,7 @@ const defaultForm = {
   system_prompt: '',
   greeting: '',
   is_default: false,
+  persona_type: 'ai',
 }
 
 const form = reactive({ ...defaultForm })
@@ -202,6 +210,7 @@ function editPersona(persona) {
     system_prompt: persona.system_prompt,
     greeting: persona.greeting || '',
     is_default: persona.is_default,
+    persona_type: persona.persona_type || 'ai',
   })
   editDialogVisible.value = true
 }

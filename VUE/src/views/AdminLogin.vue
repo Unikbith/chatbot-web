@@ -2,7 +2,7 @@
   <div class="admin-login-page">
     <div class="login-card">
       <div class="brand">
-        <img :src="brandIcon" class="brand-img" alt="ChatBot" />
+        <img :src="brandIcon" class="brand-img" alt="Confide" />
         <span class="brand-text">{{ t('管理后台', 'Admin Panel') }}</span>
       </div>
       <p class="subtitle">{{ t('管理员专用登录入口（账号密码由服务端 .env 配置）', 'Admin-only login. Credentials come from the server .env') }}</p>
@@ -43,7 +43,7 @@
 
       <div class="back-link">
         <el-button link type="primary" @click="$router.push('/')">
-          {{ t('返回 ChatBot 主界面', 'Back to ChatBot') }}
+          {{ t('返回 Confide 主界面', 'Back to Confide') }}
         </el-button>
       </div>
     </div>

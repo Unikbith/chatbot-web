@@ -182,6 +182,15 @@
             </div>
 
             <div class="setting-item">
+              <div class="setting-label">{{ t('性别', 'Gender') }}</div>
+              <el-radio-group v-model="localGender" @change="handleGenderChange">
+                <el-radio-button value="男">男</el-radio-button>
+                <el-radio-button value="女">女</el-radio-button>
+                <el-radio-button value="神秘">神秘</el-radio-button>
+              </el-radio-group>
+            </div>
+
+            <div class="setting-item">
               <div class="setting-label">{{ t('修改密码', 'Change Password') }}</div>
               <el-button size="small" @click="showPwdDialog = true">{{ t('修改密码', 'Change Password') }}</el-button>
             </div>
@@ -337,6 +346,24 @@ async function sendPwdCode() {
 const showDeleteDialog = ref(false)
 const deleteLoading = ref(false)
 const deleteForm = reactive({ password: '' })
+
+const localGender = ref(props.user?.gender || '神秘')
+
+watch(() => props.user, (u) => {
+  if (u?.gender) localGender.value = u.gender
+})
+
+async function handleGenderChange(val) {
+  try {
+    const res = await settingsApi.updateProfile({ gender: val })
+    if (res.code === 200) {
+      emit('user-updated', { ...props.user, gender: val })
+      ElMessage.success(t('性别已更新', 'Gender updated'))
+    }
+  } catch (e) {
+    ElMessage.error(t('更新失败', 'Update failed'))
+  }
+}
 
 const defaultSettings = {
   theme: 'auto',

@@ -41,7 +41,8 @@ const props = defineProps({
   settings: { type: Object, default: null },
   isFreeApi: { type: Boolean, default: false },
   autoPlayVoice: { type: Boolean, default: false },
-  loggedIn: { type: Boolean, default: false }
+  loggedIn: { type: Boolean, default: false },
+  personaGreeting: { type: String, default: '' }
 });
 
 const emit = defineEmits([
@@ -650,10 +651,10 @@ onUnmounted(() => {
       <!-- 空对话开场白：尚未产生 AI 回复时始终展示，切换对话/发送消息也不会突兀消失 -->
       <div v-if="showWelcome" class="chat-welcome">
         <div class="welcome-avatar">
-          <img v-if="aiAvatar" :src="aiAvatar" class="avatar-img" alt="AI" />
+          <img v-if="aiAvatar" :src="aiAvatar" class="avatar-img" alt="AI" style="cursor: pointer" @click="previewImage(aiAvatar)" />
           <span v-else>AI</span>
         </div>
-        <div class="welcome-text">{{ greetingText() }}</div>
+        <div class="welcome-text">{{ props.personaGreeting || greetingText() }}</div>
       </div>
 
       <el-scrollbar ref="messageListRef" class="message-scrollbar">
@@ -671,12 +672,16 @@ onUnmounted(() => {
                   :src="aiAvatar"
                   class="avatar-img"
                   alt="AI"
+                  style="cursor: pointer"
+                  @click="previewImage(aiAvatar)"
                 />
                 <img
                   v-else-if="item.role === 'user' && userAvatar"
                   :src="userAvatar"
                   class="avatar-img"
                   alt="我"
+                  style="cursor: pointer"
+                  @click="previewImage(userAvatar)"
                 />
                 <span v-else>{{ item.role === 'assistant' ? 'AI' : t('我', 'Me') }}</span>
               </div>

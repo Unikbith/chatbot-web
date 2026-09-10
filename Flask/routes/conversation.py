@@ -155,6 +155,11 @@ def update_conversation(conv_id):
         if perid is not None and not PersonaTemplate.query.filter_by(id=perid, user_id=user_id).first():
             return jsonify({'code': 400, 'message': '无效的角色模板'}), 400
         conv.persona_id = perid
+    if 'user_persona_id' in data:
+        upid = data['user_persona_id']
+        if upid is not None and not PersonaTemplate.query.filter_by(id=upid, user_id=user_id).first():
+            return jsonify({'code': 400, 'message': '无效的用户人设'}), 400
+        conv.user_persona_id = upid
     if 'system_prompt' in data:
         conv.system_prompt = data['system_prompt']
     if 'temperature' in data:

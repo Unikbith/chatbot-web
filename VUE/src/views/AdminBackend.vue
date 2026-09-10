@@ -3,8 +3,8 @@
     <!-- 顶部导航 -->
     <header class="admin-header">
       <div class="header-brand">
-        <img :src="brandIcon" class="brand-img" alt="ChatBot" />
-        <span class="brand-text">{{ t('ChatBot 管理后台', 'ChatBot Admin') }}</span>
+        <img :src="brandIcon" class="brand-img" alt="Confide" />
+        <span class="brand-text">{{ t('Confide 管理后台', 'Confide Admin') }}</span>
       </div>
       <div class="header-right">
         <span v-if="adminName" class="admin-name">
@@ -35,7 +35,14 @@
 
       <div class="admin-toolbar">
         <span class="admin-title">{{ t('用户数据', 'User Data') }}</span>
-        <el-button size="small" :icon="Refresh" @click="loadAll">{{ t('刷新', 'Refresh') }}</el-button>
+        <div class="toolbar-actions">
+          <el-select v-model="genderFilter" clearable placeholder="性别筛选" size="small" style="width: 120px" @change="applyGenderFilter">
+            <el-option label="男" value="男" />
+            <el-option label="女" value="女" />
+            <el-option label="神秘" value="神秘" />
+          </el-select>
+          <el-button size="small" :icon="Refresh" @click="loadAll">{{ t('刷新', 'Refresh') }}</el-button>
+        </div>
       </div>
 
       <el-table
@@ -76,6 +83,9 @@
 
         <el-table-column prop="username" :label="t('用户名', 'Username')" min-width="110" show-overflow-tooltip />
         <el-table-column prop="email" :label="t('邮箱', 'Email')" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="gender" :label="t('性别', 'Gender')" width="80" align="center">
+          <template #default="{ row }">{{ row.gender || '-' }}</template>
+        </el-table-column>
         <el-table-column :label="t('状态', 'Status')" width="80" align="center">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'danger'" size="small">{{ row.is_active ? t('正常', 'Active') : t('停用', 'Disabled') }}</el-tag>
@@ -112,6 +122,8 @@ const stats = ref({})
 const users = ref([])
 const statsLoading = ref(false)
 const usersLoading = ref(false)
+const genderFilter = ref('')
+const allUsers = ref([])
 
 function formatTime(iso) {
   if (!iso) return '-'
@@ -138,7 +150,8 @@ async function loadUsers() {
   try {
     const res = await adminApi.users()
     if (res.code === 200) {
-      users.value = (res.data || []).map(u => ({ ...u, _conversations: null, _loading: false }))
+      allUsers.value = (res.data || []).map(u => ({ ...u, _conversations: null, _loading: false }))
+      applyGenderFilter()
     } else if (res.code === 403) {
       ElMessage.warning(t('无管理员权限', 'No admin permission'))
     }
@@ -146,6 +159,14 @@ async function loadUsers() {
     ElMessage.error(t('加载用户失败', 'Failed to load users'))
   } finally {
     usersLoading.value = false
+  }
+}
+
+function applyGenderFilter() {
+  if (!genderFilter.value) {
+    users.value = [...allUsers.value]
+  } else {
+    users.value = allUsers.value.filter(u => u.gender === genderFilter.value)
   }
 }
 
@@ -321,6 +342,12 @@ onMounted(async () => {
   font-size: 15px;
   font-weight: 600;
   color: #4a3520;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .admin-table {

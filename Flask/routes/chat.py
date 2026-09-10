@@ -310,6 +310,19 @@ def chat():
         db.session.commit()
         conversation_id = conv.id
 
+    # 持久化开场白：对话无 AI 消息时，将角色开场白作为首条 assistant 消息写入
+    if conv:
+        has_ai_msg = Message.query.filter_by(conversation_id=conv.id, role='assistant').first()
+        if not has_ai_msg:
+            greeting_persona = conv.persona or (
+                PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first() if persona_id else None
+            ) or PersonaTemplate.query.filter_by(user_id=user_id, is_default=True).first()
+            if greeting_persona and greeting_persona.greeting:
+                db.session.add(Message(
+                    conversation_id=conv.id, role='assistant', content=greeting_persona.greeting
+                ))
+                db.session.commit()
+
     # 立即持久化最新用户消息：AI 仍在生成时切换对话也不丢消息。
     # 通过与已存的最末用户消息比对去重，重试/重新生成时不会重复入库。
     if conv:
@@ -343,6 +356,15 @@ def chat():
 
     # 插入系统提示词
     final_prompt = _get_system_prompt(conv, user_id, persona_id, system_prompt)
+
+    # 注入用户人设：如果对话设置了用户人设，将其拼接到系统提示词最前面
+    if conv and conv.user_persona_id:
+        user_persona = PersonaTemplate.query.filter_by(
+            id=conv.user_persona_id, user_id=user_id
+        ).first()
+        if user_persona and user_persona.system_prompt:
+            final_prompt = user_persona.system_prompt + '\n\n' + (final_prompt or '')
+
     if final_prompt and (not formatted_messages or formatted_messages[0].get('role') != 'system'):
         formatted_messages.insert(0, {
             'role': 'system',

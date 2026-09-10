@@ -49,25 +49,53 @@
           </div>
         </div>
 
-        <!-- 人设 -->
+        <!-- AI 人设 -->
         <div class="cv-section">
-          <div class="cv-title">{{ t('人设', 'Persona') }}</div>
+          <div class="cv-title">{{ t('AI 人设', 'AI Persona') }}</div>
           <div class="cv-row">
             <el-select
               v-model="form.persona_id"
               clearable
-              :placeholder="t('使用默认人设', 'Use default persona')"
+              :placeholder="t('使用默认AI人设', 'Use default AI persona')"
               style="width: 100%"
             >
               <el-option
-                v-for="p in personas"
+                v-for="p in aiPersonas"
                 :key="p.id"
-                :label="p.is_default ? t('默认人设') + ' · ' + p.name : p.name"
+                :label="p.is_default ? t('默认') + ' · ' + p.name : p.name"
                 :value="p.id"
               >
                 <div class="persona-opt">
                   <el-avatar :size="24" :src="p.avatar" class="opt-avatar">
                     <el-icon><MagicStick /></el-icon>
+                  </el-avatar>
+                  <span>{{ p.name }}</span>
+                </div>
+              </el-option>
+            </el-select>
+          </div>
+        </div>
+
+        <!-- 用户人设 -->
+        <div class="cv-section">
+          <div class="cv-title">{{ t('用户人设', 'User Persona') }}</div>
+          <p class="cv-hint-text">{{ t('用户人设会在每次对话开始时注入到消息最前端', 'User persona is injected at the start of each conversation') }}</p>
+          <div class="cv-row">
+            <el-select
+              v-model="form.user_persona_id"
+              clearable
+              :placeholder="t('不使用用户人设', 'No user persona')"
+              style="width: 100%"
+            >
+              <el-option
+                v-for="p in userPersonas"
+                :key="p.id"
+                :label="p.name"
+                :value="p.id"
+              >
+                <div class="persona-opt">
+                  <el-avatar :size="24" :src="p.avatar" class="opt-avatar">
+                    <el-icon><User /></el-icon>
                   </el-avatar>
                   <span>{{ p.name }}</span>
                 </div>
@@ -251,7 +279,8 @@ import { t } from '../i18n'
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   conversation: { type: Object, default: null },
-  personas: { type: Array, default: () => [] },
+  aiPersonas: { type: Array, default: () => [] },
+  userPersonas: { type: Array, default: () => [] },
   configs: { type: Array, default: () => [] },
   generalOpacity: { type: Number, default: 0.9 },
   userAvatar: { type: String, default: '' },
@@ -272,13 +301,14 @@ const selectedProvider = computed(() =>
 function providerModels(p) {
   return (p?.models || []).filter(m => m.enabled !== false)
 }
-const form = reactive({ provider_id: null, model_id: null, persona_id: null, ai_avatar: null, user_avatar: null, background_image: null, background_cover: 'contain', message_opacity: null, temperature: null, frequency_penalty: null, presence_penalty: null, auto_play_voice: false })
+const form = reactive({ provider_id: null, model_id: null, persona_id: null, user_persona_id: null, ai_avatar: null, user_avatar: null, background_image: null, background_cover: 'contain', message_opacity: null, temperature: null, frequency_penalty: null, presence_penalty: null, auto_play_voice: false })
 
 function resetForm() {
   const conv = props.conversation || {}
   form.provider_id = conv.provider_id != null ? conv.provider_id : null
   form.model_id = conv.model_id || null
   form.persona_id = conv.persona_id != null ? conv.persona_id : null
+  form.user_persona_id = conv.user_persona_id != null ? conv.user_persona_id : null
   form.ai_avatar = conv.ai_avatar || null
   form.user_avatar = conv.user_avatar || null
   form.background_image = conv.background_image || null
@@ -354,6 +384,7 @@ function save() {
     provider_id: form.provider_id != null ? form.provider_id : null,
     model_id: form.model_id || null,
     persona_id: form.persona_id != null ? form.persona_id : null,
+    user_persona_id: form.user_persona_id != null ? form.user_persona_id : null,
     ai_avatar: form.ai_avatar || null,
     user_avatar: form.user_avatar || null,
     background_image: form.background_image || null,
@@ -455,6 +486,7 @@ function save() {
 }
 .bg-placeholder { font-size: 12px; color: var(--text-muted); }
 .cv-hint { font-size: 11px; color: var(--text-muted); }
+.cv-hint-text { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
 
 .slider-control { display: flex; align-items: center; }
 .slider-value {

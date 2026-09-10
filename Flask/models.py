@@ -13,6 +13,7 @@ class User(db.Model):
     email = db.Column(db.String(120), unique=True, nullable=False, index=True)  # 邮箱必填
     avatar = db.Column(db.String(500), nullable=True)  # 用户头像
     ai_avatar = db.Column(db.String(500), nullable=True)  # AI 头像
+    gender = db.Column(db.String(10), nullable=True)  # 性别：男/女/神秘
     password_hash = db.Column(db.String(255), nullable=False)
     is_active = db.Column(db.Boolean, default=True)
     token_version = db.Column(db.Integer, default=0)  # 令牌版本：改密/注销时自增以吊销旧 token
@@ -38,6 +39,7 @@ class User(db.Model):
             'email': self.email,
             'avatar': self.avatar,
             'ai_avatar': self.ai_avatar,
+            'gender': self.gender,
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
@@ -136,6 +138,7 @@ class PersonaTemplate(db.Model):
     greeting = db.Column(db.Text, nullable=True)  # 开场问候语
     is_default = db.Column(db.Boolean, default=False)  # 是否为默认角色
     is_system = db.Column(db.Boolean, default=False)  # 是否系统内置（不可删除）
+    persona_type = db.Column(db.String(10), default='ai')  # ai / user
     weight = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -150,6 +153,7 @@ class PersonaTemplate(db.Model):
             'greeting': self.greeting,
             'is_default': self.is_default,
             'is_system': self.is_system,
+            'persona_type': self.persona_type or 'ai',
             'weight': self.weight,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
@@ -290,7 +294,8 @@ class Conversation(db.Model):
     title = db.Column(db.String(200), default='新对话')
     provider_id = db.Column(db.Integer, db.ForeignKey('model_providers.id'), nullable=True)
     model_id = db.Column(db.String(200), nullable=True)  # 对话使用的模型 ID
-    persona_id = db.Column(db.Integer, db.ForeignKey('persona_templates.id'), nullable=True)  # 使用的角色模板
+    persona_id = db.Column(db.Integer, db.ForeignKey('persona_templates.id'), nullable=True)  # 使用的角色模板（AI人设）
+    user_persona_id = db.Column(db.Integer, db.ForeignKey('persona_templates.id'), nullable=True)  # 用户人设
     is_pinned = db.Column(db.Boolean, default=False)
     system_prompt = db.Column(db.Text, nullable=True)  # 单对话自定义提示词（覆盖模板）
     background_image = db.Column(db.String(500), nullable=True)  # 对话独立背景（覆盖通用）
@@ -308,7 +313,8 @@ class Conversation(db.Model):
 
     messages = db.relationship('Message', backref='conversation', lazy='dynamic',
                                cascade='all, delete-orphan', order_by='Message.created_at')
-    persona = db.relationship('PersonaTemplate', backref='conversations')
+    persona = db.relationship('PersonaTemplate', backref='conversations', foreign_keys=[persona_id])
+    user_persona = db.relationship('PersonaTemplate', foreign_keys=[user_persona_id])
 
     def to_dict(self):
         return {
@@ -317,6 +323,7 @@ class Conversation(db.Model):
             'provider_id': self.provider_id,
             'model_id': self.model_id,
             'persona_id': self.persona_id,
+            'user_persona_id': self.user_persona_id,
             'is_pinned': self.is_pinned,
             'system_prompt': self.system_prompt,
             'background_image': self.background_image,

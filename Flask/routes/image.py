@@ -117,9 +117,9 @@ def generate():
     if resolution and resolution not in IMAGE_RESOLUTIONS:
         return jsonify({'code': 400, 'message': f'不支持的分辨率: {resolution}'}), 400
     aspect_ratio = data.get('aspect_ratio')
-    # 使用共享免费 Key 生图/改图时默认 9:16（竖版，未单独指定比例）
+    # 使用共享免费 Key 生图/改图时默认 2:3（竖版，未单独指定比例）
     if aspect_ratio is None and is_free:
-        aspect_ratio = '9:16'
+        aspect_ratio = '2:3'
     if aspect_ratio and aspect_ratio not in IMAGE_ASPECT_RATIOS:
         return jsonify({'code': 400, 'message': f'不支持的长宽比: {aspect_ratio}'}), 400
     quality = data.get('quality')

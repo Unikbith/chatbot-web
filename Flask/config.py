@@ -40,7 +40,7 @@ class Config:
     SMTP_PORT = int(os.getenv('SMTP_PORT', '465'))
     SMTP_USER = os.getenv('SMTP_USER', '')
     SMTP_PASS = os.getenv('SMTP_PASS', '')
-    SENDER_NAME = os.getenv('SENDER_NAME', 'ChatBot')
+    SENDER_NAME = os.getenv('SENDER_NAME', '心语')
 
     # 支持的 API 类型
     SUPPORTED_API_TYPES = ['openai', 'deepseek', 'zhipu', 'qwen', 'custom']

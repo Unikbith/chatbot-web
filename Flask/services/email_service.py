@@ -16,7 +16,7 @@ class EmailService:
     SMTP_PORT = int(os.getenv('SMTP_PORT', '465'))
     SMTP_USER = os.getenv('SMTP_USER', '')  # QQ 邮箱地址（生产务必通过 .env 配置，禁止写死）
     SMTP_PASS = os.getenv('SMTP_PASS', '')  # QQ 邮箱授权码（生产务必通过 .env 配置，禁止写死）
-    SENDER_NAME = os.getenv('SENDER_NAME', 'ChatBot')
+    SENDER_NAME = os.getenv('SENDER_NAME', '心语')
 
     @classmethod
     def is_configured(cls):

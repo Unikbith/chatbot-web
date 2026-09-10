@@ -19,7 +19,7 @@ const routes = [
     path: '/chatbotAdmin',
     name: 'AdminBackend',
     component: () => import('@/views/AdminBackend.vue'),
-    meta: { title: 'ChatBot 管理后台' }
+    meta: { title: 'Confide 管理后台' }
   },
   {
     path: '/:pathMatch(.*)*',

@@ -33,6 +33,7 @@ const form = ref({
   password: '',
   confirmPassword: '',
   code: '',
+  gender: '神秘',
 });
 
 const forgotForm = ref({
@@ -44,7 +45,7 @@ const forgotForm = ref({
 
 watch(() => props.modelValue, (val) => {
   if (!val) {
-    form.value = { username: '', email: '', password: '', confirmPassword: '', code: '' };
+    form.value = { username: '', email: '', password: '', confirmPassword: '', code: '', gender: '神秘' };
     isLogin.value = true;
     inForgot.value = false;
     forgotStep.value = 1;
@@ -278,6 +279,7 @@ const handleSubmit = async () => {
         email: form.value.email,
         password: form.value.password,
         code: form.value.code,
+        gender: form.value.gender,
       });
     }
 
@@ -314,8 +316,8 @@ const handleSubmit = async () => {
     <template #header>
       <div class="auth-header">
         <div class="auth-logo">
-          <img :src="brandIcon" class="logo-img" alt="ChatBot" />
-          <span class="logo-text">ChatBot</span>
+          <img :src="brandIcon" class="logo-img" alt="Confide" />
+          <span class="logo-text">Confide</span>
         </div>
         <el-button class="close-btn" circle :icon="Close" @click="handleClose" />
       </div>
@@ -423,6 +425,17 @@ const handleSubmit = async () => {
             @keyup.enter="handleSubmit"
             class="auth-input"
           />
+        </el-form-item>
+
+        <el-form-item v-if="!isLogin">
+          <div class="gender-select">
+            <span class="gender-label">性别</span>
+            <el-radio-group v-model="form.gender">
+              <el-radio-button value="男">男</el-radio-button>
+              <el-radio-button value="女">女</el-radio-button>
+              <el-radio-button value="神秘">神秘</el-radio-button>
+            </el-radio-group>
+          </div>
         </el-form-item>
 
         <el-button
@@ -701,5 +714,17 @@ const handleSubmit = async () => {
   text-align: center;
   margin-top: 16px;
   font-size: 14px;
+}
+
+.gender-select {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+.gender-label {
+  font-size: 14px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 </style>

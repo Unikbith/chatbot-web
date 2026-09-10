@@ -16,7 +16,7 @@ import SystemSettings from '../components/SystemSettings.vue'
 import PersonaPanel from '../components/PersonaPanel.vue'
 import ConversationSettings from '../components/ConversationSettings.vue'
 
-import defaultUserAvatar from '../assets/images/avatar-takashi.jpg'
+import defaultUserAvatar from '../assets/images/avatar-user.jpg'
 import defaultAiAvatar from '../assets/images/avatar-megumi.jpg'
 
 const sidebarRef = ref(null)
@@ -44,6 +44,8 @@ const temperature = ref(0.8)
 // 角色
 const personas = ref([])
 const currentPersona = ref(null)
+const aiPersonas = computed(() => personas.value.filter(p => (p.persona_type || 'ai') === 'ai'))
+const userPersonas = computed(() => personas.value.filter(p => (p.persona_type || 'ai') === 'user'))
 
 // 对话模型配置列表（用于对话内选择模型、判定已启用配置）
 const chatConfigs = ref([])
@@ -483,6 +485,7 @@ async function handleConvoSettingsSaved(payload) {
       provider_id: payload.provider_id,
       model_id: payload.model_id,
       persona_id: payload.persona_id,
+      user_persona_id: payload.user_persona_id,
       ai_avatar: payload.ai_avatar,
       user_avatar: payload.user_avatar,
       background_image: payload.background_image,
@@ -571,6 +574,7 @@ async function handleConvoSettingsSaved(payload) {
       :auto-play-voice="autoPlayVoice"
       :is-free-api="chatStatus.is_free"
       :logged-in="isLoggedIn"
+      :persona-greeting="currentPersona?.greeting || ''"
       @open-settings="requireLogin(() => settingsVisible = true)"
       @open-provider="requireLogin(() => providerPanelVisible = true)"
       @open-conversation-settings="openConversationSettings"
@@ -610,7 +614,8 @@ async function handleConvoSettingsSaved(payload) {
     <ConversationSettings
       v-model="convoSettingsVisible"
       :conversation="currentConv"
-      :personas="personas"
+      :ai-personas="aiPersonas"
+      :user-personas="userPersonas"
       :configs="chatConfigs"
       :user-avatar="effectiveUserAvatar"
       :general-opacity="userSettings.message_opacity"

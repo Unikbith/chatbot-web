@@ -167,6 +167,10 @@ def _ensure_schema_columns(app):
                     with db.engine.begin() as conn:
                         conn.execute(text('ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0'))
                     print('[迁移] 已为 users 增加 token_version 字段')
+                if 'gender' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE users ADD COLUMN gender VARCHAR(10)"))
+                    print('[迁移] 已为 users 增加 gender 字段')
             # user_settings.background_cover - 背景展示方式（contain/cover）
             if 'user_settings' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('user_settings')}
@@ -193,6 +197,17 @@ def _ensure_schema_columns(app):
                         with db.engine.begin() as conn:
                             conn.execute(text(f'ALTER TABLE conversations ADD COLUMN {cname} {ctype}'))
                         print(f'[迁移] 已为 conversations 增加 {cname} 字段')
+                if 'user_persona_id' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text('ALTER TABLE conversations ADD COLUMN user_persona_id INTEGER'))
+                    print('[迁移] 已为 conversations 增加 user_persona_id 字段')
+            # persona_templates.persona_type - AI/用户人设区分
+            if 'persona_templates' in inspector.get_table_names():
+                cols = {c['name'] for c in inspector.get_columns('persona_templates')}
+                if 'persona_type' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE persona_templates ADD COLUMN persona_type VARCHAR(10) DEFAULT 'ai'"))
+                    print('[迁移] 已为 persona_templates 增加 persona_type 字段')
     except Exception as e:
         print(f'[迁移] schema 检查/补列跳过: {e}')
 

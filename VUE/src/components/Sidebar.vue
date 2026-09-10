@@ -3,7 +3,7 @@
     <!-- 收起时的迷你模式 -->
     <div v-if="collapsed" class="sidebar-mini">
       <div class="mini-logo" @click="toggleCollapse">
-        <img :src="brandIcon" class="brand-img" alt="ChatBot" />
+        <img :src="brandIcon" class="brand-img" alt="Confide" />
       </div>
       <div class="mini-new-chat" @click="createConversation">
         <el-icon><Plus /></el-icon>
@@ -23,8 +23,8 @@
     <template v-else>
       <div class="sidebar-header">
         <div class="logo">
-          <img :src="brandIcon" class="logo-img" alt="ChatBot" />
-          <span class="logo-text">ChatBot</span>
+          <img :src="brandIcon" class="logo-img" alt="Confide" />
+          <span class="logo-text">Confide</span>
         </div>
         <el-button 
           class="collapse-btn" 

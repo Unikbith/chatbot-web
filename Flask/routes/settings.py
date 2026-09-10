@@ -116,9 +116,14 @@ def update_profile():
     
     if 'avatar' in data:
         user.avatar = data['avatar'] or None
-    
+
     if 'ai_avatar' in data:
         user.ai_avatar = data['ai_avatar'] or None
+
+    if 'gender' in data:
+        g = (data['gender'] or '').strip()
+        if g in ('男', '女', '神秘'):
+            user.gender = g
     
     db.session.commit()
     

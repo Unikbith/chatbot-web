@@ -313,7 +313,7 @@ def _agnes_image_schema():
                 help='文生图 / 图生图使用的图像模型',
                 help_en='Text / image-to-image generation model'),
         _select('aspect_ratio', '默认长宽比', 'Default Aspect Ratio',
-                default='1:1', options=IMAGE_ASPECT_RATIOS,
+                default='2:3', options=IMAGE_ASPECT_RATIOS,
                 help='生成图片的长宽比（10 种预设可选）',
                 help_en='Aspect ratio of the image'),
         _select('quality', '默认质量档', 'Default Quality',

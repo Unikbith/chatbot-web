@@ -72,7 +72,8 @@ def create_persona():
         system_prompt=system_prompt,
         greeting=greeting,
         is_default=is_default,
-        is_system=False
+        is_system=False,
+        persona_type=data.get('persona_type', 'ai'),
     )
     db.session.add(persona)
     
@@ -126,6 +127,10 @@ def update_persona(persona_id):
             user_id=user_id, is_default=True
         ).update({'is_default': False})
         persona.is_default = True
+    if 'persona_type' in data:
+        pt = (data['persona_type'] or '').strip()
+        if pt in ('ai', 'user'):
+            persona.persona_type = pt
     
     db.session.commit()
     

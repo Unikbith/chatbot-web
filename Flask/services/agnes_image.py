@@ -115,7 +115,7 @@ def generate_image(provider, prompt, model=None, reference_images=None,
 
     params = provider.get_params() or {}
     res = resolution or params.get('resolution') or '2K'
-    ratio = aspect_ratio or params.get('aspect_ratio') or '1:1'
+    ratio = aspect_ratio or params.get('aspect_ratio') or '2:3'
     q = quality or params.get('quality') or 'auto'
     timeout = int(params.get('timeout') or 120)
 
