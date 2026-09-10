@@ -110,6 +110,8 @@ def get_marketplace_persona(pid):
     d['user_vote'] = vote.vote_type if vote else None
     adopt = MarketplaceAdopt.query.filter_by(persona_id=pid, user_id=user_id).first()
     d['is_adopted'] = adopt is not None
+    d['creator_pseudonym'] = _pseudonym_for(persona.user_id, pid)
+    d['creator_identicon_seed'] = _identicon_seed_for(persona.user_id, pid)
     return jsonify({'code': 200, 'data': d})
 
 
@@ -126,17 +128,13 @@ def publish_persona():
     avatar = data.get('avatar')
 
     if not name or not description or not system_prompt or not greeting or not avatar:
-        return jsonify({'code': 400, 'message': '所有字段均为必填项'}), 400
-    if len(description) < 30:
-        return jsonify({'code': 400, 'message': '描述不得少于30字'}), 400
-    if len(description) > 100:
-        return jsonify({'code': 400, 'message': '描述最多100字'}), 400
-    if len(system_prompt) < 100:
-        return jsonify({'code': 400, 'message': '人设提示词不得少于100字'}), 400
-    if len(system_prompt) > 800:
-        return jsonify({'code': 400, 'message': '人设提示词最多800字'}), 400
+        return jsonify({'code': 400, 'message': '请按规范填写'}), 400
+    if len(description) < 30 or len(description) > 100:
+        return jsonify({'code': 400, 'message': '请按规范填写'}), 400
+    if len(system_prompt) < 100 or len(system_prompt) > 800:
+        return jsonify({'code': 400, 'message': '请按规范填写'}), 400
     if len(greeting) > 50:
-        return jsonify({'code': 400, 'message': '开场白最多50字'}), 400
+        return jsonify({'code': 400, 'message': '请按规范填写'}), 400
 
     persona = PersonaMarketplace(
         user_id=user_id,

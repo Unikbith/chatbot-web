@@ -114,6 +114,14 @@
             </button>
           </div>
           <p class="dl-desc">{{ detailData.description }}</p>
+          <div class="dl-creator-info">
+            <img
+              :src="`https://api.dicebear.com/7.x/identicon/svg?seed=${detailData.creator_identicon_seed}`"
+              class="dl-creator-icon"
+              alt=""
+            />
+            <span class="dl-creator-name">{{ detailData.creator_pseudonym }}</span>
+          </div>
           <div v-if="isCreator" class="dl-creator-actions">
             <el-button size="small" type="danger" plain @click="handleDeleteCard">
               {{ t('删除卡片', 'Delete Card') }}
@@ -610,6 +618,7 @@ function formatDate(ts) {
 
 .card-body {
   padding: 10px 12px 12px;
+  min-height: 70px;
 }
 
 .card-name {
@@ -755,6 +764,25 @@ function formatDate(ts) {
   line-height: 1.5;
   text-align: center;
   margin: 0;
+}
+
+.dl-creator-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.dl-creator-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.dl-creator-name {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .dl-creator-actions {

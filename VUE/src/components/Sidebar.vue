@@ -51,14 +51,17 @@
         </div>
       </div>
       
-      <el-button 
-        class="new-chat-btn" 
-        type="primary" 
-        @click="createConversation"
-      >
-        <el-icon class="btn-icon"><Plus /></el-icon>
-        {{ t('开启新对话', 'New Chat') }}
-      </el-button>
+      <div class="new-chat-row">
+        <el-button
+          class="new-chat-btn"
+          type="primary"
+          @click="createConversation"
+        >
+          <el-icon class="btn-icon"><Plus /></el-icon>
+          {{ t('开启新对话', 'New Chat') }}
+        </el-button>
+        <span class="conv-count">{{ conversations.length }}/10</span>
+      </div>
 
       <!-- 人设列表 -->
       <div class="persona-list-section">
@@ -475,12 +478,27 @@ function openUserMenu() {
 }
 
 .new-chat-btn {
-  margin: 8px 16px 12px;
+  margin: 8px 0 12px;
   height: 40px;
   border-radius: 8px;
   font-size: 14px;
   background: var(--brand-gradient);
   border: none;
+  flex: 1;
+}
+
+.new-chat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px;
+}
+
+.conv-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* 侧边栏内的免费 API 提示条（土陶暖色，适配明暗主题） */

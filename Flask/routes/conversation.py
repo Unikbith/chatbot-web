@@ -88,12 +88,19 @@ def create_conversation():
         if not persona:
             persona_id = None
 
-    # 对话上限10条：超出时自动软删除最早创建的对话（仅统计未删除的）
+    # 对话上限10条：超出时返回提示，前端确认后带 force_delete=true 重新请求
     MAX_CONVERSATIONS = 10
     existing_count = Conversation.query.filter_by(user_id=user_id).filter(
         Conversation.deleted_at.is_(None)
     ).count()
     if existing_count >= MAX_CONVERSATIONS:
+        force = data.get('force_delete', False)
+        if not force:
+            return jsonify({
+                'code': 409,
+                'message': f'最多保存{MAX_CONVERSATIONS}个对话，新建将删除最早的对话',
+                'data': {'count': existing_count, 'max': MAX_CONVERSATIONS}
+            }), 200
         oldest = Conversation.query.filter_by(user_id=user_id).filter(
             Conversation.deleted_at.is_(None)
         ).order_by(

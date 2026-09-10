@@ -313,6 +313,35 @@ async function handleNewChat() {
       temperature: userSettings.temperature,
     })
 
+    if (res.code === 409) {
+      try {
+        await ElMessageBox.confirm(
+          res.message || t('最多保存10个对话，新建将删除最早的对话', 'Max 10 conversations. Creating will delete the oldest.'),
+          t('对话上限', 'Conversation Limit'),
+          { confirmButtonText: t('确定', 'Confirm'), cancelButtonText: t('取消', 'Cancel'), type: 'warning' }
+        )
+        const retry = await conversationApi.create({
+          title: t('新对话', 'New Chat'),
+          provider_id: currentProviderId.value,
+          persona_id: personaId,
+          system_prompt: systemPrompt.value,
+          temperature: userSettings.temperature,
+          force_delete: true,
+        })
+        if (retry.code === 200) {
+          currentConv.value = retry.data
+          currentConvId.value = retry.data.id
+          currentConvTitle.value = retry.data.title || '新对话'
+          currentPersona.value = personaOf(retry.data)
+          systemPrompt.value = retry.data.system_prompt || ''
+          currentProviderId.value = retry.data.provider_id || pickEnabledChatProviderId()
+          chatAreaRef.value?.resetMessages()
+          loadConversations()
+        }
+      } catch (e) { /* cancelled */ }
+      return
+    }
+
     if (res.code === 200) {
       currentConv.value = res.data
       currentConvId.value = res.data.id
