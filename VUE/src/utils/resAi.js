@@ -34,9 +34,11 @@ resAi.interceptors.response.use(
   (error) => {
     console.error("请求错误", error);
     if (error.response?.status === 401) {
+      // 仅当发请求时确实持有 token 才视为「登录过期」；未登录(无 token)的 401 不弹误导提示
+      const hadToken = !!localStorage.getItem("chatbot_token");
       localStorage.removeItem("chatbot_token");
       localStorage.removeItem("chatbot_refresh_token");
-      notifyAuthExpired();
+      if (hadToken) notifyAuthExpired();
     }
     return Promise.reject(error);
   },
@@ -57,8 +59,9 @@ const fetchStream = async (url, data, options = {}) => {
   });
   if (!response.ok) {
     if (response.status === 401) {
+      const hadToken = !!localStorage.getItem("chatbot_token");
       localStorage.removeItem("chatbot_token");
-      notifyAuthExpired();
+      if (hadToken) notifyAuthExpired();
     }
     throw new Error(`HTTP error! status: ${response.status}`);
   }
@@ -80,8 +83,9 @@ const fetchStreamFormData = async (url, formData, options = {}) => {
   });
   if (!response.ok) {
     if (response.status === 401) {
+      const hadToken = !!localStorage.getItem("chatbot_token");
       localStorage.removeItem("chatbot_token");
-      notifyAuthExpired();
+      if (hadToken) notifyAuthExpired();
     }
     throw new Error(`HTTP error! status: ${response.status}`);
   }
