@@ -1,13 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-const SITE_NAME = 'ChatBot'
+const SITE_NAME = '心语'
 
 const routes = [
   {
     path: '/',
     name: 'Home',
     component: () => import('@/views/Home.vue'),
-    meta: { title: 'ChatBot' }
+    meta: { title: 'Confide' }
   },
   {
     path: '/admin',
@@ -34,7 +34,7 @@ const router = createRouter({
 
 // 路由守卫 - 设置页面标题；管理后台需登录（管理员令牌在 admin_token），未登录跳 /admin 登录页
 router.beforeEach((to, from, next) => {
-  document.title = to.meta.title ? `${to.meta.title} - ${SITE_NAME}` : SITE_NAME
+  document.title = to.meta.title ? `${to.meta.title} | ${SITE_NAME}` : SITE_NAME
 
   if (to.name === 'AdminBackend' && !localStorage.getItem('admin_token')) {
     return next({ path: '/admin' })

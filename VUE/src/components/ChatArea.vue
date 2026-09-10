@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, computed, nextTick, watch, onMounted, onUnmounted } from 'vue';
 import { ElMessage, ElInput } from 'element-plus';
 import { 
   Setting, RefreshLeft, Lightning, 
@@ -197,7 +197,7 @@ const handleSend = async () => {
   scrollToBottom();
 
   const aiIndex = messages.value.length;
-  const aiMsg = createMessage('assistant');
+  const aiMsg = reactive(createMessage('assistant'));
   messages.value.push(aiMsg);
 
   loading.value = true;
@@ -331,7 +331,7 @@ const handleImageGenerate = async (text, mode = 'text2img') => {
   imageUploadRef.value?.clearImage();
   scrollToBottom();
 
-  const aiMsg = createMessage('assistant');
+  const aiMsg = reactive(createMessage('assistant'));
   messages.value.push(aiMsg);
 
   loading.value = true;
@@ -383,7 +383,7 @@ const handleVisionChat = async (text) => {
   // 用户发送消息后立即定位到底部
   scrollToBottom();
 
-  const aiMsg = createMessage('assistant');
+  const aiMsg = reactive(createMessage('assistant'));
   messages.value.push(aiMsg);
 
   loading.value = true;
@@ -503,7 +503,7 @@ const regenerate = async (assistantIndex = null) => {
   messages.value = messages.value.slice(0, userIndex + 1);
   
   // 重新发送
-  const aiMsg = createMessage('assistant');
+  const aiMsg = reactive(createMessage('assistant'));
   messages.value.push(aiMsg);
   
   loading.value = true;
@@ -546,6 +546,9 @@ const regenerate = async (assistantIndex = null) => {
 const handleKeydown = (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
+    // 长按回车会连续触发 keydown；生成中按 Enter 不再打断当前流（避免误中止）
+    if (e.repeat) return;
+    if (loading.value) return;
     handleSend();
   }
 };
