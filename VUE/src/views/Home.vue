@@ -534,7 +534,7 @@ async function handleConvoSettingsSaved(payload) {
 
     <!-- 侧边栏 -->
     <!-- 移动端：收起时显示的菜单按钮 -->
-    <button v-if="isMobile && sidebarCollapsed" class="mobile-menu-btn" @click="toggleSidebar">
+    <button v-if="isMobile && sidebarCollapsed" class="mobile-menu-btn" :class="{ 'push-down': showFreeApiBanner }" @click="toggleSidebar">
       <el-icon><Menu /></el-icon>
     </button>
     <!-- 移动端：侧边栏展开时的遮罩 -->
@@ -565,6 +565,7 @@ async function handleConvoSettingsSaved(payload) {
     <ChatArea
       ref="chatAreaRef"
       class="chat-wrap"
+      :class="{ 'has-banner': showFreeApiBanner }"
       :conversation-id="currentConvId"
       :conversation-title="currentConvTitle"
       :provider-id="currentProviderId"
@@ -632,6 +633,7 @@ async function handleConvoSettingsSaved(payload) {
   display: flex;
   width: 100%;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: var(--app-bg);
   position: relative;
@@ -739,5 +741,33 @@ async function handleConvoSettingsSaved(payload) {
   .chat-wrap {
     padding-bottom: 0;
   }
+
+  /* 免费 API 提示条：手机上压缩为单行，避免横向溢出崩坏 */
+  .free-api-banner {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    transform: none;
+    flex-wrap: nowrap;
+    gap: 4px 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    border-radius: 10px;
+  }
+  .free-api-banner > span:nth-child(2) {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .free-api-banner :deep(.el-button) {
+    margin-left: 0;
+    padding: 2px 8px;
+  }
+
+  /* banner 显示时：菜单按钮与聊天区下移，避免被提示条遮挡 */
+  .mobile-menu-btn.push-down { top: 48px; }
+  .chat-wrap.has-banner { padding-top: 44px; }
 }
 </style>

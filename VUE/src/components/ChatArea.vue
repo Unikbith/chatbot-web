@@ -799,6 +799,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   background: transparent;
   flex: 1;
   min-width: 0;
@@ -1335,6 +1336,7 @@ onUnmounted(() => {
   
   .chat-footer {
     padding: 8px 12px 12px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
   }
   
   .message-actions {
