@@ -15,6 +15,7 @@ import ProviderPanel from '../components/ProviderPanel.vue'
 import SystemSettings from '../components/SystemSettings.vue'
 import PersonaPanel from '../components/PersonaPanel.vue'
 import ConversationSettings from '../components/ConversationSettings.vue'
+import PersonaMarketplace from '../components/PersonaMarketplace.vue'
 
 import defaultUserAvatar from '../assets/images/avatar-user.jpg'
 import defaultAiAvatar from '../assets/images/avatar-megumi.jpg'
@@ -32,6 +33,7 @@ const providerPanelVisible = ref(false)
 const settingsVisible = ref(false)
 const personaPanelVisible = ref(false)
 const convoSettingsVisible = ref(false)
+const marketplaceVisible = ref(false)
 
 // 对话状态
 const currentConv = ref(null)
@@ -544,6 +546,8 @@ async function handleConvoSettingsSaved(payload) {
       :current-persona="currentPersona"
       :free-api-banner="showFreeApiBanner"
       :free-api-name="chatStatus.free_name"
+      :ai-personas="aiPersonas"
+      :user-personas="userPersonas"
       @dismiss-free-api="dismissFreeApiBanner"
       @create="requireLogin(handleNewChat)"
       @select="handleSelectConversation"
@@ -553,6 +557,8 @@ async function handleConvoSettingsSaved(payload) {
       @open-provider="requireLogin(() => providerPanelVisible = true)"
       @open-settings="requireLogin(() => settingsVisible = true)"
       @open-persona="requireLogin(() => personaPanelVisible = true)"
+      @open-marketplace="requireLogin(() => marketplaceVisible = true)"
+      @select-persona="handlePersonaChanged"
       @login="authModalVisible = true"
       @logout="handleLogout"
     />
@@ -623,6 +629,12 @@ async function handleConvoSettingsSaved(payload) {
       :general-frequency-penalty="userSettings.frequency_penalty"
       :general-presence-penalty="userSettings.presence_penalty"
       @save="handleConvoSettingsSaved"
+    />
+
+    <!-- 人设广场 -->
+    <PersonaMarketplace
+      v-model="marketplaceVisible"
+      @adopted="loadPersonas"
     />
   </div>
 </template>

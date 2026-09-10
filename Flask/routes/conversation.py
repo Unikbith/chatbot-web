@@ -85,7 +85,18 @@ def create_conversation():
         persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first()
         if not persona:
             persona_id = None
-    
+
+    # 对话上限10条：超出时自动删除最早创建的对话
+    MAX_CONVERSATIONS = 10
+    existing_count = Conversation.query.filter_by(user_id=user_id).count()
+    if existing_count >= MAX_CONVERSATIONS:
+        oldest = Conversation.query.filter_by(user_id=user_id).order_by(
+            Conversation.created_at.asc()
+        ).first()
+        if oldest:
+            db.session.delete(oldest)
+            db.session.flush()
+
     conv = Conversation(
         user_id=user_id,
         title=title,

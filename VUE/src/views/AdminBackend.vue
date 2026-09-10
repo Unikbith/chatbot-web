@@ -36,7 +36,8 @@
       <div class="admin-toolbar">
         <span class="admin-title">{{ t('用户数据', 'User Data') }}</span>
         <div class="toolbar-actions">
-          <el-select v-model="genderFilter" clearable placeholder="性别筛选" size="small" style="width: 120px" @change="applyGenderFilter">
+          <el-select v-model="genderFilter" placeholder="性别筛选" size="small" style="width: 120px" @change="applyGenderFilter">
+            <el-option label="全部" value="" />
             <el-option label="男" value="男" />
             <el-option label="女" value="女" />
             <el-option label="神秘" value="神秘" />

@@ -60,13 +60,50 @@
         {{ t('开启新对话', 'New Chat') }}
       </el-button>
 
-      <!-- 角色选择 -->
-      <div class="persona-selector" @click="openPersonaPanel">
-        <el-avatar :size="28" :src="currentPersona?.avatar" class="persona-avatar">
-          <el-icon><MagicStick /></el-icon>
-        </el-avatar>
-        <span class="persona-name">{{ currentPersona?.name || t('选择角色', 'Select a persona') }}</span>
-        <el-icon class="persona-arrow"><ArrowRight /></el-icon>
+      <!-- 人设列表 -->
+      <div class="persona-list-section">
+        <div class="persona-group">
+          <div class="persona-group-header">
+            <span class="persona-group-title">{{ t('AI 人设', 'AI Personas') }}</span>
+            <el-button text size="small" circle @click.stop="emit('open-persona')">
+              <el-icon><Plus /></el-icon>
+            </el-button>
+          </div>
+          <div
+            v-for="p in aiPersonas"
+            :key="p.id"
+            class="persona-list-item"
+            :class="{ active: currentPersona?.id === p.id }"
+            @click="selectPersona(p)"
+          >
+            <el-avatar :size="24" :src="p.avatar" class="pl-avatar">
+              {{ p.name?.charAt(0) }}
+            </el-avatar>
+            <span class="pl-name">{{ p.name }}</span>
+          </div>
+          <div v-if="aiPersonas.length === 0" class="pl-empty">{{ t('暂无', 'None') }}</div>
+        </div>
+
+        <div class="persona-group">
+          <div class="persona-group-header">
+            <span class="persona-group-title">{{ t('用户人设', 'User Personas') }}</span>
+            <el-button text size="small" circle @click.stop="emit('open-persona')">
+              <el-icon><Plus /></el-icon>
+            </el-button>
+          </div>
+          <div
+            v-for="p in userPersonas"
+            :key="p.id"
+            class="persona-list-item"
+            @click="selectPersona(p)"
+          >
+            <el-avatar :size="24" :src="p.avatar" class="pl-avatar">
+              {{ p.name?.charAt(0) }}
+            </el-avatar>
+            <span class="pl-name">{{ p.name }}</span>
+          </div>
+          <div v-if="userPersonas.length === 0" class="pl-empty">{{ t('暂无', 'None') }}</div>
+        </div>
       </div>
       
       <div class="conversation-list">
@@ -208,8 +245,8 @@
               <el-dropdown-item disabled v-if="user" class="user-info-item">
                 {{ user?.username }}
               </el-dropdown-item>
-              <el-dropdown-item v-if="user" command="persona">
-                <el-icon><MagicStick /></el-icon> {{ t('角色人设', 'Personas') }}
+              <el-dropdown-item v-if="user" command="marketplace">
+                <el-icon><ShoppingBag /></el-icon> {{ t('人设广场', 'Marketplace') }}
               </el-dropdown-item>
               <el-dropdown-item v-if="user" command="provider">
                 <el-icon><Setting /></el-icon> {{ t('模型设置', 'Model Settings') }}
@@ -236,7 +273,7 @@ import { computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, ArrowLeft, ArrowRight, ArrowUp, Top, Delete,
-  User, Setting, Tools, SwitchButton, MagicStick, Menu, Present
+  User, Setting, Tools, SwitchButton, MagicStick, Menu, Present, ShoppingBag
 } from '@element-plus/icons-vue'
 import { t } from '../i18n'
 
@@ -252,12 +289,15 @@ const props = defineProps({
   currentPersona: { type: Object, default: null },
   freeApiBanner: { type: Boolean, default: false },
   freeApiName: { type: String, default: '' },
+  aiPersonas: { type: Array, default: () => [] },
+  userPersonas: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits([
   'create', 'select', 'toggle-pin', 'delete',
   'toggle-collapse', 'open-provider', 'open-settings',
-  'open-persona', 'login', 'logout', 'open-user-menu',
+  'open-persona', 'open-marketplace', 'select-persona',
+  'login', 'logout', 'open-user-menu',
   'dismiss-free-api'
 ])
 
@@ -295,10 +335,14 @@ function openPersonaPanel() {
   emit('open-persona')
 }
 
+function selectPersona(persona) {
+  emit('select-persona', persona)
+}
+
 function handleCommand(cmd) {
   switch (cmd) {
-    case 'persona':
-      emit('open-persona')
+    case 'marketplace':
+      emit('open-marketplace')
       break
     case 'provider':
       emit('open-provider')
@@ -500,41 +544,67 @@ function openUserMenu() {
   margin-right: 6px;
 }
 
-.persona-selector {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 16px 12px;
-  padding: 10px 12px;
-  background: var(--surface);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
+/* 人设列表 */
+.persona-list-section {
+  margin: 0 12px 8px;
+  max-height: 180px;
+  overflow-y: auto;
 }
 
-.persona-selector:hover {
-  border-color: var(--brand);
+.persona-group {
+  margin-bottom: 6px;
+}
+
+.persona-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 2px;
+}
+
+.persona-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.persona-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.persona-list-item:hover {
   background: var(--surface-hover);
 }
 
-.persona-avatar {
+.persona-list-item.active {
+  background: var(--surface-hover);
+}
+
+.pl-avatar {
   flex-shrink: 0;
 }
 
-.persona-name {
+.pl-name {
   flex: 1;
   font-size: 13px;
-  font-weight: 500;
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.persona-arrow {
-  color: #9ca3af;
+.pl-empty {
   font-size: 12px;
+  color: var(--text-muted);
+  padding: 4px 8px;
 }
 
 .conversation-list {

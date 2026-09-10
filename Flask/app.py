@@ -16,7 +16,7 @@ from models import User, ModelProvider, PersonaTemplate, UserSettings
 from routes import (
     auth_bp, chat_bp, audio_bp, provider_bp,
     conversation_bp, settings_bp, persona_bp, upload_bp,
-    admin_bp, image_bp,
+    admin_bp, image_bp, marketplace_bp,
 )
 
 
@@ -57,6 +57,7 @@ def create_app(config_name=None):
     app.register_blueprint(upload_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(image_bp)
+    app.register_blueprint(marketplace_bp)
 
     # 健康检查
     @app.route('/api/health')

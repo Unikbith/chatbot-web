@@ -8,6 +8,7 @@ from routes.persona import persona_bp
 from routes.upload import upload_bp
 from routes.admin import admin_bp
 from routes.image import image_bp
+from routes.marketplace import marketplace_bp
 
 __all__ = [
     'auth_bp',
@@ -20,4 +21,5 @@ __all__ = [
     'upload_bp',
     'admin_bp',
     'image_bp',
+    'marketplace_bp',
 ]

@@ -478,6 +478,39 @@ const audioApi = {
   },
 };
 
+const marketplaceApi = {
+  list(sort = 'hot', page = 1) {
+    return resAi.get(`/api/marketplace?sort=${sort}&page=${page}`);
+  },
+  get(id) {
+    return resAi.get(`/api/marketplace/${id}`);
+  },
+  publish(data) {
+    return resAi.post('/api/marketplace', data);
+  },
+  vote(id, voteType) {
+    return resAi.post(`/api/marketplace/${id}/vote`, { vote_type: voteType });
+  },
+  adopt(id) {
+    return resAi.post(`/api/marketplace/${id}/adopt`);
+  },
+  comments(personaId, sort = 'hot', page = 1) {
+    return resAi.get(`/api/marketplace/${personaId}/comments?sort=${sort}&page=${page}`);
+  },
+  addComment(personaId, content) {
+    return resAi.post(`/api/marketplace/${personaId}/comments`, { content });
+  },
+  likeComment(commentId) {
+    return resAi.post(`/api/marketplace/comments/${commentId}/like`);
+  },
+  checkin() {
+    return resAi.post('/api/marketplace/checkin');
+  },
+  checkinStatus() {
+    return resAi.get('/api/marketplace/checkin/status');
+  },
+};
+
 export {
   resAi,
   fetchStream,
@@ -494,5 +527,6 @@ export {
   audioApi,
   imageApi,
   adminApi,
+  marketplaceApi,
   baseURL
 };

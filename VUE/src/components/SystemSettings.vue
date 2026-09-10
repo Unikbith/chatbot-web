@@ -181,6 +181,27 @@
               <span class="static-value">{{ user?.email }}</span>
             </div>
 
+            <div class="setting-item checkin-row">
+              <div class="setting-label">{{ t('每日签到', 'Daily Check-in') }}</div>
+              <div class="checkin-actions">
+                <span v-if="checkinStatus.checked_in" class="checkin-done">
+                  <el-icon><CircleCheck /></el-icon> {{ t('今日已签到', 'Checked in today') }}
+                </span>
+                <el-button
+                  v-else
+                  type="primary"
+                  size="small"
+                  :loading="checkinLoading"
+                  @click="handleCheckin"
+                >
+                  {{ t('签到 +5 免费生图', 'Check in +5 free images') }}
+                </el-button>
+                <span v-if="checkinStatus.free_images != null" class="checkin-free">
+                  {{ t('剩余免费生图', 'Free images left') }}: {{ checkinStatus.free_images }}
+                </span>
+              </div>
+            </div>
+
             <div class="setting-item">
               <div class="setting-label">{{ t('性别', 'Gender') }}</div>
               <el-radio-group v-model="localGender" @change="handleGenderChange">
@@ -274,8 +295,8 @@
 <script setup>
 import { ref, reactive, computed, watch, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { User, MagicStick, QuestionFilled } from '@element-plus/icons-vue'
-import { settingsApi, uploadApi, authApi } from '../utils/resAi'
+import { User, MagicStick, QuestionFilled, CircleCheck } from '@element-plus/icons-vue'
+import { settingsApi, uploadApi, authApi, marketplaceApi } from '../utils/resAi'
 import { setLocale } from '../i18n'
 import { t } from '../i18n'
 import { applyTheme } from '../utils/theme'
@@ -362,6 +383,38 @@ async function handleGenderChange(val) {
     }
   } catch (e) {
     ElMessage.error(t('更新失败', 'Update failed'))
+  }
+}
+
+// 每日签到
+const checkinLoading = ref(false)
+const checkinStatus = reactive({ checked_in: false, free_images: null })
+
+watch(() => props.modelValue, async (val) => {
+  if (val) {
+    try {
+      const res = await marketplaceApi.checkinStatus()
+      if (res.code === 200 && res.data) {
+        checkinStatus.checked_in = !!res.data.checked_in
+        checkinStatus.free_images = res.data.free_images ?? null
+      }
+    } catch (e) { /* ignore */ }
+  }
+})
+
+async function handleCheckin() {
+  checkinLoading.value = true
+  try {
+    const res = await marketplaceApi.checkin()
+    if (res.code === 200) {
+      checkinStatus.checked_in = true
+      checkinStatus.free_images = res.data?.free_images ?? checkinStatus.free_images
+      ElMessage.success(t('签到成功！+5 免费生图次数', 'Checked in! +5 free image generations'))
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || t('签到失败', 'Check-in failed'))
+  } finally {
+    checkinLoading.value = false
   }
 }
 
@@ -732,6 +785,26 @@ async function confirmDelete() {
 
 .static-value {
   font-size: 14px;
+  color: var(--text-muted);
+}
+
+.checkin-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.checkin-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #67c23a;
+  font-weight: 500;
+}
+
+.checkin-free {
+  font-size: 12px;
   color: var(--text-muted);
 }
 

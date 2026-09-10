@@ -381,3 +381,108 @@ class Message(db.Model):
             'model': self.model,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
+
+
+class PersonaMarketplace(db.Model):
+    """人设广场 - 用户分享的AI人设"""
+    __tablename__ = 'persona_marketplace'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.String(500), nullable=True)
+    avatar = db.Column(db.String(500), nullable=True)
+    system_prompt = db.Column(db.Text, nullable=False)
+    greeting = db.Column(db.Text, nullable=True)
+    likes = db.Column(db.Integer, default=0)
+    dislikes = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    author = db.relationship('User', backref='marketplace_personas')
+    comments = db.relationship('MarketplaceComment', backref='persona_card', lazy='dynamic',
+                               cascade='all, delete-orphan', order_by='MarketplaceComment.created_at.desc()')
+
+    def to_dict(self, include_prompt=False):
+        data = {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'avatar': self.avatar,
+            'greeting': self.greeting,
+            'likes': self.likes,
+            'dislikes': self.dislikes,
+            'score': self.likes - self.dislikes,
+            'author_name': self.author.username if self.author else None,
+            'comment_count': self.comments.count() if self.comments else 0,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+        if include_prompt:
+            data['system_prompt'] = self.system_prompt
+        return data
+
+
+class MarketplaceVote(db.Model):
+    """人设广场投票记录（每人每卡只投一次）"""
+    __tablename__ = 'marketplace_votes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    persona_id = db.Column(db.Integer, db.ForeignKey('persona_marketplace.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    vote_type = db.Column(db.String(4), nullable=False)  # like / dislike
+
+    __table_args__ = (
+        db.UniqueConstraint('persona_id', 'user_id', name='uq_marketplace_vote'),
+    )
+
+
+class MarketplaceComment(db.Model):
+    """人设广场评论"""
+    __tablename__ = 'marketplace_comments'
+
+    id = db.Column(db.Integer, primary_key=True)
+    persona_id = db.Column(db.Integer, db.ForeignKey('persona_marketplace.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    content = db.Column(db.Text, nullable=False)
+    likes = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    commenter = db.relationship('User', backref='marketplace_comments')
+
+    def to_dict(self, pseudonym=None, identicon_seed=None):
+        return {
+            'id': self.id,
+            'content': self.content,
+            'likes': self.likes,
+            'pseudonym': pseudonym,
+            'identicon_seed': identicon_seed,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class CommentLike(db.Model):
+    """评论点赞记录"""
+    __tablename__ = 'comment_likes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    comment_id = db.Column(db.Integer, db.ForeignKey('marketplace_comments.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('comment_id', 'user_id', name='uq_comment_like'),
+    )
+
+
+class DailyCheckIn(db.Model):
+    """每日签到"""
+    __tablename__ = 'daily_checkins'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    checkin_date = db.Column(db.Date, nullable=False)
+    bonus_images = db.Column(db.Integer, default=5)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'checkin_date', name='uq_daily_checkin'),
+    )
