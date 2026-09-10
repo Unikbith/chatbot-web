@@ -286,6 +286,8 @@ def chat():
     conv = None
     if conversation_id:
         conv = Conversation.query.filter_by(id=conversation_id, user_id=user_id).first()
+        if conv and conv.deleted_at:
+            return jsonify({'code': 404, 'message': '对话不存在'}), 404
 
     # 对话独立参数覆盖通用设置（未单独设置时沿用通用值）
     if conv:
@@ -356,14 +358,6 @@ def chat():
 
     # 插入系统提示词
     final_prompt = _get_system_prompt(conv, user_id, persona_id, system_prompt)
-
-    # 注入用户人设：如果对话设置了用户人设，将其拼接到系统提示词最前面
-    if conv and conv.user_persona_id:
-        user_persona = PersonaTemplate.query.filter_by(
-            id=conv.user_persona_id, user_id=user_id
-        ).first()
-        if user_persona and user_persona.system_prompt:
-            final_prompt = user_persona.system_prompt + '\n\n' + (final_prompt or '')
 
     if final_prompt and (not formatted_messages or formatted_messages[0].get('role') != 'system'):
         formatted_messages.insert(0, {

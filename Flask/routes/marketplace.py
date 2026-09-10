@@ -1,12 +1,13 @@
 """人设广场路由 - 分享、投票、评论"""
 import hashlib
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
 from models import (
     PersonaMarketplace, MarketplaceVote, MarketplaceComment,
     CommentLike, DailyCheckIn, ImageUsage, User, Conversation,
+    MarketplaceAdopt,
 )
 
 marketplace_bp = Blueprint('marketplace', __name__, url_prefix='/api/marketplace')
@@ -52,11 +53,20 @@ def _identicon_seed_for(user_id, persona_id):
 @jwt_required()
 def list_marketplace():
     """获取人设广场列表，按 score 排序"""
+    user_id = int(get_jwt_identity())
     sort = request.args.get('sort', 'hot')  # hot / new
     page = int(request.args.get('page', 1))
     per_page = min(int(request.args.get('per_page', 20)), 50)
+    keyword = request.args.get('q', '').strip()
 
     query = PersonaMarketplace.query
+    if keyword:
+        query = query.filter(
+            db.or_(
+                PersonaMarketplace.name.ilike(f'%{keyword}%'),
+                PersonaMarketplace.description.ilike(f'%{keyword}%'),
+            )
+        )
     if sort == 'new':
         query = query.order_by(PersonaMarketplace.created_at.desc())
     else:
@@ -66,10 +76,20 @@ def list_marketplace():
         )
 
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+    items = []
+    for p in pagination.items:
+        d = p.to_dict()
+        vote = MarketplaceVote.query.filter_by(persona_id=p.id, user_id=user_id).first()
+        d['user_vote'] = vote.vote_type if vote else None
+        adopt = MarketplaceAdopt.query.filter_by(persona_id=p.id, user_id=user_id).first()
+        d['is_adopted'] = adopt is not None
+        items.append(d)
+
     return jsonify({
         'code': 200,
         'data': {
-            'items': [p.to_dict() for p in pagination.items],
+            'items': items,
             'total': pagination.total,
             'page': page,
             'pages': pagination.pages,
@@ -81,10 +101,16 @@ def list_marketplace():
 @marketplace_bp.route('/<int:pid>', methods=['GET'])
 @jwt_required()
 def get_marketplace_persona(pid):
+    user_id = int(get_jwt_identity())
     persona = PersonaMarketplace.query.get(pid)
     if not persona:
         return jsonify({'code': 404, 'message': '人设不存在'}), 404
-    return jsonify({'code': 200, 'data': persona.to_dict(include_prompt=True)})
+    d = persona.to_dict(include_prompt=True)
+    vote = MarketplaceVote.query.filter_by(persona_id=pid, user_id=user_id).first()
+    d['user_vote'] = vote.vote_type if vote else None
+    adopt = MarketplaceAdopt.query.filter_by(persona_id=pid, user_id=user_id).first()
+    d['is_adopted'] = adopt is not None
+    return jsonify({'code': 200, 'data': d})
 
 
 # ── 发布 ────────────────────────────────────────────────────────
@@ -94,17 +120,31 @@ def publish_persona():
     user_id = int(get_jwt_identity())
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
+    description = (data.get('description') or '').strip()
     system_prompt = (data.get('system_prompt') or '').strip()
-    if not name or not system_prompt:
-        return jsonify({'code': 400, 'message': '名称和提示词不能为空'}), 400
+    greeting = (data.get('greeting') or '').strip()
+    avatar = data.get('avatar')
+
+    if not name or not description or not system_prompt or not greeting or not avatar:
+        return jsonify({'code': 400, 'message': '所有字段均为必填项'}), 400
+    if len(description) < 30:
+        return jsonify({'code': 400, 'message': '描述不得少于30字'}), 400
+    if len(description) > 100:
+        return jsonify({'code': 400, 'message': '描述最多100字'}), 400
+    if len(system_prompt) < 100:
+        return jsonify({'code': 400, 'message': '人设提示词不得少于100字'}), 400
+    if len(system_prompt) > 800:
+        return jsonify({'code': 400, 'message': '人设提示词最多800字'}), 400
+    if len(greeting) > 50:
+        return jsonify({'code': 400, 'message': '开场白最多50字'}), 400
 
     persona = PersonaMarketplace(
         user_id=user_id,
         name=name,
-        description=(data.get('description') or '').strip() or None,
-        avatar=data.get('avatar'),
+        description=description,
+        avatar=avatar,
         system_prompt=system_prompt,
-        greeting=(data.get('greeting') or '').strip() or None,
+        greeting=greeting,
     )
     db.session.add(persona)
     db.session.commit()
@@ -157,6 +197,10 @@ def adopt_persona(pid):
     if not persona:
         return jsonify({'code': 404, 'message': '人设不存在'}), 404
 
+    existing_adopt = MarketplaceAdopt.query.filter_by(persona_id=pid, user_id=user_id).first()
+    if existing_adopt:
+        return jsonify({'code': 200, 'message': '已采用过该卡片', 'data': {'already': True}})
+
     tp = PersonaTemplate(
         user_id=user_id,
         name=persona.name,
@@ -169,8 +213,40 @@ def adopt_persona(pid):
         persona_type='ai',
     )
     db.session.add(tp)
+    db.session.flush()
+
+    adopt = MarketplaceAdopt(persona_id=pid, user_id=user_id, template_id=tp.id)
+    db.session.add(adopt)
+
     db.session.commit()
     return jsonify({'code': 200, 'message': '已添加到我的角色', 'data': tp.to_dict()})
+
+
+# ── 删除（仅创建者） ────────────────────────────────────────────
+@marketplace_bp.route('/<int:pid>', methods=['DELETE'])
+@jwt_required()
+def delete_persona(pid):
+    user_id = int(get_jwt_identity())
+    persona = PersonaMarketplace.query.get(pid)
+    if not persona:
+        return jsonify({'code': 404, 'message': '人设不存在'}), 404
+    if persona.user_id != user_id:
+        return jsonify({'code': 403, 'message': '只能删除自己发布的卡片'}), 403
+    db.session.delete(persona)
+    db.session.commit()
+    return jsonify({'code': 200, 'message': '已删除'})
+
+
+# ── 取消采用 ────────────────────────────────────────────────────
+@marketplace_bp.route('/<int:pid>/unadopt', methods=['POST'])
+@jwt_required()
+def unadopt_persona(pid):
+    user_id = int(get_jwt_identity())
+    adopt = MarketplaceAdopt.query.filter_by(persona_id=pid, user_id=user_id).first()
+    if adopt:
+        db.session.delete(adopt)
+        db.session.commit()
+    return jsonify({'code': 200, 'message': '已取消采用'})
 
 
 # ── 评论列表 ────────────────────────────────────────────────────
@@ -253,13 +329,16 @@ def like_comment(cid):
 @jwt_required()
 def daily_checkin():
     user_id = int(get_jwt_identity())
-    today = date.today()
+    now = datetime.utcnow()
 
-    existing = DailyCheckIn.query.filter_by(user_id=user_id, checkin_date=today).first()
-    if existing:
-        return jsonify({'code': 200, 'message': '今日已签到', 'data': {'already': True}})
+    last = DailyCheckIn.query.filter_by(user_id=user_id).order_by(DailyCheckIn.checkin_time.desc()).first()
+    if last and last.checkin_time and (now - last.checkin_time).total_seconds() < 86400:
+        remaining = 86400 - (now - last.checkin_time).total_seconds()
+        hours = int(remaining // 3600)
+        minutes = int((remaining % 3600) // 60)
+        return jsonify({'code': 400, 'message': f'签到冷却中，还需等待{hours}小时{minutes}分钟'}), 400
 
-    checkin = DailyCheckIn(user_id=user_id, checkin_date=today, bonus_images=5)
+    checkin = DailyCheckIn(user_id=user_id, checkin_time=now, bonus_images=5)
     db.session.add(checkin)
 
     usage = ImageUsage.query.filter_by(user_id=user_id).first()
@@ -272,7 +351,7 @@ def daily_checkin():
     return jsonify({
         'code': 200,
         'message': '签到成功，获得5次免费生图机会',
-        'data': {'already': False, 'bonus': 5, 'remaining': usage.free_count}
+        'data': {'bonus': 5, 'free_images': usage.free_count}
     })
 
 
@@ -280,13 +359,23 @@ def daily_checkin():
 @jwt_required()
 def checkin_status():
     user_id = int(get_jwt_identity())
-    today = date.today()
-    checked = DailyCheckIn.query.filter_by(user_id=user_id, checkin_date=today).first() is not None
+    now = datetime.utcnow()
+
+    last = DailyCheckIn.query.filter_by(user_id=user_id).order_by(DailyCheckIn.checkin_time.desc()).first()
+    can_checkin = True
+    next_checkin = None
+    if last and last.checkin_time:
+        elapsed = (now - last.checkin_time).total_seconds()
+        if elapsed < 86400:
+            can_checkin = False
+            next_checkin = (last.checkin_time + timedelta(seconds=86400)).isoformat()
+
     usage = ImageUsage.query.filter_by(user_id=user_id).first()
     return jsonify({
         'code': 200,
         'data': {
-            'checked_today': checked,
-            'remaining_images': usage.free_count if usage else 0,
+            'can_checkin': can_checkin,
+            'next_checkin': next_checkin,
+            'free_images': usage.free_count if usage else 0,
         }
     })

@@ -64,9 +64,7 @@ const opacityVal = computed(() => {
 const greetingText = () => t('你好！有什么可以帮你的吗？', 'Hello! How can I help you?');
 
 // 开场白：尚未产生任何 AI 回复时始终展示（发送用户消息后也不会突兀消失，直到 AI 开始回话）
-const showWelcome = computed(() =>
-  !messages.value.some(m => m.role === 'assistant' && (m.content || m.raw))
-);
+const showWelcome = computed(() => true)
 
 // 消息
 const createMessage = (role, content = '', imageUrl = null) => ({ 

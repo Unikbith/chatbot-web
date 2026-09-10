@@ -1,6 +1,7 @@
 """认证路由 - 注册、登录、验证码、用户信息、账号管理"""
 import os
 import re
+from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import (
     create_access_token, create_refresh_token,
@@ -317,7 +318,10 @@ def login():
     
     if not user or not user.check_password(password):
         return jsonify({'code': 401, 'message': '账号或密码错误'}), 401
-    
+
+    if user.deleted_at:
+        return jsonify({'code': 403, 'message': '该账号已注销'}), 403
+
     if not user.is_active:
         return jsonify({'code': 403, 'message': '账号已被禁用'}), 403
     
@@ -516,10 +520,11 @@ def delete_account():
     if not user.check_password(password):
         return jsonify({'code': 400, 'message': '密码错误'}), 400
     
-    # 删除用户（级联删除所有数据）
-    db.session.delete(user)
+    # 软删除用户（标记注销时间，禁用账号，保留数据）
+    user.deleted_at = datetime.utcnow()
+    user.is_active = False
     db.session.commit()
-    
+
     return jsonify({
         'code': 200,
         'message': '账号已注销'

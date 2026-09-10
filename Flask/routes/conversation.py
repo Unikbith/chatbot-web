@@ -14,7 +14,9 @@ def list_conversations():
     """获取对话列表（带按日期分组的数据）"""
     user_id = int(get_jwt_identity())
     
-    conversations = Conversation.query.filter_by(user_id=user_id).order_by(
+    conversations = Conversation.query.filter_by(user_id=user_id).filter(
+        Conversation.deleted_at.is_(None)
+    ).order_by(
         Conversation.is_pinned.desc(),
         Conversation.updated_at.desc()
     ).all()
@@ -86,15 +88,19 @@ def create_conversation():
         if not persona:
             persona_id = None
 
-    # 对话上限10条：超出时自动删除最早创建的对话
+    # 对话上限10条：超出时自动软删除最早创建的对话（仅统计未删除的）
     MAX_CONVERSATIONS = 10
-    existing_count = Conversation.query.filter_by(user_id=user_id).count()
+    existing_count = Conversation.query.filter_by(user_id=user_id).filter(
+        Conversation.deleted_at.is_(None)
+    ).count()
     if existing_count >= MAX_CONVERSATIONS:
-        oldest = Conversation.query.filter_by(user_id=user_id).order_by(
+        oldest = Conversation.query.filter_by(user_id=user_id).filter(
+            Conversation.deleted_at.is_(None)
+        ).order_by(
             Conversation.created_at.asc()
         ).first()
         if oldest:
-            db.session.delete(oldest)
+            oldest.deleted_at = datetime.utcnow()
             db.session.flush()
 
     conv = Conversation(
@@ -120,14 +126,16 @@ def create_conversation():
 def get_conversation(conv_id):
     """获取对话详情及消息"""
     user_id = int(get_jwt_identity())
-    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).first()
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).filter(
+        Conversation.deleted_at.is_(None)
+    ).first()
     if not conv:
         return jsonify({'code': 404, 'message': '对话不存在'}), 404
-    
+
     messages = Message.query.filter_by(conversation_id=conv_id).order_by(
         Message.created_at.asc()
     ).all()
-    
+
     return jsonify({
         'code': 200,
         'data': {
@@ -142,7 +150,9 @@ def get_conversation(conv_id):
 def update_conversation(conv_id):
     """更新对话信息（标题、置顶等）"""
     user_id = int(get_jwt_identity())
-    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).first()
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).filter(
+        Conversation.deleted_at.is_(None)
+    ).first()
     if not conv:
         return jsonify({'code': 404, 'message': '对话不存在'}), 404
     
@@ -207,7 +217,9 @@ def update_conversation(conv_id):
 def toggle_pin(conv_id):
     """切换置顶状态"""
     user_id = int(get_jwt_identity())
-    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).first()
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).filter(
+        Conversation.deleted_at.is_(None)
+    ).first()
     if not conv:
         return jsonify({'code': 404, 'message': '对话不存在'}), 404
     
@@ -225,15 +237,17 @@ def toggle_pin(conv_id):
 @conversation_bp.route('/<int:conv_id>', methods=['DELETE'])
 @jwt_required()
 def delete_conversation(conv_id):
-    """删除对话"""
+    """删除对话（软删除）"""
     user_id = int(get_jwt_identity())
-    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).first()
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).filter(
+        Conversation.deleted_at.is_(None)
+    ).first()
     if not conv:
         return jsonify({'code': 404, 'message': '对话不存在'}), 404
-    
-    db.session.delete(conv)
+
+    conv.deleted_at = datetime.utcnow()
     db.session.commit()
-    
+
     return jsonify({
         'code': 200,
         'message': '删除成功'
@@ -245,7 +259,9 @@ def delete_conversation(conv_id):
 def clear_messages(conv_id):
     """清空对话消息"""
     user_id = int(get_jwt_identity())
-    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).first()
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).filter(
+        Conversation.deleted_at.is_(None)
+    ).first()
     if not conv:
         return jsonify({'code': 404, 'message': '对话不存在'}), 404
     

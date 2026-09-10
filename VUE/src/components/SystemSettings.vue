@@ -184,7 +184,7 @@
             <div class="setting-item checkin-row">
               <div class="setting-label">{{ t('每日签到', 'Daily Check-in') }}</div>
               <div class="checkin-actions">
-                <span v-if="checkinStatus.checked_in" class="checkin-done">
+                <span v-if="!checkinStatus.can_checkin" class="checkin-done">
                   <el-icon><CircleCheck /></el-icon> {{ t('今日已签到', 'Checked in today') }}
                 </span>
                 <el-button
@@ -194,7 +194,7 @@
                   :loading="checkinLoading"
                   @click="handleCheckin"
                 >
-                  {{ t('签到 +5 免费生图', 'Check in +5 free images') }}
+                  {{ t('签到', 'Check in') }}
                 </el-button>
                 <span v-if="checkinStatus.free_images != null" class="checkin-free">
                   {{ t('剩余免费生图', 'Free images left') }}: {{ checkinStatus.free_images }}
@@ -388,14 +388,15 @@ async function handleGenderChange(val) {
 
 // 每日签到
 const checkinLoading = ref(false)
-const checkinStatus = reactive({ checked_in: false, free_images: null })
+const checkinStatus = reactive({ can_checkin: true, next_checkin: null, free_images: null })
 
 watch(() => props.modelValue, async (val) => {
   if (val) {
     try {
       const res = await marketplaceApi.checkinStatus()
       if (res.code === 200 && res.data) {
-        checkinStatus.checked_in = !!res.data.checked_in
+        checkinStatus.can_checkin = !!res.data.can_checkin
+        checkinStatus.next_checkin = res.data.next_checkin || null
         checkinStatus.free_images = res.data.free_images ?? null
       }
     } catch (e) { /* ignore */ }
@@ -407,7 +408,8 @@ async function handleCheckin() {
   try {
     const res = await marketplaceApi.checkin()
     if (res.code === 200) {
-      checkinStatus.checked_in = true
+      checkinStatus.can_checkin = false
+      checkinStatus.next_checkin = res.data?.next_checkin || checkinStatus.next_checkin
       checkinStatus.free_images = res.data?.free_images ?? checkinStatus.free_images
       ElMessage.success(t('签到成功！+5 免费生图次数', 'Checked in! +5 free image generations'))
     }

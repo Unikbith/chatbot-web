@@ -76,8 +76,10 @@ def admin_me():
 @admin_required
 def platform_stats():
     """平台整体数据统计。"""
-    user_count = User.query.filter_by(is_active=True).count()
-    conversation_count = db.session.query(func.count(Conversation.id)).scalar() or 0
+    user_count = User.query.filter_by(is_active=True).filter(User.deleted_at.is_(None)).count()
+    conversation_count = db.session.query(func.count(Conversation.id)).filter(
+        Conversation.deleted_at.is_(None)
+    ).scalar() or 0
     message_count = db.session.query(func.count(Message.id)).scalar() or 0
     provider_count = ModelProvider.query.count()
     persona_count = PersonaTemplate.query.count()
@@ -85,8 +87,12 @@ def platform_stats():
     # 今日新增
     from datetime import datetime
     today_start = datetime(datetime.utcnow().year, datetime.utcnow().month, datetime.utcnow().day)
-    recent_users = User.query.filter(User.created_at >= today_start).count()
-    recent_convs = Conversation.query.filter(Conversation.created_at >= today_start).count()
+    recent_users = User.query.filter(User.created_at >= today_start).filter(
+        User.deleted_at.is_(None)
+    ).count()
+    recent_convs = Conversation.query.filter(Conversation.created_at >= today_start).filter(
+        Conversation.deleted_at.is_(None)
+    ).count()
     recent_msgs = Message.query.filter(Message.created_at >= today_start).count()
 
     return jsonify({
@@ -114,6 +120,7 @@ def list_users():
 
     conv_counts = dict(
         db.session.query(Conversation.user_id, func.count(Conversation.id))
+        .filter(Conversation.deleted_at.is_(None))
         .group_by(Conversation.user_id).all()
     )
     msg_counts = dict(
@@ -129,11 +136,12 @@ def list_users():
         .group_by(PersonaTemplate.user_id).all()
     )
 
-    # 每个用户最新一条消息时间 = 最近活跃
+    # 每个用户最新一条消息时间 = 最近活跃（排除已软删除的对话）
     latest_msg_by_user = {}
     latest_rows = (
         db.session.query(Conversation.user_id, func.max(Message.created_at))
         .join(Message, Message.conversation_id == Conversation.id)
+        .filter(Conversation.deleted_at.is_(None))
         .group_by(Conversation.user_id).all()
     )
     for uid, ts in latest_rows:
@@ -141,7 +149,7 @@ def list_users():
 
     result = []
     for u in users:
-        conv_ids = [c.id for c in u.conversations]
+        conv_ids = [c.id for c in u.conversations if c.deleted_at is None]
         msg_count = sum(msg_counts.get(cid, 0) for cid in conv_ids)
         result.append({
             'id': u.id,
@@ -150,6 +158,7 @@ def list_users():
             'avatar': u.avatar,
             'gender': u.gender,
             'is_active': u.is_active,
+            'deleted_at': u.deleted_at.isoformat() if u.deleted_at else None,
             'created_at': u.created_at.isoformat() if u.created_at else None,
             'conversation_count': len(conv_ids),
             'message_count': msg_count,
@@ -183,11 +192,16 @@ def user_conversations(user_id):
             'id': c.id,
             'title': c.title,
             'is_pinned': c.is_pinned,
+            'message_count': msg_counts.get(c.id, 0),
             'persona_name': c.persona.name if c.persona else None,
+            'persona_system_prompt': c.persona.system_prompt if c.persona else None,
+            'persona_avatar': c.persona.avatar if c.persona else None,
+            'persona_description': c.persona.description if c.persona else None,
+            'persona_greeting': c.persona.greeting if c.persona else None,
+            'background_image': c.background_image,
             'provider_id': c.provider_id,
             'created_at': c.created_at.isoformat() if c.created_at else None,
             'updated_at': c.updated_at.isoformat() if c.updated_at else None,
-            'message_count': msg_counts.get(c.id, 0),
         } for c in convs]
     })
 
@@ -262,3 +276,45 @@ def export_conversation(conv_id):
     resp = Response('\n'.join(lines), mimetype='text/markdown; charset=utf-8')
     resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
     return resp
+
+
+@admin_bp.route('/marketplace', methods=['GET'])
+@admin_required
+def list_marketplace_cards():
+    """管理员查看广场卡片列表（含真实创建者信息）"""
+    from models import PersonaMarketplace
+    page = int(request.args.get('page', 1))
+    per_page = min(int(request.args.get('per_page', 20)), 50)
+
+    pagination = PersonaMarketplace.query.order_by(PersonaMarketplace.created_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    items = []
+    for p in pagination.items:
+        d = p.to_dict(include_prompt=True)
+        d['author_username'] = p.author.username if p.author else None
+        d['author_email'] = p.author.email if p.author else None
+        items.append(d)
+
+    return jsonify({
+        'code': 200,
+        'data': {
+            'items': items,
+            'total': pagination.total,
+            'page': page,
+            'pages': pagination.pages,
+        }
+    })
+
+
+@admin_bp.route('/marketplace/<int:pid>', methods=['DELETE'])
+@admin_required
+def delete_marketplace_card(pid):
+    """管理员删除广场卡片"""
+    from models import PersonaMarketplace
+    persona = PersonaMarketplace.query.get(pid)
+    if not persona:
+        return jsonify({'code': 404, 'message': '卡片不存在'}), 404
+    db.session.delete(persona)
+    db.session.commit()
+    return jsonify({'code': 200, 'message': '已删除'})

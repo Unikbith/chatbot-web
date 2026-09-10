@@ -1,21 +1,34 @@
 <template>
   <el-drawer
     v-model="visible"
-    :title="t('人设广场', 'Persona Marketplace')"
-    size="min(680px, 100vw)"
+    :title="t('卡片广场', 'Card Marketplace')"
+    size="min(720px, 100vw)"
     direction="rtl"
     @close="handleClose"
   >
     <div class="marketplace">
       <!-- 顶部操作栏 -->
       <div class="mp-toolbar">
-        <el-radio-group v-model="sortMode" size="default" @change="loadList">
-          <el-radio-button value="hot">{{ t('热门', 'Hot') }}</el-radio-button>
-          <el-radio-button value="new">{{ t('最新', 'New') }}</el-radio-button>
-        </el-radio-group>
-        <el-button type="primary" size="small" @click="showPublishDialog = true">
-          <el-icon><Plus /></el-icon> {{ t('发布人设', 'Publish') }}
-        </el-button>
+        <el-input
+          v-model="searchKeyword"
+          :placeholder="t('搜索卡片名称或描述...', 'Search cards...')"
+          clearable
+          size="default"
+          style="width: 240px"
+          @input="debouncedSearch"
+          @clear="loadList"
+        >
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+        <div class="toolbar-right">
+          <el-radio-group v-model="sortMode" size="default" @change="loadList">
+            <el-radio-button value="hot">{{ t('热门', 'Hot') }}</el-radio-button>
+            <el-radio-button value="new">{{ t('最新', 'New') }}</el-radio-button>
+          </el-radio-group>
+          <el-button type="primary" size="small" @click="showPublishDialog = true">
+            <el-icon><Plus /></el-icon> {{ t('发布卡片', 'Publish Card') }}
+          </el-button>
+        </div>
       </div>
 
       <!-- 卡片网格 -->
@@ -26,25 +39,30 @@
           class="mp-card"
           @click="openDetail(item)"
         >
-          <div class="card-header">
-            <el-avatar :size="48" :src="item.avatar" class="card-avatar">
-              {{ item.name?.charAt(0) }}
-            </el-avatar>
-            <div class="card-info">
-              <div class="card-name">{{ item.name }}</div>
-              <div class="card-author">{{ item.author_name }}</div>
+          <div class="card-image">
+            <img v-if="item.avatar" :src="item.avatar" :alt="item.name" />
+            <div v-else class="card-image-placeholder">
+              <span>{{ item.name?.charAt(0) }}</span>
+            </div>
+            <div class="card-like-badge" @click.stop="handleCardVote(item, 'like')">
+              <el-icon :class="{ active: item.user_vote === 'like' }"><Sunny /></el-icon>
+              <span>{{ item.likes }}</span>
             </div>
           </div>
-          <p class="card-desc">{{ item.description || t('暂无描述', 'No description') }}</p>
-          <div class="card-footer">
-            <span class="card-stat like"><el-icon><Star /></el-icon> {{ item.likes }}</span>
-            <span class="card-stat dislike"><el-icon><StarFilled /></el-icon> {{ item.dislikes }}</span>
-            <span class="card-stat comment"><el-icon><ChatDotRound /></el-icon> {{ item.comment_count || 0 }}</span>
+          <div class="card-body">
+            <div class="card-name">{{ item.name }}</div>
+            <p class="card-desc">{{ item.description }}</p>
+            <div class="card-footer">
+              <span class="card-stat">
+                <el-icon><Sunny /></el-icon> {{ item.likes }}
+              </span>
+              <span v-if="item.is_adopted" class="card-adopted-tag">{{ t('已采用', 'Adopted') }}</span>
+            </div>
           </div>
         </div>
 
         <div v-if="!loading && items.length === 0" class="mp-empty">
-          {{ t('暂无人设，快来发布第一个吧', 'No personas yet. Be the first to publish!') }}
+          {{ t('暂无卡片', 'No cards yet') }}
         </div>
       </div>
 
@@ -61,113 +79,137 @@
       </div>
     </div>
 
-    <!-- 详情对话框 -->
+    <!-- 详情对话框：左右分栏 -->
     <el-dialog
       v-model="detailVisible"
-      :title="detailData?.name"
-      width="min(600px, 95vw)"
+      width="min(800px, 96vw)"
       align-center
       destroy-on-close
+      class="detail-dialog"
+      :show-close="true"
     >
-      <div v-if="detailData" class="detail-content">
-        <div class="detail-header">
-          <el-avatar :size="64" :src="detailData.avatar" class="detail-avatar">
-            {{ detailData.name?.charAt(0) }}
-          </el-avatar>
-          <div class="detail-meta">
-            <h3>{{ detailData.name }}</h3>
-            <span class="detail-author">{{ t('作者', 'Author') }}: {{ detailData.author_name }}</span>
+      <template #header><span></span></template>
+      <div v-if="detailData" class="detail-split">
+        <!-- 左半区：固定 -->
+        <div class="detail-left">
+          <div class="dl-avatar">
+            <img v-if="detailData.avatar" :src="detailData.avatar" :alt="detailData.name" />
+            <div v-else class="dl-avatar-placeholder">{{ detailData.name?.charAt(0) }}</div>
           </div>
-        </div>
-
-        <p class="detail-desc">{{ detailData.description }}</p>
-
-        <div class="detail-prompt-section">
-          <div class="prompt-label">{{ t('系统提示词', 'System Prompt') }}</div>
-          <div class="prompt-box">{{ detailData.system_prompt }}</div>
-        </div>
-
-        <div v-if="detailData.greeting" class="detail-prompt-section">
-          <div class="prompt-label">{{ t('开场白', 'Greeting') }}</div>
-          <div class="prompt-box greeting-box">{{ detailData.greeting }}</div>
-        </div>
-
-        <!-- 操作按钮 -->
-        <div class="detail-actions">
-          <el-button
-            :type="detailData.user_vote === 'like' ? 'primary' : 'default'"
-            @click="handleVote('like')"
-          >
-            <el-icon><Star /></el-icon> {{ detailData.likes }}
-          </el-button>
-          <el-button
-            :type="detailData.user_vote === 'dislike' ? 'danger' : 'default'"
-            @click="handleVote('dislike')"
-          >
-            <el-icon><StarFilled /></el-icon> {{ detailData.dislikes }}
-          </el-button>
-          <el-button type="success" @click="handleAdopt">
-            <el-icon><Download /></el-icon> {{ t('采用', 'Adopt') }}
-          </el-button>
-        </div>
-
-        <!-- 评论区 -->
-        <div class="comments-section">
-          <div class="comments-header">
-            <span>{{ t('评论', 'Comments') }} ({{ commentTotal }})</span>
-            <el-radio-group v-model="commentSort" size="small" @change="loadComments">
-              <el-radio-button value="hot">{{ t('热门', 'Hot') }}</el-radio-button>
-              <el-radio-button value="new">{{ t('最新', 'New') }}</el-radio-button>
-            </el-radio-group>
+          <div class="dl-votes">
+            <button
+              class="vote-btn like-btn"
+              :class="{ active: detailData.user_vote === 'like' }"
+              @click="handleVote('like')"
+            >
+              <el-icon><Sunny /></el-icon>
+              <span>{{ detailData.likes }}</span>
+            </button>
+            <button
+              class="vote-btn dislike-btn"
+              :class="{ active: detailData.user_vote === 'dislike' }"
+              @click="handleVote('dislike')"
+            >
+              <el-icon class="thumb-down"><Sunny /></el-icon>
+            </button>
           </div>
-
-          <!-- 发表评论 -->
-          <div class="comment-input">
-            <el-input
-              v-model="newComment"
-              :placeholder="t('写下你的评论...', 'Write a comment...')"
-              maxlength="500"
-              show-word-limit
-              type="textarea"
-              :rows="2"
-            />
-            <el-button type="primary" size="small" :disabled="!newComment.trim()" @click="submitComment" :loading="commentSubmitting">
-              {{ t('发表', 'Post') }}
+          <p class="dl-desc">{{ detailData.description }}</p>
+          <div v-if="isCreator" class="dl-creator-actions">
+            <el-button size="small" type="danger" plain @click="handleDeleteCard">
+              {{ t('删除卡片', 'Delete Card') }}
             </el-button>
           </div>
+        </div>
 
-          <!-- 评论列表 -->
-          <div v-loading="commentsLoading" class="comments-list">
-            <div v-for="c in comments" :key="c.id" class="comment-item">
-              <div class="comment-user">
-                <img
-                  :src="`https://api.dicebear.com/7.x/identicon/svg?seed=${c.identicon_seed}`"
-                  class="comment-identicon"
-                  alt=""
-                />
-                <span class="comment-pseudonym">{{ c.pseudonym }}</span>
-                <span v-if="c.is_author" class="comment-badge">{{ t('作者', 'Author') }}</span>
+        <!-- 右半区：可滚动 -->
+        <div class="detail-right">
+          <h2 class="dr-name">{{ detailData.name }}</h2>
+          <div class="dr-meta">
+            <span>{{ t('创建时间', 'Created') }}: {{ formatDate(detailData.created_at) }}</span>
+            <span><el-icon><Sunny /></el-icon> {{ detailData.likes }}</span>
+          </div>
+
+          <div class="dr-section">
+            <div class="dr-label">{{ t('人设提示词', 'Character Prompt') }}</div>
+            <div class="dr-box">{{ detailData.system_prompt }}</div>
+          </div>
+
+          <div v-if="detailData.greeting" class="dr-section">
+            <div class="dr-label">{{ t('开场白', 'Greeting') }}</div>
+            <div class="dr-box greeting-box">{{ detailData.greeting }}</div>
+          </div>
+
+          <!-- 评论区 -->
+          <div class="dr-section comments-section">
+            <div class="comments-header">
+              <span>{{ t('评论', 'Comments') }} ({{ commentTotal }})</span>
+              <el-radio-group v-model="commentSort" size="small" @change="loadComments">
+                <el-radio-button value="hot">{{ t('热门', 'Hot') }}</el-radio-button>
+                <el-radio-button value="new">{{ t('最新', 'New') }}</el-radio-button>
+              </el-radio-group>
+            </div>
+
+            <div class="comment-input">
+              <el-input
+                v-model="newComment"
+                :placeholder="t('写下你的评论...', 'Write a comment...')"
+                maxlength="500"
+                show-word-limit
+                type="textarea"
+                :rows="2"
+              />
+              <el-button type="primary" size="small" :disabled="!newComment.trim()" @click="submitComment" :loading="commentSubmitting">
+                {{ t('发表', 'Post') }}
+              </el-button>
+            </div>
+
+            <div v-loading="commentsLoading" class="comments-list">
+              <div v-for="c in comments" :key="c.id" class="comment-item">
+                <div class="comment-user">
+                  <img
+                    :src="`https://api.dicebear.com/7.x/identicon/svg?seed=${c.identicon_seed}`"
+                    class="comment-identicon"
+                    alt=""
+                  />
+                  <span class="comment-pseudonym">{{ c.pseudonym }}</span>
+                </div>
+                <p class="comment-text">{{ c.content }}</p>
+                <div class="comment-footer">
+                  <span class="comment-time">{{ formatTime(c.created_at) }}</span>
+                  <el-button text size="small" @click="handleLikeComment(c)">
+                    <el-icon><Sunny /></el-icon> {{ c.likes }}
+                  </el-button>
+                </div>
               </div>
-              <p class="comment-text">{{ c.content }}</p>
-              <div class="comment-footer">
-                <el-button text size="small" @click="handleLikeComment(c)">
-                  <el-icon><Star /></el-icon> {{ c.likes }}
-                </el-button>
-                <span class="comment-time">{{ formatTime(c.created_at) }}</span>
+              <div v-if="!commentsLoading && comments.length === 0" class="no-comments">
+                {{ t('暂无评论', 'No comments yet') }}
               </div>
             </div>
-            <div v-if="!commentsLoading && comments.length === 0" class="no-comments">
-              {{ t('暂无评论', 'No comments yet') }}
-            </div>
+          </div>
+
+          <!-- 采用按钮（底部固定） -->
+          <div class="dr-bottom">
+            <el-button
+              v-if="!detailData.is_adopted"
+              type="primary"
+              size="large"
+              class="adopt-btn"
+              @click="handleAdopt"
+            >
+              {{ t('采用', 'Adopt') }}
+            </el-button>
+            <el-button v-else size="large" disabled class="adopt-btn">
+              {{ t('已采用', 'Adopted') }}
+            </el-button>
           </div>
         </div>
       </div>
     </el-dialog>
 
-    <!-- 发布人设对话框 -->
+    <!-- 发布卡片对话框 -->
     <el-dialog
       v-model="showPublishDialog"
-      :title="t('发布人设', 'Publish Persona')"
+      :title="t('发布卡片', 'Publish Card')"
       width="min(500px, 95vw)"
       align-center
       destroy-on-close
@@ -176,16 +218,16 @@
         <el-form-item :label="t('名称', 'Name')" required>
           <el-input v-model="publishForm.name" maxlength="30" show-word-limit />
         </el-form-item>
-        <el-form-item :label="t('描述', 'Description')">
-          <el-input v-model="publishForm.description" type="textarea" :rows="2" maxlength="200" show-word-limit />
+        <el-form-item :label="t('描述 (30-100字)', 'Description (30-100 chars)')" required>
+          <el-input v-model="publishForm.description" type="textarea" :rows="2" :maxlength="100" show-word-limit />
         </el-form-item>
-        <el-form-item :label="t('系统提示词', 'System Prompt')" required>
-          <el-input v-model="publishForm.system_prompt" type="textarea" :rows="5" maxlength="4000" show-word-limit />
+        <el-form-item :label="t('人设提示词 (100-800字)', 'Character Prompt (100-800 chars)')" required>
+          <el-input v-model="publishForm.system_prompt" type="textarea" :rows="5" :maxlength="800" show-word-limit />
         </el-form-item>
-        <el-form-item :label="t('开场白', 'Greeting')">
-          <el-input v-model="publishForm.greeting" type="textarea" :rows="2" maxlength="500" show-word-limit />
+        <el-form-item :label="t('开场白 (最多50字)', 'Greeting (max 50 chars)')" required>
+          <el-input v-model="publishForm.greeting" type="textarea" :rows="2" :maxlength="50" show-word-limit />
         </el-form-item>
-        <el-form-item :label="t('头像', 'Avatar')">
+        <el-form-item :label="t('头像', 'Avatar')" required>
           <el-upload
             :show-file-list="false"
             :before-upload="handleAvatarUpload"
@@ -211,13 +253,14 @@
 
 <script setup>
 import { ref, reactive, computed, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Plus, Star, StarFilled, ChatDotRound, Download } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Sunny, Search } from '@element-plus/icons-vue'
 import { marketplaceApi, uploadApi } from '../utils/resAi'
 import { t } from '../i18n'
 
 const props = defineProps({
   modelValue: Boolean,
+  currentUserId: { type: Number, default: null },
 })
 
 const emit = defineEmits(['update:modelValue', 'adopted'])
@@ -231,14 +274,27 @@ const visible = computed({
 const loading = ref(false)
 const items = ref([])
 const sortMode = ref('hot')
+const searchKeyword = ref('')
 const currentPage = ref(1)
 const pageSize = 12
 const total = ref(0)
 const totalPages = computed(() => Math.ceil(total.value / pageSize))
 
+let _searchTimer = null
+function debouncedSearch() {
+  clearTimeout(_searchTimer)
+  _searchTimer = setTimeout(() => {
+    currentPage.value = 1
+    loadList()
+  }, 300)
+}
+
 // 详情状态
 const detailVisible = ref(false)
 const detailData = ref(null)
+const isCreator = computed(() =>
+  detailData.value && props.currentUserId && detailData.value.author_id === props.currentUserId
+)
 
 // 评论状态
 const comments = ref([])
@@ -266,13 +322,13 @@ watch(() => props.modelValue, (val) => {
 async function loadList() {
   loading.value = true
   try {
-    const res = await marketplaceApi.list(sortMode.value, currentPage.value)
+    const res = await marketplaceApi.list(sortMode.value, currentPage.value, searchKeyword.value.trim())
     if (res.code === 200) {
       items.value = res.data.items || []
       total.value = res.data.total || 0
     }
   } catch (e) {
-    console.error('加载人设广场失败', e)
+    console.error('加载卡片广场失败', e)
   } finally {
     loading.value = false
   }
@@ -299,11 +355,10 @@ async function handleVote(voteType) {
       detailData.value.likes = res.data.likes
       detailData.value.dislikes = res.data.dislikes
       detailData.value.user_vote = res.data.user_vote
-      // 同步列表中的卡片数据
       const idx = items.value.findIndex(i => i.id === detailData.value.id)
       if (idx >= 0) {
         items.value[idx].likes = res.data.likes
-        items.value[idx].dislikes = res.data.dislikes
+        items.value[idx].user_vote = res.data.user_vote
       }
     }
   } catch (e) {
@@ -311,16 +366,52 @@ async function handleVote(voteType) {
   }
 }
 
+async function handleCardVote(item, voteType) {
+  try {
+    const res = await marketplaceApi.vote(item.id, voteType)
+    if (res.code === 200) {
+      item.likes = res.data.likes
+      item.user_vote = res.data.user_vote
+    }
+  } catch (e) { /* silent */ }
+}
+
 async function handleAdopt() {
   if (!detailData.value) return
   try {
     const res = await marketplaceApi.adopt(detailData.value.id)
     if (res.code === 200) {
-      ElMessage.success(t('已采用到人设列表', 'Adopted to your personas'))
+      if (res.data?.already) {
+        ElMessage.info(t('已经采用过该卡片', 'Already adopted'))
+      } else {
+        ElMessage.success(t('已采用到人设列表', 'Adopted to your personas'))
+      }
+      detailData.value.is_adopted = true
+      const idx = items.value.findIndex(i => i.id === detailData.value.id)
+      if (idx >= 0) items.value[idx].is_adopted = true
       emit('adopted')
     }
   } catch (e) {
     ElMessage.error(e.response?.data?.message || t('采用失败', 'Adopt failed'))
+  }
+}
+
+async function handleDeleteCard() {
+  if (!detailData.value) return
+  try {
+    await ElMessageBox.confirm(t('确定删除这张卡片吗？', 'Delete this card?'), t('确认', 'Confirm'), {
+      type: 'warning',
+    })
+    const res = await marketplaceApi.delete(detailData.value.id)
+    if (res.code === 200) {
+      ElMessage.success(t('已删除', 'Deleted'))
+      detailVisible.value = false
+      loadList()
+    }
+  } catch (e) {
+    if (e !== 'cancel') {
+      ElMessage.error(e.response?.data?.message || t('删除失败', 'Delete failed'))
+    }
   }
 }
 
@@ -381,10 +472,6 @@ async function handleAvatarUpload(file) {
 }
 
 async function handlePublish() {
-  if (!publishForm.name.trim() || !publishForm.system_prompt.trim()) {
-    ElMessage.warning(t('请填写名称和系统提示词', 'Name and system prompt are required'))
-    return
-  }
   publishing.value = true
   try {
     const res = await marketplaceApi.publish({
@@ -421,6 +508,12 @@ function formatTime(ts) {
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}${t('小时前', 'h ago')}`
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
+
+function formatDate(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 </script>
 
 <style scoped>
@@ -436,6 +529,14 @@ function formatTime(ts) {
   justify-content: space-between;
   align-items: center;
   flex-shrink: 0;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .mp-grid {
@@ -451,12 +552,9 @@ function formatTime(ts) {
   background: var(--surface);
   border: 1px solid var(--border-color);
   border-radius: 12px;
-  padding: 16px;
   cursor: pointer;
   transition: all 0.2s;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  overflow: hidden;
 }
 
 .mp-card:hover {
@@ -465,36 +563,70 @@ function formatTime(ts) {
   transform: translateY(-2px);
 }
 
-.card-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.card-image {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3/4;
+  overflow: hidden;
+  background: var(--surface-hover);
 }
 
-.card-info {
-  min-width: 0;
-  flex: 1;
+.card-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.card-image-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  color: var(--text-muted);
+  background: var(--surface-hover);
+}
+
+.card-like-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+
+.card-like-badge .el-icon.active {
+  color: #fbbf24;
+}
+
+.card-body {
+  padding: 10px 12px 12px;
 }
 
 .card-name {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+  margin-bottom: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.card-author {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
 .card-desc {
   font-size: 12px;
   color: var(--text-secondary);
-  line-height: 1.5;
-  margin: 0;
+  line-height: 1.4;
+  margin: 0 0 8px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -503,8 +635,8 @@ function formatTime(ts) {
 
 .card-footer {
   display: flex;
-  gap: 12px;
-  margin-top: auto;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .card-stat {
@@ -515,8 +647,11 @@ function formatTime(ts) {
   color: var(--text-muted);
 }
 
-.card-stat.like .el-icon { color: #f59e0b; }
-.card-stat.dislike .el-icon { color: #ef4444; }
+.card-adopted-tag {
+  font-size: 11px;
+  color: var(--brand);
+  font-weight: 500;
+}
 
 .mp-empty {
   grid-column: 1 / -1;
@@ -533,50 +668,141 @@ function formatTime(ts) {
   padding-top: 8px;
 }
 
-/* 详情 */
-.detail-content {
+/* ===== 详情对话框：左右分栏 ===== */
+.detail-split {
+  display: flex;
+  min-height: 500px;
+  max-height: 75vh;
+}
+
+.detail-left {
+  width: 280px;
+  flex-shrink: 0;
+  padding: 20px;
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.dl-avatar {
+  width: 200px;
+  height: 260px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface-hover);
+}
+
+.dl-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.dl-avatar-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  color: var(--text-muted);
+}
+
+.dl-votes {
+  display: flex;
+  gap: 10px;
+}
+
+.vote-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border-color);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.vote-btn:hover {
+  border-color: var(--brand);
+}
+
+.like-btn.active {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #f59e0b;
+}
+
+.dislike-btn.active {
+  background: #fee2e2;
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.thumb-down {
+  transform: rotate(180deg);
+}
+
+.dl-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  text-align: center;
+  margin: 0;
+}
+
+.dl-creator-actions {
+  margin-top: auto;
+}
+
+.detail-right {
+  flex: 1;
+  padding: 20px 24px;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.detail-header {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.detail-meta h3 {
+.dr-name {
   margin: 0;
-  font-size: 18px;
+  font-size: 22px;
+  font-weight: 700;
   color: var(--text-primary);
 }
 
-.detail-author {
+.dr-meta {
+  display: flex;
+  gap: 16px;
   font-size: 13px;
   color: var(--text-muted);
 }
 
-.detail-desc {
-  font-size: 14px;
-  color: var(--text-secondary);
-  line-height: 1.6;
-  margin: 0;
+.dr-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.detail-prompt-section {
+.dr-section {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.prompt-label {
-  font-size: 13px;
+.dr-label {
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.prompt-box {
+.dr-box {
   background: var(--surface-hover);
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -584,8 +810,6 @@ function formatTime(ts) {
   font-size: 13px;
   color: var(--text-secondary);
   line-height: 1.6;
-  max-height: 200px;
-  overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -594,19 +818,20 @@ function formatTime(ts) {
   border-left: 3px solid var(--brand);
 }
 
-.detail-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+.dr-bottom {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.adopt-btn {
+  width: 100%;
 }
 
 /* 评论区 */
 .comments-section {
   border-top: 1px solid var(--border-color);
   padding-top: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
 }
 
 .comments-header {
@@ -616,12 +841,14 @@ function formatTime(ts) {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+  margin-bottom: 12px;
 }
 
 .comment-input {
   display: flex;
   gap: 8px;
   align-items: flex-start;
+  margin-bottom: 12px;
 }
 
 .comment-input .el-input {
@@ -631,9 +858,7 @@ function formatTime(ts) {
 .comments-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-height: 300px;
-  overflow-y: auto;
+  gap: 10px;
 }
 
 .comment-item {
@@ -647,7 +872,7 @@ function formatTime(ts) {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .comment-identicon {
@@ -663,14 +888,6 @@ function formatTime(ts) {
   color: var(--text-primary);
 }
 
-.comment-badge {
-  font-size: 10px;
-  background: var(--brand);
-  color: white;
-  padding: 1px 6px;
-  border-radius: 8px;
-}
-
 .comment-text {
   font-size: 13px;
   color: var(--text-secondary);
@@ -681,7 +898,7 @@ function formatTime(ts) {
 .comment-footer {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
   margin-top: 6px;
 }
 
@@ -715,8 +932,19 @@ function formatTime(ts) {
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     gap: 10px;
   }
-  .detail-actions {
+  .detail-split {
     flex-direction: column;
+    max-height: none;
+  }
+  .detail-left {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+    padding: 16px;
+  }
+  .dl-avatar {
+    width: 140px;
+    height: 180px;
   }
 }
 </style>

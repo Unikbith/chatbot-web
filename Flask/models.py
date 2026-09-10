@@ -16,6 +16,7 @@ class User(db.Model):
     gender = db.Column(db.String(10), nullable=True)  # 性别：男/女/神秘
     password_hash = db.Column(db.String(255), nullable=False)
     is_active = db.Column(db.Boolean, default=True)
+    deleted_at = db.Column(db.DateTime, nullable=True)
     token_version = db.Column(db.Integer, default=0)  # 令牌版本：改密/注销时自增以吊销旧 token
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -307,6 +308,7 @@ class Conversation(db.Model):
     frequency_penalty = db.Column(db.Float, nullable=True)
     presence_penalty = db.Column(db.Float, nullable=True)
     auto_play_voice = db.Column(db.Boolean, nullable=True)  # 对话独立：AI 回复自动播报
+    deleted_at = db.Column(db.DateTime, nullable=True)
     settings = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -413,6 +415,7 @@ class PersonaMarketplace(db.Model):
             'likes': self.likes,
             'dislikes': self.dislikes,
             'score': self.likes - self.dislikes,
+            'author_id': self.user_id,
             'author_name': self.author.username if self.author else None,
             'comment_count': self.comments.count() if self.comments else 0,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -473,16 +476,27 @@ class CommentLike(db.Model):
     )
 
 
+class MarketplaceAdopt(db.Model):
+    """记录用户采用了哪些广场卡片，避免重复采用"""
+    __tablename__ = 'marketplace_adopts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    persona_id = db.Column(db.Integer, db.ForeignKey('persona_marketplace.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    template_id = db.Column(db.Integer, db.ForeignKey('persona_templates.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('persona_id', 'user_id', name='uq_marketplace_adopt'),
+    )
+
+
 class DailyCheckIn(db.Model):
     """每日签到"""
     __tablename__ = 'daily_checkins'
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
-    checkin_date = db.Column(db.Date, nullable=False)
+    checkin_time = db.Column(db.DateTime, default=datetime.utcnow)
     bonus_images = db.Column(db.Integer, default=5)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    __table_args__ = (
-        db.UniqueConstraint('user_id', 'checkin_date', name='uq_daily_checkin'),
-    )

@@ -84,26 +84,6 @@
           <div v-if="aiPersonas.length === 0" class="pl-empty">{{ t('暂无', 'None') }}</div>
         </div>
 
-        <div class="persona-group">
-          <div class="persona-group-header">
-            <span class="persona-group-title">{{ t('用户人设', 'User Personas') }}</span>
-            <el-button text size="small" circle @click.stop="emit('open-persona')">
-              <el-icon><Plus /></el-icon>
-            </el-button>
-          </div>
-          <div
-            v-for="p in userPersonas"
-            :key="p.id"
-            class="persona-list-item"
-            @click="selectPersona(p)"
-          >
-            <el-avatar :size="24" :src="p.avatar" class="pl-avatar">
-              {{ p.name?.charAt(0) }}
-            </el-avatar>
-            <span class="pl-name">{{ p.name }}</span>
-          </div>
-          <div v-if="userPersonas.length === 0" class="pl-empty">{{ t('暂无', 'None') }}</div>
-        </div>
       </div>
       
       <div class="conversation-list">
@@ -290,7 +270,6 @@ const props = defineProps({
   freeApiBanner: { type: Boolean, default: false },
   freeApiName: { type: String, default: '' },
   aiPersonas: { type: Array, default: () => [] },
-  userPersonas: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits([

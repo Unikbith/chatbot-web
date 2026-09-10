@@ -429,6 +429,12 @@ const adminApi = {
     a.remove();
     window.URL.revokeObjectURL(url);
   },
+  async marketplaceCards(page = 1) {
+    return adminReq.get(`/api/admin/marketplace?page=${page}`);
+  },
+  async deleteMarketplaceCard(pid) {
+    return adminReq.delete(`/api/admin/marketplace/${pid}`);
+  },
   logout() {
     localStorage.removeItem("admin_token");
     localStorage.removeItem("admin_username");
@@ -479,8 +485,10 @@ const audioApi = {
 };
 
 const marketplaceApi = {
-  list(sort = 'hot', page = 1) {
-    return resAi.get(`/api/marketplace?sort=${sort}&page=${page}`);
+  list(sort = 'hot', page = 1, keyword = '') {
+    let url = `/api/marketplace?sort=${sort}&page=${page}`;
+    if (keyword) url += `&q=${encodeURIComponent(keyword)}`;
+    return resAi.get(url);
   },
   get(id) {
     return resAi.get(`/api/marketplace/${id}`);
@@ -488,11 +496,17 @@ const marketplaceApi = {
   publish(data) {
     return resAi.post('/api/marketplace', data);
   },
+  delete(id) {
+    return resAi.delete(`/api/marketplace/${id}`);
+  },
   vote(id, voteType) {
     return resAi.post(`/api/marketplace/${id}/vote`, { vote_type: voteType });
   },
   adopt(id) {
     return resAi.post(`/api/marketplace/${id}/adopt`);
+  },
+  unadopt(id) {
+    return resAi.post(`/api/marketplace/${id}/unadopt`);
   },
   comments(personaId, sort = 'hot', page = 1) {
     return resAi.get(`/api/marketplace/${personaId}/comments?sort=${sort}&page=${page}`);

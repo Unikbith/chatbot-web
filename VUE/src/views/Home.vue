@@ -47,7 +47,6 @@ const temperature = ref(0.8)
 const personas = ref([])
 const currentPersona = ref(null)
 const aiPersonas = computed(() => personas.value.filter(p => (p.persona_type || 'ai') === 'ai'))
-const userPersonas = computed(() => personas.value.filter(p => (p.persona_type || 'ai') === 'user'))
 
 // 对话模型配置列表（用于对话内选择模型、判定已启用配置）
 const chatConfigs = ref([])
@@ -487,7 +486,6 @@ async function handleConvoSettingsSaved(payload) {
       provider_id: payload.provider_id,
       model_id: payload.model_id,
       persona_id: payload.persona_id,
-      user_persona_id: payload.user_persona_id,
       ai_avatar: payload.ai_avatar,
       user_avatar: payload.user_avatar,
       background_image: payload.background_image,
@@ -547,7 +545,6 @@ async function handleConvoSettingsSaved(payload) {
       :free-api-banner="showFreeApiBanner"
       :free-api-name="chatStatus.free_name"
       :ai-personas="aiPersonas"
-      :user-personas="userPersonas"
       @dismiss-free-api="dismissFreeApiBanner"
       @create="requireLogin(handleNewChat)"
       @select="handleSelectConversation"
@@ -621,7 +618,6 @@ async function handleConvoSettingsSaved(payload) {
       v-model="convoSettingsVisible"
       :conversation="currentConv"
       :ai-personas="aiPersonas"
-      :user-personas="userPersonas"
       :configs="chatConfigs"
       :user-avatar="effectiveUserAvatar"
       :general-opacity="userSettings.message_opacity"
@@ -634,6 +630,7 @@ async function handleConvoSettingsSaved(payload) {
     <!-- 人设广场 -->
     <PersonaMarketplace
       v-model="marketplaceVisible"
+      :current-user-id="user?.id"
       @adopted="loadPersonas"
     />
   </div>

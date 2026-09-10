@@ -172,6 +172,10 @@ def _ensure_schema_columns(app):
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE users ADD COLUMN gender VARCHAR(10)"))
                     print('[迁移] 已为 users 增加 gender 字段')
+                if 'deleted_at' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE users ADD COLUMN deleted_at DATETIME"))
+                    print('[迁移] 已为 users 增加 deleted_at 字段')
             # user_settings.background_cover - 背景展示方式（contain/cover）
             if 'user_settings' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('user_settings')}
@@ -202,6 +206,17 @@ def _ensure_schema_columns(app):
                     with db.engine.begin() as conn:
                         conn.execute(text('ALTER TABLE conversations ADD COLUMN user_persona_id INTEGER'))
                     print('[迁移] 已为 conversations 增加 user_persona_id 字段')
+                if 'deleted_at' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE conversations ADD COLUMN deleted_at DATETIME"))
+                    print('[迁移] 已为 conversations 增加 deleted_at 字段')
+            # daily_checkins.checkin_time - 签到时间（24小时冷却制）
+            if 'daily_checkins' in inspector.get_table_names():
+                cols = {c['name'] for c in inspector.get_columns('daily_checkins')}
+                if 'checkin_time' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE daily_checkins ADD COLUMN checkin_time DATETIME"))
+                    print('[迁移] 已为 daily_checkins 增加 checkin_time 字段')
             # persona_templates.persona_type - AI/用户人设区分
             if 'persona_templates' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('persona_templates')}

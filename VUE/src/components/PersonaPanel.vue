@@ -13,7 +13,7 @@
           :key="persona.id"
           class="persona-card"
           :class="{ active: selectedId === persona.id, 'is-default': persona.is_default }"
-          @click="selectPersona(persona)"
+          @click="editPersona(persona)"
         >
           <el-avatar :size="44" :src="persona.avatar" class="persona-avatar">
             <el-icon><MagicStick /></el-icon>
@@ -23,7 +23,6 @@
               {{ persona.name }}
               <el-tag v-if="persona.is_default" size="small" type="success" effect="light" class="default-tag">默认</el-tag>
               <el-tag v-if="persona.is_system" size="small" type="info" effect="light" class="system-tag">系统</el-tag>
-              <el-tag v-if="persona.persona_type === 'user'" size="small" type="warning" effect="light" class="system-tag">用户</el-tag>
             </div>
             <div class="persona-desc">{{ persona.description || '暂无描述' }}</div>
           </div>
@@ -114,12 +113,6 @@
         </el-form-item>
         <el-form-item v-if="!editingPersona || !editingPersona.is_system">
           <el-checkbox v-model="form.is_default">设为默认角色</el-checkbox>
-        </el-form-item>
-        <el-form-item label="人设类型">
-          <el-radio-group v-model="form.persona_type">
-            <el-radio-button value="ai">AI 人设</el-radio-button>
-            <el-radio-button value="user">用户人设</el-radio-button>
-          </el-radio-group>
         </el-form-item>
       </el-form>
       <template #footer>
