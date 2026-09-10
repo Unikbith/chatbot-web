@@ -570,6 +570,7 @@ async function handleConvoSettingsSaved(payload) {
       :message-opacity="effectiveOpacity"
       :auto-play-voice="autoPlayVoice"
       :is-free-api="chatStatus.is_free"
+      :logged-in="isLoggedIn"
       @open-settings="requireLogin(() => settingsVisible = true)"
       @open-provider="requireLogin(() => providerPanelVisible = true)"
       @open-conversation-settings="openConversationSettings"
