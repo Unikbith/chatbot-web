@@ -36,6 +36,20 @@
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
       </div>
+
+      <!-- 免费 API 提示条：仅在侧边栏展开（拉出）时显示；每次会话只出现一次，可点“知道了”消除 -->
+      <div v-if="freeApiBanner" class="sidebar-free-banner">
+        <span class="sfb-icon"><el-icon><Present /></el-icon></span>
+        <span class="sfb-text">{{ t('当前使用', 'Now using') }} <strong>{{ freeApiName }}</strong>，{{ t('为获得更好体验建议配置自己的 API Key', 'configure your own API Key for a better experience') }}</span>
+        <div class="sfb-actions">
+          <el-button size="small" type="primary" link @click="openProvider">
+            {{ t('去配置', 'Configure') }}
+          </el-button>
+          <el-button size="small" text @click="emit('dismiss-free-api')">
+            {{ t('知道了', 'Got it') }}
+          </el-button>
+        </div>
+      </div>
       
       <el-button 
         class="new-chat-btn" 
@@ -222,7 +236,7 @@ import { computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, ArrowLeft, ArrowRight, ArrowUp, Top, Delete,
-  User, Setting, Tools, SwitchButton, MagicStick, Menu
+  User, Setting, Tools, SwitchButton, MagicStick, Menu, Present
 } from '@element-plus/icons-vue'
 import { t } from '../i18n'
 
@@ -236,12 +250,15 @@ const props = defineProps({
   userAvatar: { type: String, default: null },
   collapsed: { type: Boolean, default: false },
   currentPersona: { type: Object, default: null },
+  freeApiBanner: { type: Boolean, default: false },
+  freeApiName: { type: String, default: '' },
 })
 
 const emit = defineEmits([
   'create', 'select', 'toggle-pin', 'delete',
   'toggle-collapse', 'open-provider', 'open-settings',
-  'open-persona', 'login', 'logout', 'open-user-menu'
+  'open-persona', 'login', 'logout', 'open-user-menu',
+  'dismiss-free-api'
 ])
 
 function createConversation() {
@@ -268,6 +285,10 @@ function confirmDelete(id) {
 
 function toggleCollapse() {
   emit('toggle-collapse')
+}
+
+function openProvider() {
+  emit('open-provider')
 }
 
 function openPersonaPanel() {
@@ -439,6 +460,41 @@ function openUserMenu() {
   border: none;
 }
 
+/* 侧边栏内的免费 API 提示条（土陶暖色，适配明暗主题） */
+.sidebar-free-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 16px 12px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, rgba(222, 128, 84, 0.14) 0%, rgba(214, 103, 66, 0.12) 100%);
+  border: 1px solid rgba(214, 103, 66, 0.28);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sfb-icon {
+  display: inline-flex;
+  color: var(--brand);
+  font-size: 15px;
+}
+
+.sfb-text strong {
+  color: var(--brand);
+}
+
+.sfb-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sfb-actions .el-button {
+  font-size: 12px;
+}
+
 .btn-icon {
   color: var(--brand);
   margin-right: 6px;
@@ -598,5 +654,14 @@ function openUserMenu() {
 .user-info-item {
   font-weight: 600;
   color: #1f2937;
+}
+
+/* 移动端：底部用户卡片避开底部安全区（Home Indicator），避免“贴底”错位 */
+@media (max-width: 768px) {
+  .sidebar-footer {
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
 }
 </style>

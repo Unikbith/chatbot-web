@@ -3,6 +3,7 @@
     v-model="visible"
     title="角色人设管理"
     size="min(500px, 100vw)"
+    class="persona-drawer"
     @close="handleClose"
   >
     <div class="persona-panel">
@@ -279,10 +280,12 @@ function confirmDelete(id) {
   height: 100%;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .persona-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding-right: 4px;
 }

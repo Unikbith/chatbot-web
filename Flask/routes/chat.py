@@ -469,6 +469,7 @@ def vision_chat():
     text = request.form.get('text', '请描述这张图片')
     provider_id = request.form.get('provider_id')
     conversation_id = request.form.get('conversation_id')
+    raw_sys = request.form.get('system_prompt')
 
     image_file = request.files.get('image')
     if not image_file:
@@ -491,6 +492,10 @@ def vision_chat():
     messages = [
         {'role': 'user', 'content': text}
     ]
+    # 识图同样注入人设/图片生成能力约定（前端按能力拼好）；system 消息会被原样转发给模型
+    system_prompt = (raw_sys.strip() if isinstance(raw_sys, str) else '').strip()
+    if system_prompt:
+        messages.insert(0, {'role': 'system', 'content': system_prompt})
 
     # 立即持久化识图的用户消息，避免生成过程中切换对话丢失（与普通聊天一致）
     if conversation_id:

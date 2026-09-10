@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Present, Menu } from '@element-plus/icons-vue'
+import { Menu } from '@element-plus/icons-vue'
 import {
   authApi, providersApi, personaApi, settingsApi, conversationApi, chatApi
 } from '../utils/resAi'
@@ -65,8 +65,9 @@ const userSettings = reactive({
 // 聊天状态
 const chatStatus = ref({ has_provider: false, is_free: false, free_name: '', provider_name: '' })
 
-// 免费 API 提示条：每次打开网页展示一次、可点“知道了”消除；已配置自有模型的用户不展示
-const freeApiBannerDismissed = ref(false)
+// 免费 API 提示条：每次浏览器会话只展示一次、可点“知道了”消除；已配置自有模型的用户不展示。
+// 仅在侧边栏拉出（展开）时渲染在侧边栏内，移动端收起/桌面端折叠时不可见。
+const freeApiBannerDismissed = ref(sessionStorage.getItem('free_api_banner_dismissed') === '1')
 // 是否已配置自有对话模型（任一启用的 chat 配置都视为已配置）
 const hasOwnChatProvider = computed(() =>
   chatConfigs.value.some(p => p.provider_type === 'chat' && p.enabled !== false)
@@ -76,6 +77,7 @@ const showFreeApiBanner = computed(() =>
 )
 function dismissFreeApiBanner() {
   freeApiBannerDismissed.value = true
+  sessionStorage.setItem('free_api_banner_dismissed', '1')
 }
 
 // 对话列表
@@ -154,9 +156,8 @@ onMounted(async () => {
     } catch (e) {
       authModalVisible.value = true
     }
-  } else {
-    authModalVisible.value = true
   }
+  // 未登录时首屏不弹登录框：仅在用户进行需要登录的操作（发消息/新对话/角色/设置等）时才提示，避免一进来就打扰
 
   window.addEventListener('auth:expired', handleAuthExpired)
 })
@@ -187,7 +188,7 @@ function requireLogin(action) {
     authModalVisible.value = true
     return
   }
-  action()
+  if (typeof action === 'function') action()
 }
 
 // ========== 用户数据加载 ==========
@@ -468,7 +469,8 @@ function handleProviderSelect({ provider, type }) {
 
 // ========== 对话独立设置 ==========
 function openConversationSettings() {
-  convoSettingsVisible.value = true
+  // 对话设置需登录（未登录点到时直接弹登录框）
+  requireLogin(() => { convoSettingsVisible.value = true })
 }
 
 async function handleConvoSettingsSaved(payload) {
@@ -520,21 +522,9 @@ async function handleConvoSettingsSaved(payload) {
     <!-- 背景层：仅覆盖聊天区域（红线标注区），侧边栏收起时自动铺满 -->
     <div class="bg-layer" :style="bgStyle"></div>
 
-    <!-- 免费 API 提示条 -->
-    <div v-if="showFreeApiBanner" class="free-api-banner">
-      <span class="free-icon"><el-icon><Present /></el-icon></span>
-      <span>{{ t('当前使用', 'Now using') }} <strong>{{ chatStatus.free_name }}</strong>，{{ t('为获得更好体验建议配置自己的 API Key', 'configure your own API Key for a better experience') }}</span>
-      <el-button size="small" type="primary" link @click="providerPanelVisible = true">
-        {{ t('去配置', 'Configure') }}
-      </el-button>
-      <el-button size="small" text @click="dismissFreeApiBanner">
-        {{ t('知道了', 'Got it') }}
-      </el-button>
-    </div>
-
     <!-- 侧边栏 -->
     <!-- 移动端：收起时显示的菜单按钮 -->
-    <button v-if="isMobile && sidebarCollapsed" class="mobile-menu-btn" :class="{ 'push-down': showFreeApiBanner }" @click="toggleSidebar">
+    <button v-if="isMobile && sidebarCollapsed" class="mobile-menu-btn" @click="toggleSidebar">
       <el-icon><Menu /></el-icon>
     </button>
     <!-- 移动端：侧边栏展开时的遮罩 -->
@@ -549,7 +539,10 @@ async function handleConvoSettingsSaved(payload) {
       :user-avatar="effectiveUserAvatar"
       :collapsed="sidebarCollapsed"
       :current-persona="currentPersona"
-      @create="handleNewChat"
+      :free-api-banner="showFreeApiBanner"
+      :free-api-name="chatStatus.free_name"
+      @dismiss-free-api="dismissFreeApiBanner"
+      @create="requireLogin(handleNewChat)"
       @select="handleSelectConversation"
       @toggle-pin="handleTogglePin"
       @delete="handleDeleteConversation"
@@ -565,7 +558,6 @@ async function handleConvoSettingsSaved(payload) {
     <ChatArea
       ref="chatAreaRef"
       class="chat-wrap"
-      :class="{ 'has-banner': showFreeApiBanner }"
       :conversation-id="currentConvId"
       :conversation-title="currentConvTitle"
       :provider-id="currentProviderId"
@@ -581,6 +573,7 @@ async function handleConvoSettingsSaved(payload) {
       @open-settings="requireLogin(() => settingsVisible = true)"
       @open-provider="requireLogin(() => providerPanelVisible = true)"
       @open-conversation-settings="openConversationSettings"
+      @require-login="requireLogin"
       @title-change="handleTitleChange"
       @new-chat="handleNewChat"
       @conversation-created="handleConversationCreated"
@@ -660,39 +653,14 @@ async function handleConvoSettingsSaved(payload) {
   min-width: 0;
 }
 
-.free-api-banner {
-  position: fixed;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 20px;
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  color: #92400e;
-  font-size: 13px;
-  border-radius: 0 0 12px 12px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-}
-
-.free-icon {
-  font-size: 16px;
-}
-
-.free-api-banner strong {
-  color: #78350f;
-}
-
 /* ===== 移动端响应式 ===== */
 .mobile-menu-btn {
   position: fixed;
-  top: 14px;
+  top: 12px;
   left: 14px;
   z-index: 60;
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   border: 1px solid var(--border-color);
   border-radius: 12px;
   background: var(--surface);
@@ -703,7 +671,7 @@ async function handleConvoSettingsSaved(payload) {
   justify-content: center;
   cursor: pointer;
   font-size: 20px;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s ease, background 0.2s;
 }
 
 .mobile-menu-btn:active { transform: scale(0.92); }
@@ -741,33 +709,5 @@ async function handleConvoSettingsSaved(payload) {
   .chat-wrap {
     padding-bottom: 0;
   }
-
-  /* 免费 API 提示条：手机上压缩为单行，避免横向溢出崩坏 */
-  .free-api-banner {
-    top: 8px;
-    left: 8px;
-    right: 8px;
-    transform: none;
-    flex-wrap: nowrap;
-    gap: 4px 6px;
-    padding: 6px 10px;
-    font-size: 12px;
-    border-radius: 10px;
-  }
-  .free-api-banner > span:nth-child(2) {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-  .free-api-banner :deep(.el-button) {
-    margin-left: 0;
-    padding: 2px 8px;
-  }
-
-  /* banner 显示时：菜单按钮与聊天区下移，避免被提示条遮挡 */
-  .mobile-menu-btn.push-down { top: 48px; }
-  .chat-wrap.has-banner { padding-top: 44px; }
 }
 </style>

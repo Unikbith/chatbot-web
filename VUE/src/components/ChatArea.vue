@@ -40,7 +40,8 @@ const props = defineProps({
   messageOpacity: { type: Number, default: 0.9 },
   settings: { type: Object, default: null },
   isFreeApi: { type: Boolean, default: false },
-  autoPlayVoice: { type: Boolean, default: false }
+  autoPlayVoice: { type: Boolean, default: false },
+  loggedIn: { type: Boolean, default: false }
 });
 
 const emit = defineEmits([
@@ -50,7 +51,8 @@ const emit = defineEmits([
   'titleChange', 
   'newChat',
   'updateConversation',
-  'conversationCreated'
+  'conversationCreated',
+  'requireLogin'
 ]);
 
 const opacityVal = computed(() => {
@@ -59,6 +61,11 @@ const opacityVal = computed(() => {
 });
 
 const greetingText = () => t('你好！有什么可以帮你的吗？', 'Hello! How can I help you?');
+
+// 开场白：尚未产生任何 AI 回复时始终展示（发送用户消息后也不会突兀消失，直到 AI 开始回话）
+const showWelcome = computed(() =>
+  !messages.value.some(m => m.role === 'assistant' && (m.content || m.raw))
+);
 
 // 消息
 const createMessage = (role, content = '', imageUrl = null) => ({ 
@@ -137,9 +144,19 @@ const ensureConversation = async () => {
   return null;
 };
 
+// 发送消息前先确认已登录；未登录直接弹登录框且不发请求（需求：输入框未登录不可发送）
+const guardLogin = () => {
+  if (!props.loggedIn) {
+    emit('requireLogin')
+    return false
+  }
+  return true
+}
+
 // 发送消息
 const handleSend = async () => {
   if (loading.value) { abortRequest(); return; }
+  if (!guardLogin()) return;
 
   const text = inputText.value.trim();
   if (!text && !selectedImage.value) return;
@@ -272,8 +289,9 @@ async function imageLlmToolsEnabled() {
   return llmToolsCache;
 }
 
-// 从模型回复里提取「生图/改图」标记并代为调用图片生成，结果以图片形式附到该消息
-async function handleLlmImageMarkers(msg) {
+// 从模型回复里提取「生图/改图」标记并代为调用图片生成，结果以图片形式附到该消息。
+// reference 供「改图（图生图）」使用：识图对话中用户附带的参考图 / 结合人设生成新图
+async function handleLlmImageMarkers(msg, reference = null) {
   const src = msg.raw || msg.content || '';
   if (!src) return;
   const m2i = src.match(/生图[:：]\s*([^\n]+)/);
@@ -285,7 +303,9 @@ async function handleLlmImageMarkers(msg) {
   msg.raw = ((msg.raw || '').replace(marker[0], '') || '').trim();
   msg.content = ((msg.content || '').replace(marker[0], '') || '').trim();
   try {
-    const res = await imageApi.generate({ prompt, references: [] });
+    // 改图时把用户/参考图作为 references 传入，实现「结合人设 + 参考图生成新图」
+    const useRef = mImg ? (reference ? [reference] : []) : [];
+    const res = await imageApi.generate({ prompt, references: useRef });
     if (res.code === 200 && res.data?.url) {
       msg.imageUrl = res.data.url;
       if (res.data?.free) {
@@ -353,7 +373,11 @@ const previewImage = (url) => {
 
 // 识图对话
 const handleVisionChat = async (text) => {
-  messages.value.push(createMessage('user', text, selectedImage.value.dataUrl));
+  // 先快照用户上传的图片，后续 clearImage 不会影响它（既是消息图，也作改图参考图）
+  const img = selectedImage.value
+  const refDataUrl = img?.dataUrl || null
+
+  messages.value.push(createMessage('user', text, refDataUrl));
   inputText.value = '';
   imageUploadRef.value?.clearImage();
   // 用户发送消息后立即定位到底部
@@ -370,13 +394,18 @@ const handleVisionChat = async (text) => {
   try {
     const formData = new FormData();
     formData.append('text', text);
-    formData.append('image', selectedImage.value.file);
+    formData.append('image', img?.file);
     if (props.providerId) {
       formData.append('provider_id', props.providerId);
     }
     if (convId) {
       formData.append('conversation_id', convId);
     }
+    // 识图同样注入人设 + 图片生成能力约定：模型输出「改图」标记后，前端结合用户参考图自动生图
+    const personaPrompt = (props.systemPrompt || '').trim();
+    formData.append('system_prompt', (
+      personaPrompt + '\n\n[系统能力-图片生成] 当用户提供图片并希望在保留图片元素的同时生成/修改图片（例如想看"你的样子"、把图中的元素融入人设风格制作新图）时，只回复一行：`改图：<用中文描述修改要求>`，用户上传的图片会自动作为参考图使用，不要输出其它解释。'
+    ).trim());
 
     const response = await chatApi.vision(formData, { signal: abortController.signal });
     await readStream(response, (data) => {
@@ -385,6 +414,9 @@ const handleVisionChat = async (text) => {
       if (content) { aiMsg.raw += content; aiMsg.streaming = true; }
       if (html) { aiMsg.content = html; aiMsg.streaming = false; }
     });
+
+    // 模型若输出「改图」标记，则结合人设与用户上传的参考图自动生图并贴到本条回复
+    await handleLlmImageMarkers(aiMsg, refDataUrl);
 
   } catch (error) {
     if (error.name === 'AbortError') {
@@ -542,6 +574,11 @@ const cancelEditTitle = () => {
 
 // 提示词工具面板
 const promptToolOpen = ref(false);
+// 未登录时打开提示词工具需先登录
+function openPromptTool() {
+  if (!guardLogin()) return
+  promptToolOpen.value = true
+}
 // 将生成结果插入输入框
 const handlePromptInsert = (text) => {
   inputText.value = text;
@@ -597,7 +634,7 @@ onUnmounted(() => {
           <el-button circle :icon="MagicStick" @click="emit('openConversationSettings')" />
         </el-tooltip>
         <el-tooltip :content="t('提示词工具', 'Prompt Tool')">
-          <el-button circle :icon="Notebook" @click="promptToolOpen = true" />
+          <el-button circle :icon="Notebook" @click="openPromptTool" />
         </el-tooltip>
         <el-tooltip :content="t('模型设置', 'Model Settings')">
           <el-button circle :icon="Setting" @click="emit('openProvider')" />
@@ -607,8 +644,8 @@ onUnmounted(() => {
 
     <!-- 消息列表 -->
     <div class="chat-body">
-      <!-- 空对话开场白：任何对话无消息时始终展示，切换对话也不会消失 -->
-      <div v-if="messages.length === 0" class="chat-welcome">
+      <!-- 空对话开场白：尚未产生 AI 回复时始终展示，切换对话/发送消息也不会突兀消失 -->
+      <div v-if="showWelcome" class="chat-welcome">
         <div class="welcome-avatar">
           <img v-if="aiAvatar" :src="aiAvatar" class="avatar-img" alt="AI" />
           <span v-else>AI</span>
@@ -676,25 +713,28 @@ onUnmounted(() => {
               </div>
 
               <!-- 消息操作 -->
-              <div v-if="item.role === 'assistant' && item.content" class="message-actions">
+              <div v-if="item.role === 'assistant' && (item.content || item.imageUrl)" class="message-actions">
+                <!-- 仅最新一条 AI 回复显示「重新生成」；历史记录只保留语音 -->
                 <el-button 
+                  v-if="isLatestAssistant(index)"
                   size="small" 
                   text 
                   :icon="RefreshLeft" 
                   @click="regenerate(index)"
                   class="action-btn"
-                  :disabled="loading || !isLatestAssistant(index)"
+                  :disabled="loading"
                 >
                   {{ t('重新生成', 'Regenerate') }}
                 </el-button>
                 <el-button 
+                  v-if="(item.content || item.raw) && !item.imageUrl"
                   size="small" 
                   text 
                   :icon="Bell" 
-                  @click="speakText(item.content, index)"
+                  @click="speakText(item.content || item.raw, index)"
                   class="action-btn"
                 >
-                  {{ speakingIndex === index ? t('播报中', 'Speaking') : t('语音播报', 'Speak') }}
+                  {{ speakingIndex === index ? t('播放中', 'Playing') : t('语音', 'Voice') }}
                 </el-button>
               </div>
             </div>

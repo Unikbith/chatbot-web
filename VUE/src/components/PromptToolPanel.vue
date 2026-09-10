@@ -126,7 +126,8 @@ onMounted(() => {
   <el-drawer
     :model-value="modelValue"
     @update:model-value="v => emit('update:modelValue', v)"
-    size="440px"
+    size="min(440px, 100%)"
+    class="pt-drawer"
     append-to-body
     :destroy-on-close="false"
   >
@@ -380,5 +381,20 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+</style>
+
+<style>
+/* 移动端：抽屉宽度自适应，内容可滚动并适配底部安全区（append-to-body 需用全局样式） */
+@media (max-width: 768px) {
+  .pt-drawer .el-drawer__body,
+  .persona-drawer .el-drawer__body {
+    height: 100%;
+    overflow-y: auto;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+    box-sizing: border-box;
+  }
 }
 </style>
