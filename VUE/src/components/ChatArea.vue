@@ -455,6 +455,9 @@ const handleVisionChat = async (text) => {
 };
 
 // 语音播报
+// 保存当前播放的 object URL，便于在停止/卸载时释放，避免 blob 常驻内存
+let currentAudioUrl = null;
+
 const speakText = async (text, index) => {
   stopSpeaking();
   
@@ -465,16 +468,18 @@ const speakText = async (text, index) => {
     // 音色使用 TTS 模型配置中的音色（不传 voice，由后端按提供商配置决定）
     const blob = await audioApi.textToSpeech(plainText, '');
     const url = URL.createObjectURL(blob);
-    
+    currentAudioUrl = url;
+
     audioElement = new Audio(url);
     audioElement.onended = () => {
       isSpeaking.value = false;
       speakingIndex.value = null;
-      URL.revokeObjectURL(url);
+      releaseAudioUrl();
     };
     audioElement.onerror = () => {
       isSpeaking.value = false;
       speakingIndex.value = null;
+      releaseAudioUrl();
       logger.error('语音播放失败');
     };
     isSpeaking.value = true;
@@ -486,11 +491,23 @@ const speakText = async (text, index) => {
   }
 };
 
+// 释放当前音频对象 URL（幂等）
+const releaseAudioUrl = () => {
+  if (currentAudioUrl) {
+    try { URL.revokeObjectURL(currentAudioUrl); } catch { /* 忽略 */ }
+    currentAudioUrl = null;
+  }
+};
+
 const stopSpeaking = () => {
   if (audioElement) {
+    audioElement.onended = null;
+    audioElement.onerror = null;
     audioElement.pause();
+    audioElement.src = '';
     audioElement = null;
   }
+  releaseAudioUrl();
   isSpeaking.value = false;
   speakingIndex.value = null;
 };
@@ -631,6 +648,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   abortRequest();
+  stopSpeaking();
 });
 </script>
 

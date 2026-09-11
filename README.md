@@ -149,6 +149,85 @@ npm run dev
 
 前端默认运行在 `http://localhost:5173`
 
+### 生产部署（Nginx + gunicorn）
+
+```bash
+# 1. 构建前端（产物在 VUE/dist）
+cd VUE && npm ci && npm run build
+
+# 2. 启动后端（生产环境务必设置 FLASK_ENV=production 与强随机密钥）
+cd ../Flask
+pip install -r requirements.txt
+FLASK_ENV=production gunicorn -w 4 -k gthread --threads 4 -b 127.0.0.1:5000 app:create_app()
+```
+
+Nginx 参考配置（已针对首屏性能做 gzip 与长期缓存优化）：
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name your-domain.com;
+    root /path/to/chatbot-web/VUE/dist;
+    index index.html;
+
+    # gzip 压缩：JS/CSS 体积可减少约 70%，显著加快首屏
+    gzip on;
+    gzip_comp_level 6;
+    gzip_min_length 1k;
+    gzip_vary on;
+    gzip_types text/plain text/css application/javascript application/json
+               application/xml image/svg+xml application/wasm;
+
+    # 带 hash 的静态资源长期缓存（内容变更即换名，可放心 immutable）
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+    location ~* \.(png|jpe?g|gif|webp|svg|woff2?)$ {
+        expires 30d;
+        add_header Cache-Control "public";
+    }
+
+    # index.html 不缓存，保证每次拿到最新入口
+    location = /index.html {
+        add_header Cache-Control "no-cache, must-revalidate";
+    }
+
+    # API 反向代理（流式接口需关闭缓冲）
+    location /api/ {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_buffering off;              # SSE 流式聊天必须关闭
+        proxy_read_timeout 300s;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 安全响应头
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+}
+```
+
+> 部署在 Nginx/网关之后时，将 `Flask/.env` 的 `TRUST_PROXY_HEADERS` 设为 `true`，
+> 并把 `CORS_ORIGINS` 改为你的真实域名。
+
+### ⚠️ 上线前安全清单
+
+1. **轮换密钥**：`.env` 中若曾填写过真实密钥，上线前务必在对应平台重置
+   （SMTP 授权码、免费 API Key、生图 Key、管理员密码），并重新生成
+   `SECRET_KEY` / `JWT_SECRET_KEY`（`python -c "import secrets;print(secrets.token_hex(32))"`）。
+2. **不要提交 `.env`**：`.env` 已被 `.gitignore` 排除；服务器上用环境变量注入，而非上传文件。
+3. **HTTPS**：生产必须启用 HTTPS，否则令牌与内容明文传输。
+4. **Access Token 有效期** 默认 2 小时（`JWT_ACCESS_TOKEN_EXPIRES`），过期后前端自动静默续期。
+
 ### SMTP 邮件配置（邮箱注册 / 重置密码）
 
 在 `Flask/.env` 中配置邮件服务，用于发送注册与重置密码的验证码：
