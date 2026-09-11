@@ -456,7 +456,7 @@ def list_marketplace():
 
     items = []
     for p in page_items:
-        d = p.to_dict()
+        d = p.to_dict(comment_count=comment_counts.get(p.id, 0))
         d['comment_count'] = comment_counts.get(p.id, 0)
         d['user_vote'] = user_votes.get(p.id)
         d['is_adopted'] = p.id in adopted_ids

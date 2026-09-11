@@ -433,7 +433,9 @@ class PersonaMarketplace(db.Model):
     comments = db.relationship('MarketplaceComment', backref='persona_card', lazy='dynamic',
                                cascade='all, delete-orphan', order_by='MarketplaceComment.created_at.desc()')
 
-    def to_dict(self, include_prompt=False):
+    def to_dict(self, include_prompt=False, comment_count=None):
+        """序列化。comment_count 可由调用方预先批量聚合传入，
+        避免逐卡片执行 count() 造成 N+1 查询。"""
         data = {
             'id': self.id,
             'name': self.name,
@@ -447,7 +449,10 @@ class PersonaMarketplace(db.Model):
             'score': self.likes - self.dislikes,
             'author_id': self.user_id,
             'author_name': self.author.username if self.author else None,
-            'comment_count': self.comments.count() if self.comments else 0,
+            'comment_count': (
+                comment_count if comment_count is not None
+                else (self.comments.count() if self.comments else 0)
+            ),
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
         if include_prompt:
