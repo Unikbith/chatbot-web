@@ -3,6 +3,7 @@ import { ref, watch, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { User, Lock, Message, Close } from '@element-plus/icons-vue';
 import { authApi } from '../utils/resAi';
+import { tokenStore } from '../utils/tokenStore';
 
 import brandIcon from '../assets/icon/ChatBotIcon.png'
 
@@ -284,9 +285,9 @@ const handleSubmit = async () => {
     }
 
     if (res.code === 200) {
-      // 保存 token
-      localStorage.setItem('chatbot_token', res.data.access_token);
-      localStorage.setItem('chatbot_refresh_token', res.data.refresh_token);
+      // 保存 token（access 存 sessionStorage，refresh 存 localStorage）
+      tokenStore.setAccess(res.data.access_token);
+      tokenStore.setRefresh(res.data.refresh_token);
       localStorage.setItem('chatbot_user', JSON.stringify(res.data.user));
       
       ElMessage.success(isLogin.value ? '登录成功' : '注册成功');

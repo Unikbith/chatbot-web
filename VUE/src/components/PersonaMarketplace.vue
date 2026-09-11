@@ -55,8 +55,8 @@
         </div>
       </div>
 
-      <!-- 卡片网格 -->
-      <div v-loading="loading" class="mp-grid">
+      <!-- 卡片网格：滚动到底部自动加载下一页 -->
+      <div ref="gridRef" v-loading="loading" class="mp-grid">
         <div
           v-for="item in items"
           :key="item.id"
@@ -110,17 +110,6 @@
         </div>
       </div>
 
-      <!-- 分页 -->
-      <div v-if="totalPages > 1" class="mp-pagination">
-        <el-pagination
-          v-model:current-page="currentPage"
-          :page-size="pageSize"
-          :total="total"
-          layout="prev, pager, next"
-          small
-          @current-change="loadList"
-        />
-      </div>
     </div>
 
     <!-- 详情对话框：左右分栏 -->
@@ -279,6 +268,11 @@
               <div v-if="!commentsLoading && comments.length === 0" class="no-comments">
                 {{ t('暂无评论', 'No comments yet') }}
               </div>
+              <div v-if="!commentsLoading && commentsHasMore" class="comments-load-more">
+                <button type="button" @click="loadMoreComments">
+                  {{ t('加载更多评论', 'Load more comments') }}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -375,7 +369,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch } from 'vue'
+import logger from '@/utils/logger';
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Sunny, Search, ZoomIn, ChatLineRound } from '@element-plus/icons-vue'
 import { marketplaceApi, uploadApi } from '../utils/resAi'
@@ -420,7 +415,8 @@ const genderFilter = ref('')
 const currentPage = ref(1)
 const pageSize = 12
 const total = ref(0)
-const totalPages = computed(() => Math.ceil(total.value / pageSize))
+const hasMore = computed(() => items.value.length < total.value)
+const gridRef = ref(null)
 
 let _searchTimer = null
 function debouncedSearch() {
@@ -466,6 +462,9 @@ const commentSort = ref('hot')
 const commentTotal = ref(0)
 const newComment = ref('')
 const commentSubmitting = ref(false)
+const commentsPage = ref(1)
+const COMMENTS_PAGE_SIZE = 5
+const commentsHasMore = computed(() => comments.value.length < commentTotal.value)
 
 // 评论为扁平结构：只评论人物卡，不支持对评论的回复
 
@@ -507,20 +506,47 @@ async function refreshDetailAdoptState() {
   } catch (e) { /* silent */ }
 }
 
-async function loadList() {
+async function loadList(append = false) {
+  if (!append) {
+    currentPage.value = 1
+    items.value = []
+    total.value = 0
+  }
   loading.value = true
   try {
-    const res = await marketplaceApi.list(sortMode.value, currentPage.value, searchKeyword.value.trim(), genderFilter.value)
+    const res = await marketplaceApi.list(sortMode.value, currentPage.value, searchKeyword.value.trim(), genderFilter.value, pageSize)
     if (res.code === 200) {
-      items.value = res.data.items || []
+      const newItems = res.data.items || []
       total.value = res.data.total || 0
+      if (append) {
+        items.value.push(...newItems)
+      } else {
+        items.value = newItems
+      }
     }
   } catch (e) {
-    console.error('加载卡片广场失败', e)
+    logger.error('加载卡片广场失败', e)
   } finally {
     loading.value = false
   }
 }
+
+function onGridScroll() {
+  const el = gridRef.value
+  if (!el || loading.value || !hasMore.value) return
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) {
+    currentPage.value += 1
+    loadList(true)
+  }
+}
+
+onMounted(() => {
+  if (gridRef.value) gridRef.value.addEventListener('scroll', onGridScroll)
+})
+
+onUnmounted(() => {
+  if (gridRef.value) gridRef.value.removeEventListener('scroll', onGridScroll)
+})
 
 async function openDetail(item) {
   try {
@@ -608,20 +634,41 @@ async function handleDeleteCard() {
   }
 }
 
-async function loadComments() {
+async function loadComments(append = false) {
   if (!detailData.value) return
+  if (!append) {
+    commentsPage.value = 1
+    comments.value = []
+    commentTotal.value = 0
+  }
   commentsLoading.value = true
   try {
-    const res = await marketplaceApi.comments(detailData.value.id, commentSort.value, 1)
+    const res = await marketplaceApi.comments(
+      detailData.value.id,
+      commentSort.value,
+      commentsPage.value,
+      COMMENTS_PAGE_SIZE
+    )
     if (res.code === 200) {
-      comments.value = res.data.items || []
+      const items = res.data.items || []
       commentTotal.value = res.data.total || 0
+      if (append) {
+        comments.value.push(...items)
+      } else {
+        comments.value = items
+      }
     }
   } catch (e) {
-    console.error('加载评论失败', e)
+    logger.error('加载评论失败', e)
   } finally {
     commentsLoading.value = false
   }
+}
+
+async function loadMoreComments() {
+  if (commentsLoading.value || !commentsHasMore.value) return
+  commentsPage.value += 1
+  await loadComments(true)
 }
 
 async function submitComment() {
@@ -1293,6 +1340,28 @@ function formatDate(ts) {
   color: var(--text-muted);
   font-size: 13px;
   padding: 20px;
+}
+
+.comments-load-more {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.comments-load-more button {
+  background: none;
+  border: none;
+  font-size: 13px;
+  color: var(--brand);
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.comments-load-more button:hover {
+  background: var(--surface-hover);
+  text-decoration: underline;
 }
 
 /* 发布表单头像预览 */

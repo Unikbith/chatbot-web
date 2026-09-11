@@ -60,3 +60,64 @@ def block_ssrf(url, enabled=True):
     bad = classify_url(url)
     if bad:
         raise ValueError(f"请求被 SSRF 防护拦截：{bad}")
+
+
+# 出站请求允许的协议白名单：禁止 file:// / gopher:// / ftp:// 等非 HTTP(S) 协议
+ALLOWED_SCHEMES = ('http', 'https')
+
+# 参考图允许的最大数量与单个 Data URI 最大长度（约 8MB base64），避免请求体过大
+MAX_REFERENCE_IMAGES = 6
+MAX_REFERENCE_DATA_URI_LEN = 8 * 1024 * 1024
+
+
+def check_scheme(url, schemes=ALLOWED_SCHEMES):
+    """校验 URL 协议是否在白名单内。安全返回 None，否则返回风险描述。"""
+    if not url:
+        return '地址为空'
+    scheme = (urlparse(url).scheme or '').lower()
+    if scheme not in schemes:
+        return f"不支持的协议: {scheme or '(空)'}，仅允许 {'/'.join(schemes)}"
+    return None
+
+
+def validate_reference_images(references, enabled=True):
+    """校验图生图参考图列表。
+
+    - 仅接受 ``https://`` / ``http://`` 公网 URL 或 ``data:image/...;base64,`` Data URI；
+    - 对 URL 调用 SSRF 校验，拦截内网 / 回环 / 云元数据地址（防止诱导第三方
+      平台请求内网，或被当作 OOB 探测通道）；
+    - 限制列表长度与单个 Data URI 体积。
+
+    返回规范化后的列表；任一元素非法则抛出 ValueError。
+    """
+    if references is None:
+        return []
+    if not isinstance(references, list):
+        raise ValueError('参考图格式不合法，应为列表')
+    if len(references) > MAX_REFERENCE_IMAGES:
+        raise ValueError(f'参考图数量过多，最多 {MAX_REFERENCE_IMAGES} 张')
+
+    cleaned = []
+    for raw in references:
+        if not raw or not isinstance(raw, str):
+            continue
+        s = raw.strip()
+        if not s:
+            continue
+        if s.startswith('data:'):
+            if not s.startswith('data:image/'):
+                raise ValueError('参考图 Data URI 必须为图片类型')
+            if len(s) > MAX_REFERENCE_DATA_URI_LEN:
+                raise ValueError('参考图体积过大，请压缩后重试')
+            cleaned.append(s)
+            continue
+        bad_scheme = check_scheme(s)
+        if bad_scheme:
+            raise ValueError(f'参考图地址不合法：{bad_scheme}')
+        if enabled:
+            bad = classify_url(s)
+            if bad:
+                raise ValueError(f'参考图地址被 SSRF 防护拦截：{bad}')
+        cleaned.append(s)
+
+    return cleaned

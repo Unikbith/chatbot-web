@@ -7,7 +7,7 @@ ID（name）、API Key、API Base URL。每个提供商下可管理多个模型�
   - 自定义模型：手动输入模型 ID（列表拉取不到的模型）
 """
 import requests
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy.exc import IntegrityError
 from extensions import db
@@ -398,9 +398,12 @@ def test_provider(provider_id):
             ok, err = _generic_request_ok(provider)
         if ok:
             return jsonify({'code': 200, 'message': '连接成功', 'data': {'ok': True}})
-        return jsonify({'code': 500, 'message': f'连接失败: {err}'})
+        # 对外脱敏：原始错误仅记录到服务端日志
+        current_app.logger.error('配置测试失败 user=%s provider=%s: %s', user_id, provider_id, err)
+        return jsonify({'code': 500, 'message': '连接失败，请检查配置是否正确'})
     except Exception as e:
-        return jsonify({'code': 500, 'message': f'测试失败: {str(e)}'})
+        current_app.logger.error('配置测试异常 user=%s provider=%s: %s', user_id, provider_id, e)
+        return jsonify({'code': 500, 'message': '测试失败，请稍后重试'})
 
 
 # ---------------------------------------------------------------------------
@@ -468,7 +471,7 @@ def fetch_models(provider_id):
     # SSRF 防护：拉取模型同样纳入拦截
     err = AIService._ssrf_error(provider.api_url)
     if err:
-        return jsonify({'code': 500, 'message': f'获取模型列表失败: {err}'}), 500
+        return jsonify({'code': 500, 'message': '获取模型列表失败：接口地址不可用'}), 500
 
     base = AIService._resolve_base(provider.api_url)
     models_url = f"{base}/models"
@@ -483,7 +486,8 @@ def fetch_models(provider_id):
             }), 500
         data = resp.json().get('data', [])
     except requests.RequestException as e:
-        return jsonify({'code': 500, 'message': f'获取模型列表失败: {str(e)}'}), 500
+        current_app.logger.error('拉取模型列表失败 user=%s provider=%s: %s', user_id, provider_id, e)
+        return jsonify({'code': 500, 'message': '获取模型列表失败，请稍后重试'}), 500
 
     # 标记已配置的模型
     configured = {
@@ -538,9 +542,18 @@ def test_model(provider_id, model_id):
         ok, err = _chat_request_ok(provider, pm.model_id)
         if ok:
             return jsonify({'code': 200, 'message': '连接正常', 'data': {'ok': True}})
-        return jsonify({'code': 500, 'message': f'连接失败: {err}'})
+        # 对外脱敏：原始错误仅记录到服务端日志，避免泄漏厂商内部信息
+        current_app.logger.error(
+            '模型测试失败 user=%s provider=%s model=%s: %s',
+            user_id, provider_id, pm.model_id, err,
+        )
+        return jsonify({'code': 500, 'message': '连接失败，请检查配置是否正确'})
     except Exception as e:
-        return jsonify({'code': 500, 'message': f'测试失败: {str(e)}'})
+        current_app.logger.error(
+            '模型测试异常 user=%s provider=%s model=%s: %s',
+            user_id, provider_id, pm.model_id, e,
+        )
+        return jsonify({'code': 500, 'message': '测试失败，请稍后重试'})
 
 
 @provider_bp.route('/<int:provider_id>/models/<int:model_id>', methods=['DELETE'])

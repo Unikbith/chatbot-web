@@ -12,6 +12,7 @@ from services.markdown_streamer import (
     sse_content, sse_reasoning, sse_done, sse_html
 )
 from services.upload_guard import check_upload, detect_image_type, MAX_IMAGE_SIZE
+from services.rate_limit import rate_limit
 
 chat_bp = Blueprint('chat', __name__, url_prefix='/api/chat')
 
@@ -55,7 +56,7 @@ def iter_sse_content(response, full_content_holder, reasoning_holder, model_hold
                 except (json.JSONDecodeError, KeyError, IndexError):
                     pass
     except GeneratorExit:
-        print("[客户端断开] 停止生成")
+        current_app.logger.info('客户端断开，停止生成')
         raise
 
     return new_content, finish_reason
@@ -213,7 +214,7 @@ def _save_ai_message(conversation_id, user_id, content, reasoning=None,
         conv.updated_at = db.func.now()
         db.session.commit()
     except Exception as e:
-        print(f"[保存消息失败] {type(e).__name__}: {e}", flush=True)
+        current_app.logger.error('保存消息失败: %s: %s', type(e).__name__, e)
 
 @chat_bp.route('/status', methods=['GET'])
 @jwt_required()
@@ -417,13 +418,19 @@ def chat():
             )
 
             if response is None:
-                yield sse_content(f'出错了：AI 服务请求失败 - {error}')
+                current_app.logger.error('AI 对话请求失败 user=%s: %s', user_id, error)
+                yield sse_content('出错了：AI 服务请求失败，请检查配置或稍后重试')
                 yield sse_done()
                 return
 
             if response.status_code != 200:
-                error_text = response.text[:200] if response.text else "无响应体"
-                yield sse_content(f'出错了：API 返回错误 - HTTP {response.status_code}: {error_text}')
+                # 原始响应体仅记录到服务端日志，避免厂商内部地址/配额/堆栈泄漏给客户端
+                error_text = response.text[:500] if response.text else "无响应体"
+                current_app.logger.error(
+                    'AI 对话返回非 200 user=%s status=%s body=%s',
+                    user_id, response.status_code, error_text,
+                )
+                yield sse_content('出错了：AI 服务请求失败，请检查配置或稍后重试')
                 yield sse_done()
                 return
 
@@ -457,13 +464,12 @@ def chat():
                     title_source=last_user_text,
                     model_id=effective_model,
                 )
-            print("[用户停止] 生成被中断")
+            current_app.logger.info('用户停止，生成被中断 user=%s', user_id)
             raise
         except Exception as e:
-            print(f"[错误] {str(e)}")
-            yield sse_content(f'出错了：服务端错误 - {str(e)}')
+            current_app.logger.error('对话流生成异常 user=%s: %s', user_id, e)
+            yield sse_content('出错了：服务端错误，请稍后重试')
             yield sse_done()
-
     return Response(
         stream_with_context(generate()),
         mimetype='text/event-stream',
@@ -544,13 +550,18 @@ def vision_chat():
             )
 
             if response is None:
-                yield sse_content(f'出错了：识图服务请求失败 - {error}')
+                current_app.logger.error('识图请求失败 user=%s: %s', user_id, error)
+                yield sse_content('出错了：识图服务请求失败，请检查配置或稍后重试')
                 yield sse_done()
                 return
 
             if response.status_code != 200:
-                error_text = response.text[:200] if response.text else "无响应体"
-                yield sse_content(f'出错了：API 返回错误 - HTTP {response.status_code}: {error_text}')
+                error_text = response.text[:500] if response.text else "无响应体"
+                current_app.logger.error(
+                    '识图返回非 200 user=%s status=%s body=%s',
+                    user_id, response.status_code, error_text,
+                )
+                yield sse_content('出错了：识图服务请求失败，请检查配置或稍后重试')
                 yield sse_done()
                 return
 
@@ -578,11 +589,11 @@ def vision_chat():
                     model_name=model_holder[0],
                     title_source=text,
                 )
-            print("[用户停止] 识图生成被中断")
+            current_app.logger.info('用户停止，识图生成被中断 user=%s', user_id)
             raise
         except Exception as e:
-            print(f"[识图错误] {str(e)}")
-            yield sse_content(f'出错了：服务端错误 - {str(e)}')
+            current_app.logger.error('识图流生成异常 user=%s: %s', user_id, e)
+            yield sse_content('出错了：服务端错误，请稍后重试')
             yield sse_done()
 
     return Response(
@@ -690,6 +701,11 @@ def prompt_tool_generate():
     - 传了 base_info 则基于该基础信息扩写；未传则随机生成一个主题
     """
     user_id = int(get_jwt_identity())
+    # 提示词生成会调用上游模型：按用户限流，每分钟最多 15 次
+    limited = rate_limit('prompt_tool', 15, 60, scope='user')
+    if limited:
+        return limited
+
     data = request.get_json(silent=True) or {}
     category = data.get('category')
     if category not in ('character', 'image'):

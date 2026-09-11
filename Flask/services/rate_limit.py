@@ -28,3 +28,35 @@ class SlidingWindowLimiter:
 
 
 limiter = SlidingWindowLimiter()
+
+
+def client_ip():
+    """获取客户端真实 IP（仅可信代理后才解析 X-Forwarded-For）。"""
+    from flask import request, current_app
+    if current_app.config.get('TRUST_PROXY_HEADERS'):
+        fwd = request.headers.get('X-Forwarded-For')
+        if fwd:
+            first = fwd.split(',')[0].strip()
+            if first:
+                return first
+    return request.remote_addr or 'unknown'
+
+
+def rate_limit(key, limit, window=60, scope=None):
+    """通用限流：超限返回 429 响应，否则返回 None。
+
+    key  限流维度（如端点名），实际 key 会拼接用户身份或客户端 IP；
+    scope 为 'user' 时按登录用户限流，否则按 IP 限流。
+    """
+    from flask import jsonify
+    from flask_jwt_extended import get_jwt_identity
+    if scope == 'user':
+        try:
+            ident = get_jwt_identity() or client_ip()
+        except Exception:
+            ident = client_ip()
+    else:
+        ident = client_ip()
+    if not limiter.hit(f'{key}:{ident}', limit, window):
+        return jsonify({'code': 429, 'message': '请求过于频繁，请稍后再试'}), 429
+    return None

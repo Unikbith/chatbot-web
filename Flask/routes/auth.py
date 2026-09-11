@@ -247,7 +247,7 @@ def _upgrade_legacy_default_personas():
         upgraded += 1
     if upgraded:
         db.session.commit()
-        print(f'[迁移] 已升级 {upgraded} 张旧版默认人物卡提示词')
+        current_app.logger.info('已升级 %s 张旧版默认人物卡提示词', upgraded)
 
 
 def _create_default_personas(user_id, gender='神秘'):

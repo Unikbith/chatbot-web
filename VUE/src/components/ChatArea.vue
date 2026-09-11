@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, computed, nextTick, watch, onMounted, onUnmounted } from 'vue';
+import logger from '@/utils/logger';
 import { ElMessage, ElInput } from 'element-plus';
 import { 
   Setting, RefreshLeft, Lightning, 
@@ -7,6 +8,7 @@ import {
 } from '@element-plus/icons-vue';
 import { readStream, chatApi, audioApi, imageApi, providersApi, conversationApi } from '@/utils/resAi';
 import auth from '@/utils/auth';
+import { sanitizeHtml } from '@/utils/sanitize';
 import { t } from '../i18n';
 
 import VoiceInput from '@/components/VoiceInput.vue';
@@ -42,7 +44,9 @@ const props = defineProps({
   isFreeApi: { type: Boolean, default: false },
   autoPlayVoice: { type: Boolean, default: false },
   loggedIn: { type: Boolean, default: false },
-  personaGreeting: { type: String, default: '' }
+  personaGreeting: { type: String, default: '' },
+  backgroundImage: { type: String, default: '' },
+  backgroundCover: { type: String, default: 'cover' }
 });
 
 const emit = defineEmits([
@@ -61,6 +65,16 @@ const opacityVal = computed(() => {
   return isNaN(v) ? 0.9 : Math.min(1, Math.max(0.05, v))
 });
 
+const bgStyle = computed(() => {
+  if (!props.backgroundImage) return {}
+  return {
+    backgroundImage: `url(${props.backgroundImage})`,
+    backgroundSize: props.backgroundCover === 'contain' ? 'contain' : 'cover',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat',
+  }
+});
+
 const greetingText = () => t('你好！有什么可以帮你的吗？', 'Hello! How can I help you?');
 
 // 开场白：作为会话首条消息常驻展示，发送消息/收到回复后不会消失；
@@ -72,7 +86,9 @@ const greetingActive = ref(false);
 const showWelcome = computed(() => greetingActive.value);
 
 // 消息
+let _msgSeq = 0;
 const createMessage = (role, content = '', imageUrl = null) => ({ 
+  _key: `m${++_msgSeq}`,  // 稳定唯一 key，避免用 index 作 key 导致重排时 DOM 复用错乱
   role, content, raw: '', streaming: false, reasoning: '', showReasoning: false, imageUrl 
 });
 
@@ -143,7 +159,7 @@ const ensureConversation = async () => {
       return res.data.id;
     }
   } catch (e) {
-    console.error('创建对话失败', e);
+    logger.error('创建对话失败', e);
   }
   return null;
 };
@@ -230,7 +246,7 @@ const handleSend = async () => {
       const { reasoning_content: reasoning = '', content = '', html = '' } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streaming = true; }
-      if (html) { aiMsg.content = html; aiMsg.streaming = false; }
+      if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 
     // 大模型输出带生图/改图标记时，自动代为调用图片生成
@@ -252,7 +268,7 @@ const handleSend = async () => {
       aiMsg.streaming = false;
       aiMsg.raw += t('（已中止）', ' (aborted)');
     } else {
-      console.error('发送失败', error);
+      logger.error('发送失败', error);
       aiMsg.streaming = false;
       aiMsg.content = `出错了：${error.message || '网络异常'}`;
     }
@@ -416,7 +432,7 @@ const handleVisionChat = async (text) => {
       const { reasoning_content: reasoning = '', content = '', html = '' } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streaming = true; }
-      if (html) { aiMsg.content = html; aiMsg.streaming = false; }
+      if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 
     // 模型若输出「改图」标记，则结合人设与用户上传的参考图自动生图并贴到本条回复
@@ -427,7 +443,7 @@ const handleVisionChat = async (text) => {
       aiMsg.streaming = false;
       aiMsg.raw += t('（已中止）', ' (aborted)');
     } else {
-      console.error('识图失败', error);
+      logger.error('识图失败', error);
       aiMsg.streaming = false;
       aiMsg.content = `出错了：${error.message || '网络异常'}`;
     }
@@ -459,13 +475,13 @@ const speakText = async (text, index) => {
     audioElement.onerror = () => {
       isSpeaking.value = false;
       speakingIndex.value = null;
-      console.error('语音播放失败');
+      logger.error('语音播放失败');
     };
     isSpeaking.value = true;
     speakingIndex.value = index;
     audioElement.play();
   } catch (e) {
-    console.error('语音合成失败', e);
+    logger.error('语音合成失败', e);
     ElMessage.warning(`语音播报失败：${e.message || ''}`);
   }
 };
@@ -530,7 +546,7 @@ const regenerate = async (assistantIndex = null) => {
       const { reasoning_content: reasoning = '', content = '', html = '' } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streaming = true; }
-      if (html) { aiMsg.content = html; aiMsg.streaming = false; }
+      if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
   } catch (error) {
     if (error.name === 'AbortError') {
@@ -652,8 +668,12 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 消息列表 -->
-    <div class="chat-body">
+    <!-- 聊天背景：仅覆盖消息列表 + 输入区，不覆盖顶部栏 -->
+    <div class="chat-conversation">
+      <div class="chat-bg" :style="bgStyle"></div>
+
+      <!-- 消息列表 -->
+      <div class="chat-body">
       <el-scrollbar ref="messageListRef" class="message-scrollbar">
         <div class="message-container">
           <!-- 人设开场白：作为首条消息展示，发送消息/收到回复后不会消失 -->
@@ -670,7 +690,7 @@ onUnmounted(() => {
           </div>
           <div
             v-for="(item, index) in messages"
-            :key="index"
+            :key="item._key || index"
             class="message-item"
             :class="item.role === 'assistant' ? 'message-ai' : 'message-user'"
           >
@@ -836,6 +856,7 @@ onUnmounted(() => {
       </div>
       
     </div>
+    </div>
 
     <!-- 提示词工具 -->
     <PromptToolPanel v-model="promptToolOpen" @insert="handlePromptInsert" />
@@ -860,6 +881,33 @@ onUnmounted(() => {
   background: transparent;
   flex: 1;
   min-width: 0;
+  position: relative;
+}
+
+/* 聊天背景：仅覆盖消息区 + 输入区，顶部栏保持透明 */
+.chat-conversation {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-color: transparent;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.chat-body,
+.chat-footer {
+  position: relative;
+  z-index: 1;
 }
 
 /* 顶部栏 */

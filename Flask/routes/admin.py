@@ -115,44 +115,77 @@ def platform_stats():
 @admin_bp.route('/users', methods=['GET'])
 @admin_required
 def list_users():
-    """用户列表及各用户的数据量汇总。"""
-    users = User.query.order_by(User.created_at.desc()).all()
+    """用户列表及各用户的数据量汇总（支持关键词搜索 + 后端分页）。
 
-    conv_counts = dict(
-        db.session.query(Conversation.user_id, func.count(Conversation.id))
-        .filter(Conversation.deleted_at.is_(None))
-        .group_by(Conversation.user_id).all()
-    )
-    msg_counts = dict(
-        db.session.query(Message.conversation_id, func.count(Message.id))
-        .group_by(Message.conversation_id).all()
-    )
-    prov_counts = dict(
-        db.session.query(ModelProvider.user_id, func.count(ModelProvider.id))
-        .group_by(ModelProvider.user_id).all()
-    )
-    persona_counts = dict(
-        db.session.query(PersonaTemplate.user_id, func.count(PersonaTemplate.id))
-        .group_by(PersonaTemplate.user_id).all()
-    )
+    query 参数：
+      page     页码（默认 1）
+      per_page 每页条数（默认 50，上限 200）
+      q        关键词（匹配用户名 / 邮箱）
+    """
+    page = max(int(request.args.get('page', 1) or 1), 1)
+    per_page = min(max(int(request.args.get('per_page', 50) or 50), 1), 200)
+    keyword = (request.args.get('q') or '').strip()
+
+    query = User.query
+    if keyword:
+        like = f'%{keyword}%'
+        query = query.filter(_or(User.username.ilike(like), User.email.ilike(like)))
+    query = query.order_by(User.created_at.desc())
+
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    users = pagination.items
+    user_ids = [u.id for u in users]
+
+    # 仅聚合当前页用户的数据量，避免全表扫描 + 逐用户触发 N+1
+    conv_counts = {}
+    msg_counts_by_user = {}
+    prov_counts = {}
+    persona_counts = {}
+    if user_ids:
+        conv_counts = dict(
+            db.session.query(Conversation.user_id, func.count(Conversation.id))
+            .filter(Conversation.deleted_at.is_(None), Conversation.user_id.in_(user_ids))
+            .group_by(Conversation.user_id).all()
+        )
+        # 消息数：一次 JOIN 聚合到 user_id，避免逐用户/逐对话查询
+        msg_counts_by_user = dict(
+            db.session.query(Conversation.user_id, func.count(Message.id))
+            .join(Message, Message.conversation_id == Conversation.id)
+            .filter(Conversation.deleted_at.is_(None), Conversation.user_id.in_(user_ids))
+            .group_by(Conversation.user_id).all()
+        )
+        prov_counts = dict(
+            db.session.query(ModelProvider.user_id, func.count(ModelProvider.id))
+            .filter(ModelProvider.user_id.in_(user_ids))
+            .group_by(ModelProvider.user_id).all()
+        )
+        persona_counts = dict(
+            db.session.query(PersonaTemplate.user_id, func.count(PersonaTemplate.id))
+            .filter(PersonaTemplate.user_id.in_(user_ids))
+            .group_by(PersonaTemplate.user_id).all()
+        )
 
     # 每个用户最新一条消息时间 = 最近活跃（排除已软删除的对话）
     latest_msg_by_user = {}
-    latest_rows = (
-        db.session.query(Conversation.user_id, func.max(Message.created_at))
-        .join(Message, Message.conversation_id == Conversation.id)
-        .filter(Conversation.deleted_at.is_(None))
-        .group_by(Conversation.user_id).all()
-    )
-    for uid, ts in latest_rows:
-        latest_msg_by_user[uid] = ts
+    latest_conv_by_user = {}
+    if user_ids:
+        latest_rows = (
+            db.session.query(Conversation.user_id, func.max(Message.created_at))
+            .join(Message, Message.conversation_id == Conversation.id)
+            .filter(Conversation.deleted_at.is_(None),
+                    Conversation.user_id.in_(user_ids))
+            .group_by(Conversation.user_id).all()
+        )
+        for uid, ts in latest_rows:
+            latest_msg_by_user[uid] = ts
 
-    # 没有消息但有对话（如刚建对话就离开）的用户，退化为对话更新时间
-    latest_conv_by_user = dict(
-        db.session.query(Conversation.user_id, func.max(Conversation.updated_at))
-        .filter(Conversation.deleted_at.is_(None))
-        .group_by(Conversation.user_id).all()
-    )
+        # 没有消息但有对话（如刚建对话就离开）的用户，退化为对话更新时间
+        latest_conv_by_user = dict(
+            db.session.query(Conversation.user_id, func.max(Conversation.updated_at))
+            .filter(Conversation.deleted_at.is_(None),
+                    Conversation.user_id.in_(user_ids))
+            .group_by(Conversation.user_id).all()
+        )
 
     def _pick(u):
         ts = latest_msg_by_user.get(u.id)
@@ -164,8 +197,7 @@ def list_users():
 
     result = []
     for u in users:
-        conv_ids = [c.id for c in u.conversations if c.deleted_at is None]
-        msg_count = sum(msg_counts.get(cid, 0) for cid in conv_ids)
+        conv_count = conv_counts.get(u.id, 0)
         last = _pick(u)
         result.append({
             'id': u.id,
@@ -177,14 +209,22 @@ def list_users():
             'is_active': u.is_active,
             'deleted_at': u.deleted_at.isoformat() if u.deleted_at else None,
             'created_at': u.created_at.isoformat() if u.created_at else None,
-            'conversation_count': len(conv_ids),
-            'message_count': msg_count,
+            'conversation_count': conv_count,
+            'message_count': msg_counts_by_user.get(u.id, 0),
             'provider_count': prov_counts.get(u.id, 0),
             'persona_count': persona_counts.get(u.id, 0),
             'last_active': last.isoformat() if last else None,
         })
 
-    return jsonify({'code': 200, 'data': result})
+    return jsonify({
+        'code': 200,
+        'data': {
+            'items': result,
+            'total': pagination.total,
+            'page': page,
+            'pages': pagination.pages,
+        }
+    })
 
 
 @admin_bp.route('/users/<int:user_id>/conversations', methods=['GET'])

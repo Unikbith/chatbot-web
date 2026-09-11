@@ -266,7 +266,6 @@
               <template #default="{ row }">
                 <div class="feedback-content-cell" @click="openFeedbackDetail(row)" :title="t('点击查看完整内容', 'Click to view full content')">
                   <span class="feedback-content-text">{{ row.content }}</span>
-                  <span class="feedback-content-more">{{ t('查看详情', 'View') }}</span>
                 </div>
               </template>
             </el-table-column>
@@ -810,7 +809,10 @@ async function loadUsers() {
   try {
     const res = await adminApi.users()
     if (res.code === 200) {
-      allUsers.value = (res.data || []).map(u => ({ ...u, _conversations: null, _loading: false }))
+      // 后端已支持分页：返回 { items, total, page, pages }；兼容旧版直接返回数组
+      const payload = res.data
+      const list = Array.isArray(payload) ? payload : (payload?.items || [])
+      allUsers.value = list.map(u => ({ ...u, _conversations: null, _loading: false }))
       applyFilters()
     } else if (res.code === 403) {
       ElMessage.warning(t('无管理员权限', 'No admin permission'))
@@ -1360,12 +1362,6 @@ watch(activeTab, (val) => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-}
-.mp-detail-stats .mp-stat.like {
-  color: #e0603f;
-}
-.mp-detail-stats .mp-stat.dislike {
-  color: #4b8b6a;
 }
 .mp-detail-desc {
   margin: 0;

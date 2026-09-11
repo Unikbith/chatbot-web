@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onUnmounted } from 'vue';
+import logger from '@/utils/logger';
 import { ElMessage } from 'element-plus';
 import { Microphone, Warning } from '@element-plus/icons-vue';
 import { audioApi, providersApi } from '@/utils/resAi';
@@ -48,7 +49,7 @@ const startRecording = async () => {
     }, 1000);
 
   } catch (e) {
-    console.error('录音失败', e);
+    logger.error('录音失败', e);
     ElMessage.error('无法访问麦克风，请检查权限设置');
   }
 };
@@ -87,7 +88,7 @@ const handleRecordingStop = async () => {
       ElMessage.error(res.message || '语音识别失败');
     }
   } catch (e) {
-    console.error('语音识别错误', e);
+    logger.error('语音识别错误', e);
     ElMessage.error('语音识别失败，请检查 API 配置');
   } finally {
     isProcessing.value = false;

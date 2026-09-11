@@ -344,6 +344,7 @@
 </template>
 
 <script setup>
+import logger from '@/utils/logger';
 import { ref, reactive, computed, watch, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { User, MagicStick, QuestionFilled, CircleCheck } from '@element-plus/icons-vue'
@@ -556,7 +557,7 @@ async function loadSettings() {
       handleLanguageChange()
     }
   } catch (e) {
-    console.error('加载设置失败', e)
+    logger.error('加载设置失败', e)
   } finally {
     _loadingSettings = false
   }

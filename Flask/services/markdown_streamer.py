@@ -14,7 +14,7 @@ class MarkdownStreamer:
         try:
             self._md = markdown.Markdown(extensions=['extra', 'nl2br'])
         except Exception:
-            print("[警告] nl2br 扩展不可用，降级为 extra")
+            # nl2br 扩展不可用时降级（不引入 print，生产环境不产生控制台噪声）
             self._md = markdown.Markdown(extensions=['extra'])
 
     def feed(self, text):

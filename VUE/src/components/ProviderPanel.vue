@@ -271,7 +271,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import logger from '@/utils/logger';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, ChatDotRound, Microphone, Headset, Delete, Picture,
@@ -412,7 +413,7 @@ async function loadProviders() {
       selectProvider(saved || providers.value.find(p => p.is_default) || providers.value[0])
     }
   } catch (e) {
-    console.error('加载配置失败', e)
+    logger.error('加载配置失败', e)
   } finally {
     loading.value = false
   }
@@ -709,6 +710,11 @@ onMounted(() => {
     loadVendors()
     loadProviders()
   }
+})
+
+// 组件卸载时移除 resize 监听，避免内存泄漏与卸载后回调报错
+onUnmounted(() => {
+  window.removeEventListener('resize', syncDrawerSize)
 })
 </script>
 

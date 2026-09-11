@@ -8,7 +8,7 @@ import sys
 # 确保当前目录在 Python 路径中
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from sqlalchemy import inspect, text
 from config import config
 from extensions import db, jwt, cors, migrate
@@ -59,6 +59,18 @@ def create_app(config_name=None):
     app.register_blueprint(image_bp)
     app.register_blueprint(marketplace_bp)
     app.register_blueprint(feedback_bp)
+
+    # 安全响应头：兜底 XSS / 点击劫持 / MIME 嗅探等常见攻击
+    @app.after_request
+    def _set_security_headers(resp):
+        resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+        resp.headers.setdefault('X-Frame-Options', 'DENY')
+        resp.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+        # 仅对 API 响应设置 CSP；静态页面由前端 index.html 的 meta CSP 覆盖
+        if request.path.startswith('/api/'):
+            resp.headers.setdefault('Content-Security-Policy',
+                                    "default-src 'none'; frame-ancestors 'none'")
+        return resp
 
     # 健康检查
     @app.route('/api/health')
@@ -156,41 +168,41 @@ def _ensure_schema_columns(app):
                 if 'params' not in cols:
                     with db.engine.begin() as conn:
                         conn.execute(text('ALTER TABLE model_providers ADD COLUMN params TEXT'))
-                    print('[迁移] 已为 model_providers 增加 params 字段')
+                    app.logger.info('[迁移] 已为 model_providers 增加 params 字段')
                 # model_providers.enabled - 配置启用开关（可多选）
                 if 'enabled' not in cols:
                     with db.engine.begin() as conn:
                         conn.execute(text('ALTER TABLE model_providers ADD COLUMN enabled BOOLEAN DEFAULT 1'))
-                    print('[迁移] 已为 model_providers 增加 enabled 字段')
+                    app.logger.info('[迁移] 已为 model_providers 增加 enabled 字段')
             # users.token_version - 令牌版本（改密/注销吊销旧 token）
             if 'users' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('users')}
                 if 'token_version' not in cols:
                     with db.engine.begin() as conn:
                         conn.execute(text('ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0'))
-                    print('[迁移] 已为 users 增加 token_version 字段')
+                    app.logger.info('[迁移] 已为 users 增加 token_version 字段')
                 if 'gender' not in cols:
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE users ADD COLUMN gender VARCHAR(10)"))
-                    print('[迁移] 已为 users 增加 gender 字段')
+                    app.logger.info('[迁移] 已为 users 增加 gender 字段')
                 if 'deleted_at' not in cols:
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE users ADD COLUMN deleted_at DATETIME"))
-                    print('[迁移] 已为 users 增加 deleted_at 字段')
+                    app.logger.info('[迁移] 已为 users 增加 deleted_at 字段')
             # user_settings.background_cover - 背景展示方式（contain/cover）
             if 'user_settings' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('user_settings')}
                 if 'background_cover' not in cols:
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE user_settings ADD COLUMN background_cover VARCHAR(20) DEFAULT 'contain'"))
-                    print('[迁移] 已为 user_settings 增加 background_cover 字段')
+                    app.logger.info('[迁移] 已为 user_settings 增加 background_cover 字段')
             # conversations.background_cover - 对话独立背景展示方式
             if 'conversations' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('conversations')}
                 if 'background_cover' not in cols:
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE conversations ADD COLUMN background_cover VARCHAR(20)"))
-                    print('[迁移] 已为 conversations 增加 background_cover 字段')
+                    app.logger.info('[迁移] 已为 conversations 增加 background_cover 字段')
                 # 对话独立：用户头像 / 频率惩罚 / 存在惩罚 / 自动播报
                 conv_add = {
                     'user_avatar': 'VARCHAR(500)',
@@ -202,22 +214,22 @@ def _ensure_schema_columns(app):
                     if cname not in cols:
                         with db.engine.begin() as conn:
                             conn.execute(text(f'ALTER TABLE conversations ADD COLUMN {cname} {ctype}'))
-                        print(f'[迁移] 已为 conversations 增加 {cname} 字段')
+                        app.logger.info(f'[迁移] 已为 conversations 增加 {cname} 字段')
                 if 'user_persona_id' not in cols:
                     with db.engine.begin() as conn:
                         conn.execute(text('ALTER TABLE conversations ADD COLUMN user_persona_id INTEGER'))
-                    print('[迁移] 已为 conversations 增加 user_persona_id 字段')
+                    app.logger.info('[迁移] 已为 conversations 增加 user_persona_id 字段')
                 if 'deleted_at' not in cols:
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE conversations ADD COLUMN deleted_at DATETIME"))
-                    print('[迁移] 已为 conversations 增加 deleted_at 字段')
+                    app.logger.info('[迁移] 已为 conversations 增加 deleted_at 字段')
             # daily_checkins.checkin_time - 签到时间（24小时冷却制）
             if 'daily_checkins' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('daily_checkins')}
                 if 'checkin_time' not in cols:
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE daily_checkins ADD COLUMN checkin_time DATETIME"))
-                    print('[迁移] 已为 daily_checkins 增加 checkin_time 字段')
+                    app.logger.info('[迁移] 已为 daily_checkins 增加 checkin_time 字段')
                 # 历史遗留：checkin_date 字段仍存在但模型已不依赖；保留原列，
                 # 由模型 default 自动填充，避免破坏旧表结构。
             # persona_marketplace.gender - 人物卡性别（男/女/自定义，非男非女筛选归入非二元）
@@ -226,28 +238,28 @@ def _ensure_schema_columns(app):
                 if 'gender' not in cols:
                     with db.engine.begin() as conn:
                         conn.execute(text('ALTER TABLE persona_marketplace ADD COLUMN gender VARCHAR(20)'))
-                    print('[迁移] 已为 persona_marketplace 增加 gender 字段')
+                    app.logger.info('[迁移] 已为 persona_marketplace 增加 gender 字段')
             # image_usage.is_remaining_semantics - 免费生图次数语义迁移标记
             if 'image_usage' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('image_usage')}
                 if 'is_remaining_semantics' not in cols:
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE image_usage ADD COLUMN is_remaining_semantics BOOLEAN DEFAULT 0"))
-                    print('[迁移] 已为 image_usage 增加 is_remaining_semantics 字段')
+                    app.logger.info('[迁移] 已为 image_usage 增加 is_remaining_semantics 字段')
             # persona_templates.persona_type - AI/用户人设区分
             if 'persona_templates' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('persona_templates')}
                 if 'persona_type' not in cols:
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE persona_templates ADD COLUMN persona_type VARCHAR(10) DEFAULT 'ai'"))
-                    print('[迁移] 已为 persona_templates 增加 persona_type 字段')
+                    app.logger.info('[迁移] 已为 persona_templates 增加 persona_type 字段')
                 # 系统内置人物卡已改为「普通人物卡」，不再区分系统/用户，移除废弃字段
                 if 'is_system' in cols:
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE persona_templates DROP COLUMN is_system"))
-                    print('[迁移] 已移除 persona_templates.is_system 废弃字段')
+                    app.logger.info('[迁移] 已移除 persona_templates.is_system 废弃字段')
     except Exception as e:
-        print(f'[迁移] schema 检查/补列跳过: {e}')
+        app.logger.info(f'[迁移] schema 检查/补列跳过: {e}')
 
 
 def _init_default_data(app):
@@ -265,9 +277,9 @@ def _init_default_data(app):
                 row.is_remaining_semantics = True
                 converted += 1
             db.session.commit()
-            print(f'[迁移] 已转换 {converted} 条 image_usage 记录为剩余次数语义')
+            app.logger.info(f'[迁移] 已转换 {converted} 条 image_usage 记录为剩余次数语义')
     except Exception as e:
-        print(f'[迁移] image_usage 语义转换跳过: {e}')
+        app.logger.info(f'[迁移] image_usage 语义转换跳过: {e}')
 
     # 默认 admin 仅开发环境创建，且不打印明文密码
     is_dev = app.config.get('DEBUG') or os.getenv('FLASK_ENV', 'development') == 'development'
@@ -276,7 +288,7 @@ def _init_default_data(app):
         default_user.set_password('admin123')
         db.session.add(default_user)
         db.session.flush()
-        print("[初始化] 开发环境创建默认用户 admin（密码 admin123，仅限本地使用）")
+        app.logger.info("[初始化] 开发环境创建默认用户 admin（仅限本地使用）")
         
         # 创建设置
         settings = UserSettings(user_id=default_user.id)
@@ -301,14 +313,14 @@ def _init_default_data(app):
             weight=100
         )
         db.session.add(persona)
-        print("[初始化] 创建默认角色: 加藤惠")
+        app.logger.info("[初始化] 创建默认角色: 加藤惠")
 
     # 旧版默认人物卡提示词一次性升级（幂等：新版含【与用户的关系】章节即跳过）
     try:
         from routes.auth import _upgrade_legacy_default_personas
         _upgrade_legacy_default_personas()
     except Exception as e:
-        print(f'[初始化] 默认人物卡升级跳过: {e}')
+        app.logger.info(f'[初始化] 默认人物卡升级跳过: {e}')
 
     # 如果环境变量中有 API Key，创建默认配置
     default_api_key = os.getenv('AI_API_KEY')
@@ -329,7 +341,7 @@ def _init_default_data(app):
                 is_default=True
             )
             db.session.add(default_config)
-            print(f"[初始化] 创建默认对话提供商: {default_model}")
+            app.logger.info("[初始化] 创建默认对话提供商: %s", default_model)
 
     db.session.commit()
 

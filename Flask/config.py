@@ -11,7 +11,9 @@ class Config:
     """基础配置"""
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'jwt-secret-key-change-in-production')
-    JWT_ACCESS_TOKEN_EXPIRES = 86400  # 24小时
+    # Access token 存活时间缩短：即便 XSS 窃取，危害窗口也大幅缩小；
+    # 前端会在 401 时用 refresh token 自动续期，用户无感知。
+    JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', '7200'))  # 2小时
     JWT_REFRESH_TOKEN_EXPIRES = 2592000  # 30天
 
     # 数据库：固定指向本文件同级 instance/chatbot.db，

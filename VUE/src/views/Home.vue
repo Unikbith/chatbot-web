@@ -1,11 +1,13 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import logger from '@/utils/logger';
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Menu, ZoomIn, ChatLineRound } from '@element-plus/icons-vue'
 import {
   authApi, providersApi, personaApi, settingsApi, conversationApi, chatApi, marketplaceApi
 } from '../utils/resAi'
 import { applyTheme, bindSystemThemeListener } from '../utils/theme'
+import { tokenStore } from '../utils/tokenStore'
 import { t, setLocale } from '../i18n'
 
 import Sidebar from '../components/Sidebar.vue'
@@ -135,62 +137,10 @@ const effectiveOpacity = computed(() => {
   return userSettings.message_opacity
 })
 
-// 背景层样式：仅覆盖聊天区域（红线标注区），随侧边栏收起自动铺满；
-// 展示方式由用户设置决定：contain=完整可见（完整展示原貌，不裁剪）/ cover=覆盖背景（铺满填充）
+// 展示方式由用户设置决定：contain=完整可见 / cover=铺满填充
 const backgroundCover = computed(() =>
   currentConv.value?.background_cover || userSettings.background_cover || 'contain'
 )
-
-// ===== 背景智能适配 =====
-// 目标：背景图必须盖住整个聊天框（消息区 + 底部输入框）。
-// contain 模式下只有当「图片等比缩小后仍比聊天内容框宽（左右留白在内容区之外），
-// 且上下留白不深于输入框高度」时才完整显示；否则兜底 cover
-// （强制放大、不破坏比例、铺满整个聊天区，保证输入框一定被背景覆盖）。
-const BG_CONTENT_FRAME = 720     // 聊天内容框宽度（消息/输入区，与 ChatArea 内 max-width 一致）
-const BG_FRAME_MARGIN = 24       // 图片需比内容框两侧再宽出的余量
-const BG_VERTICAL_TOLERANCE = 300 // contain 上下留白总和上限（约每侧 150px ≈ 输入框高度）
-
-const bgNatural = ref({ w: 0, h: 0 })
-watch(effectiveBackground, (url) => {
-  bgNatural.value = { w: 0, h: 0 }
-  if (!url) return
-  const img = new Image()
-  img.onload = () => { bgNatural.value = { w: img.naturalWidth || 0, h: img.naturalHeight || 0 } }
-  img.onerror = () => { bgNatural.value = { w: 0, h: 0 } }
-  img.src = url
-}, { immediate: true })
-
-const effectiveBgSize = computed(() => {
-  if (backgroundCover.value === 'cover') return 'cover'
-  const { w: imgW, h: imgH } = bgNatural.value
-  // 尺寸未知（未加载完/加载失败）时先按用户设置，图片加载完成后会自动重算
-  if (!imgW || !imgH) return backgroundCover.value
-
-  const sidebarPx = isMobile.value ? 0 : (sidebarCollapsed.value ? 60 : 280)
-  const boxW = Math.max(1, viewportW.value - sidebarPx)
-  const boxH = Math.max(1, viewportH.value)
-
-  const scale = Math.min(boxW / imgW, boxH / imgH) // contain 缩放比
-  const containedW = imgW * scale
-  const containedH = imgH * scale
-  const frameW = Math.min(BG_CONTENT_FRAME, boxW - 40)
-
-  // 完整显示需同时满足：横向盖住内容框；纵向留白不露出输入框
-  const coversFrame = containedW >= frameW + BG_FRAME_MARGIN
-  const notTooShort = boxH - containedH <= BG_VERTICAL_TOLERANCE
-  return coversFrame && notTooShort ? 'contain' : 'cover'
-})
-
-const bgStyle = computed(() => {
-  const url = effectiveBackground.value
-  if (!url) return {}
-  return {
-    backgroundImage: `url(${url})`,
-    backgroundSize: effectiveBgSize.value,
-    backgroundPosition: 'center',
-    backgroundRepeat: 'no-repeat',
-  }
-})
 
 // 未登录首屏没有用户设置，用默认形象图兜底，保证一进网站就有氛围背景
 const ambientBackground = computed(() => effectiveBackground.value || defaultAiAvatar)
@@ -202,9 +152,9 @@ const ambientStyle = computed(() => {
   if (!url) return {}
   return {
     backgroundImage: `url(${url})`,
-    backgroundSize: 'contain',
+    backgroundSize: 'cover',
     backgroundPosition: 'center',
-    backgroundRepeat: 'repeat',
+    backgroundRepeat: 'no-repeat',
   }
 })
 
@@ -275,7 +225,7 @@ async function loadLandingCards() {
     const pool = data.items || []
     landingCards.value = weightedRandomPick(pool, LANDING_SHOW_COUNT)
   } catch (e) {
-    console.warn('加载入口页卡片失败', e)
+    logger.warn('加载入口页卡片失败', e)
     landingCards.value = []
   } finally {
     landingLoading.value = false
@@ -283,9 +233,10 @@ async function loadLandingCards() {
 }
 
 async function openLandingDetail(card) {
+  landingCommentsPage.value = 1
   const [detail, commentsRes] = await Promise.all([
     fetchLandingDetailPublic(card.id),
-    marketplaceApi.publicComments(card.id, 'hot', 1).catch(() => null),
+    marketplaceApi.publicComments(card.id, 'hot', 1, LANDING_COMMENTS_PAGE_SIZE).catch(() => null),
   ])
   if (detail) {
     landingDetail.value = {
@@ -294,6 +245,25 @@ async function openLandingDetail(card) {
       comment_total: commentsRes?.data?.total || 0,
     }
     landingDetailVisible.value = true
+  }
+}
+
+async function loadMoreLandingComments() {
+  if (!landingDetail.value || !landingCommentsHasMore.value) return
+  landingCommentsPage.value += 1
+  try {
+    const res = await marketplaceApi.publicComments(
+      landingDetail.value.id,
+      'hot',
+      landingCommentsPage.value,
+      LANDING_COMMENTS_PAGE_SIZE
+    )
+    if (res.code === 200) {
+      landingDetail.value.comments.push(...(res.data.items || []))
+      landingDetail.value.comment_total = res.data.total || landingDetail.value.comment_total
+    }
+  } catch (e) {
+    logger.warn('加载更多评论失败', e)
   }
 }
 
@@ -322,6 +292,11 @@ const landingPreviewVisible = ref(false)
 const landingPreviewUrl = ref('')
 // 入口页详情：人物提示词默认收起，避免长文一进来就占满整个右半区
 const landingPromptExpanded = ref(false)
+const landingCommentsPage = ref(1)
+const LANDING_COMMENTS_PAGE_SIZE = 5
+const landingCommentsHasMore = computed(() =>
+  landingDetail.value && landingDetail.value.comments.length < landingDetail.value.comment_total
+)
 watch(landingDetailVisible, (val) => {
   if (val) landingPromptExpanded.value = false
 })
@@ -349,6 +324,13 @@ function formatTime(ts) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+function formatDate(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return ts
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 // ========== 初始化 ==========
 let unbindSystemTheme = null
 
@@ -357,7 +339,7 @@ onMounted(async () => {
   updateViewport()
   window.addEventListener('resize', updateViewport)
 
-  const token = localStorage.getItem('chatbot_token')
+  const token = tokenStore.getAccess()
   if (token) {
     try {
       await loadUserInfo()
@@ -435,7 +417,7 @@ async function loadConversations() {
       convGroups.value = res.data.groups || convGroups.value
     }
   } catch (e) {
-    console.warn('加载对话失败', e)
+    logger.warn('加载对话失败', e)
   }
 }
 
@@ -456,7 +438,7 @@ async function loadPersonas() {
       }
     }
   } catch (e) {
-    console.warn('加载角色失败', e)
+    logger.warn('加载角色失败', e)
   }
 }
 
@@ -467,7 +449,7 @@ async function loadChatStatus() {
       chatStatus.value = res.data
     }
   } catch (e) {
-    console.warn('加载聊天状态失败', e)
+    logger.warn('加载聊天状态失败', e)
   }
 }
 
@@ -483,7 +465,7 @@ async function loadDefaultProvider() {
       providersApi.setCurrentId(provider.id, 'chat')
     }
   } catch (e) {
-    console.warn('加载提供商失败', e)
+    logger.warn('加载提供商失败', e)
   }
 }
 
@@ -686,7 +668,7 @@ async function handleLoginSuccess(userData) {
         }
       }
     } catch (e) {
-      console.warn('采用入口页卡片失败', e)
+      logger.warn('采用入口页卡片失败', e)
     }
   }
 
@@ -837,9 +819,6 @@ async function handleConvoSettingsSaved(payload) {
   >
     <!-- 全屏氛围底图：contain 平铺 + 模糊覆盖整个页面 -->
     <div class="bg-ambient" :style="ambientStyle"></div>
-
-    <!-- 背景层：仅覆盖聊天区域（红线标注区），侧边栏收起时自动铺满；此处正常显示不模糊 -->
-    <div class="bg-layer" :style="bgStyle"></div>
 
     <!-- 侧边栏（仅登录后展示；入口页隐藏） -->
     <template v-if="isLoggedIn">
@@ -1018,6 +997,13 @@ async function handleConvoSettingsSaved(payload) {
         </div>
         <div class="lp-detail-right">
           <h2 class="lp-detail-name">{{ landingDetail.name }}</h2>
+          <div class="lp-detail-meta">
+            <span>{{ t('创建时间', 'Created') }}: {{ formatDate(landingDetail.created_at) }}</span>
+            <span class="lp-detail-meta-stats">
+              <ThumbIcon :size="13" /> {{ formatCount(landingDetail.likes || 0) }}
+              <el-icon :size="13"><ChatLineRound /></el-icon> {{ formatCount(landingDetail.comment_total || landingDetail.comment_count || 0) }}
+            </span>
+          </div>
           <p class="lp-detail-desc">{{ landingDetail.description }}</p>
           <div class="lp-detail-section" v-if="landingDetail.greeting">
             <div class="lp-detail-label">{{ t('开场白', 'Greeting') }}</div>
@@ -1059,6 +1045,11 @@ async function handleConvoSettingsSaved(payload) {
                 <p class="lp-comment-text">{{ c.content }}</p>
               </div>
             </div>
+            <div v-if="landingCommentsHasMore" class="lp-comments-load-more">
+              <button type="button" @click="loadMoreLandingComments">
+                {{ t('加载更多评论', 'Load more comments') }}
+              </button>
+            </div>
           </div>
 
           <div class="lp-detail-bottom">
@@ -1098,6 +1089,8 @@ async function handleConvoSettingsSaved(payload) {
       :is-free-api="chatStatus.is_free"
       :logged-in="isLoggedIn"
       :persona-greeting="currentPersona?.greeting || ''"
+      :background-image="effectiveBackground"
+      :background-cover="backgroundCover"
       @open-settings="requireLogin(() => settingsVisible = true)"
       @open-provider="requireLogin(() => providerPanelVisible = true)"
       @open-conversation-settings="openConversationSettings"
@@ -1172,7 +1165,7 @@ async function handleConvoSettingsSaved(payload) {
   position: relative;
 }
 
-/* 全屏氛围底图：contain 平铺 + 重度模糊，作为整站背景（图完整可见但被模糊化） */
+/* 全屏氛围底图：cover 铺满 + 重度模糊，作为整站背景 */
 .bg-ambient {
   position: absolute;
   inset: 0;
@@ -1191,16 +1184,6 @@ async function handleConvoSettingsSaved(payload) {
   inset: 0;
   background: var(--app-bg);
   opacity: 0.55;
-}
-
-/* 背景层：仅覆盖聊天区域（从侧边栏右侧开始），侧边栏收起时自动铺满；正常显示不模糊 */
-.bg-layer {
-  position: absolute;
-  inset: 0 0 0 var(--sidebar-width, 0);
-  z-index: 0;
-  pointer-events: none;
-  background-color: transparent;
-  transition: background-image 0.3s;
 }
 
 /* ======================================================
@@ -1742,6 +1725,21 @@ async function handleConvoSettingsSaved(payload) {
   color: #2c3e6e;
 }
 
+.lp-detail-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: #8aa0c4;
+}
+
+.lp-detail-meta-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .lp-detail-desc {
   margin: 0;
   font-size: 13px;
@@ -1881,11 +1879,34 @@ async function handleConvoSettingsSaved(payload) {
   word-break: break-word;
 }
 
+.lp-comments-load-more {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.lp-comments-load-more button {
+  background: none;
+  border: none;
+  font-size: 13px;
+  color: #6e8fdf;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.lp-comments-load-more button:hover {
+  background: rgba(110, 143, 223, 0.08);
+  text-decoration: underline;
+}
+
 @media (max-width: 768px) {
   .lp-title { font-size: 28px; }
   .lp-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
   .lp-detail { flex-direction: column; }
-  .lp-detail-left { width: 100%; height: 220px; }
+  .lp-detail-left { width: 100%; height: auto; }
+  .lp-detail-avatar-box { height: 220px; }
 }
 
 .sidebar-wrap,

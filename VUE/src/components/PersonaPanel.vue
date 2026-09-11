@@ -79,47 +79,62 @@
       width="min(560px, 94vw)"
       @close="resetForm"
     >
-      <el-form :model="form" label-width="80px" label-position="top">
-        <el-form-item label="角色头像">
-          <div class="avatar-upload">
-            <el-avatar :size="64" :src="form.avatar" class="form-avatar">
-              <el-icon><MagicStick /></el-icon>
-            </el-avatar>
+      <el-form :model="form" label-position="top" class="persona-form">
+        <!-- 头像上传：居中大图预览，与系统卡片风格一致 -->
+        <el-form-item>
+          <div class="form-avatar-section">
+            <div class="form-avatar-preview">
+              <img v-if="form.avatar" :src="form.avatar" alt="" />
+              <el-icon v-else class="form-avatar-placeholder"><MagicStick /></el-icon>
+            </div>
             <el-upload
               :show-file-list="false"
               :before-upload="handleAvatarUpload"
               accept="image/*"
             >
-              <el-button size="small">上传头像</el-button>
+              <el-button size="small" type="primary" plain>
+                <el-icon><Upload /></el-icon> 上传头像
+              </el-button>
             </el-upload>
           </div>
         </el-form-item>
-        <el-form-item label="角色名称">
-          <el-input v-model="form.name" placeholder="如：加藤惠" />
-        </el-form-item>
-        <el-form-item label="角色简介">
-          <el-input v-model="form.description" placeholder="简短描述角色特点" />
-        </el-form-item>
-        <el-form-item label="系统提示词">
-          <el-input
-            v-model="form.system_prompt"
-            type="textarea"
-            :rows="8"
-            :autosize="false"
-            resize="none"
-            placeholder="详细的角色设定，指导 AI 如何扮演这个角色..."
-          />
-        </el-form-item>
-        <el-form-item label="开场问候语">
-          <el-input
-            v-model="form.greeting"
-            type="textarea"
-            :rows="2"
-            :autosize="false"
-            resize="none"
-            placeholder="角色第一次打招呼时说的话（可选）"
-          />
-        </el-form-item>
+
+        <div class="form-card">
+          <el-form-item label="角色名称">
+            <el-input v-model="form.name" placeholder="如：加藤惠" maxlength="30" show-word-limit />
+          </el-form-item>
+          <el-form-item label="角色简介">
+            <el-input v-model="form.description" placeholder="简短描述角色特点" maxlength="100" show-word-limit />
+          </el-form-item>
+        </div>
+
+        <div class="form-card">
+          <el-form-item label="系统提示词">
+            <el-input
+              v-model="form.system_prompt"
+              type="textarea"
+              :rows="8"
+              :autosize="false"
+              resize="none"
+              placeholder="详细的角色设定，指导 AI 如何扮演这个角色..."
+              maxlength="2000"
+              show-word-limit
+            />
+          </el-form-item>
+          <el-form-item label="开场问候语">
+            <el-input
+              v-model="form.greeting"
+              type="textarea"
+              :rows="2"
+              :autosize="false"
+              resize="none"
+              placeholder="角色第一次打招呼时说的话（可选）"
+              maxlength="200"
+              show-word-limit
+            />
+          </el-form-item>
+        </div>
+
         <el-form-item>
           <el-checkbox v-model="form.is_default">设为默认角色</el-checkbox>
         </el-form-item>
@@ -133,9 +148,10 @@
 </template>
 
 <script setup>
+import logger from '@/utils/logger';
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { MagicStick } from '@element-plus/icons-vue'
+import { MagicStick, Upload } from '@element-plus/icons-vue'
 import { personaApi, uploadApi } from '../utils/resAi'
 
 const props = defineProps({
@@ -183,7 +199,7 @@ async function loadPersonas() {
       personas.value = res.data
     }
   } catch (e) {
-    console.error('加载角色失败', e)
+    logger.error('加载角色失败', e)
   }
 }
 
@@ -422,14 +438,68 @@ function confirmDelete(id) {
   line-height: 17px;
 }
 
-.avatar-upload {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+/* 编辑/新建对话框：与系统整体风格一致的卡片式表单 */
+.persona-form {
+  padding: 4px 8px;
 }
 
-.form-avatar {
-  border: 2px solid #ebeef5;
+.persona-form :deep(.el-form-item__label) {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #303133);
+  padding-bottom: 6px;
+}
+
+.form-avatar-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0 8px;
+}
+
+.form-avatar-preview {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: linear-gradient(135deg, #eef3fc, #e6edfa);
+  border: 2px solid var(--border-color, #e4e7ed);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+.form-avatar-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.form-avatar-placeholder {
+  font-size: 32px;
+  color: #bfc9dc;
+}
+
+.form-card {
+  background: var(--surface, #f5f7fa);
+  border: 1px solid var(--border-color, #e4e7ed);
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.form-card :deep(.el-textarea__inner) {
+  background: var(--bg, #ffffff);
+  border-radius: 10px;
+  resize: none;
+}
+
+.form-card :deep(.el-input__wrapper) {
+  background: var(--bg, #ffffff);
+  border-radius: 10px;
 }
 
 /* ===== 移动端响应式 ===== */

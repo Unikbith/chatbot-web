@@ -10,6 +10,8 @@ export function applyTheme(theme) {
   else isDark = !!(dark && dark.matches)
   html.classList.toggle('dark', isDark)
   try { localStorage.setItem(THEME_KEY, theme) } catch (e) {}
+  // 通知主入口按需注入深色主题 CSS
+  window.dispatchEvent(new CustomEvent('chatbot:theme-change'))
 }
 
 // 在应用启动早期应用本地缓存的主题，避免首次渲染时闪白/闪黑

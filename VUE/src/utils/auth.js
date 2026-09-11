@@ -1,8 +1,8 @@
+import logger from './logger';
 // utils/auth.js - 认证相关工具
 import { resAi } from './resAi';
+import { tokenStore } from './tokenStore';
 
-const TOKEN_KEY = 'chatbot_token';
-const REFRESH_TOKEN_KEY = 'chatbot_refresh_token';
 const USER_KEY = 'chatbot_user';
 
 export const auth = {
@@ -30,29 +30,27 @@ export const auth = {
 
   // 退出登录
   logout() {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
+    tokenStore.clear();
   },
 
   // 获取 token
   getToken() {
-    return localStorage.getItem(TOKEN_KEY);
+    return tokenStore.getAccess();
   },
 
   // 设置 token
   setToken(token) {
-    localStorage.setItem(TOKEN_KEY, token);
+    tokenStore.setAccess(token);
   },
 
   // 获取 refresh token
   getRefreshToken() {
-    return localStorage.getItem(REFRESH_TOKEN_KEY);
+    return tokenStore.getRefresh();
   },
 
   // 设置 refresh token
   setRefreshToken(token) {
-    localStorage.setItem(REFRESH_TOKEN_KEY, token);
+    tokenStore.setRefresh(token);
   },
 
   // 获取用户信息
@@ -84,7 +82,7 @@ export const auth = {
         return res.data;
       }
     } catch (e) {
-      console.error('获取用户信息失败', e);
+      logger.error('获取用户信息失败', e);
     }
     return null;
   },

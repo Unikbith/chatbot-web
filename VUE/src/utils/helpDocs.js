@@ -23,8 +23,8 @@ export const HELP_DOC_GROUPS = [
     title: '语音转文字',
     titleEn: 'Speech-to-Text',
     links: [
-      { name: 'OpenAI Whisper', url: 'https://platform.openai.com/docs/guides/speech-to-text', brand: 'openai' },
-      { name: '通义听悟', url: 'https://help.aliyun.com/zh/dashscope/', brand: 'dashscope' },
+      { name: '火山引擎（豆包 ASR）', url: 'https://docs.volcengine.com/docs/6561/1558163', brand: 'volcengine' },
+      { name: '阿里云百炼（Paraformer）', url: 'https://help.aliyun.com/zh/model-studio/paraformer-real-time-speech-recognition-python-sdk', brand: 'bailian' },
     ],
   },
   {
@@ -32,8 +32,9 @@ export const HELP_DOC_GROUPS = [
     title: '文字转语音',
     titleEn: 'Text-to-Speech',
     links: [
-      { name: 'ElevenLabs', url: 'https://elevenlabs.io/docs', brand: 'elevenlabs' },
-      { name: 'OpenAI TTS', url: 'https://platform.openai.com/docs/guides/text-to-speech', brand: 'openai' },
+      { name: 'MiniMax', url: 'https://platform.minimaxi.com/docs/guides/models-intro', brand: 'mimotts' },
+      { name: '火山引擎', url: 'https://docs.volcengine.com/docs/82379/1099455?lang=zh', brand: 'volcengine' },
+      { name: '阿里云百炼', url: 'https://docs.bailian.console.aliyun.com/zh/model-studio/what-is-model-studio?spm=a2ty07.bailian_model_settings_kms.0.0.1d9274a1lGaLxb', brand: 'bailian' },
     ],
   },
   {
@@ -41,8 +42,7 @@ export const HELP_DOC_GROUPS = [
     title: '图片生成',
     titleEn: 'Image Generation',
     links: [
-      { name: 'Agnes Image', url: 'https://apihub.agnes-ai.cn/docs', brand: 'agnes' },
-      { name: 'DALL·E', url: 'https://platform.openai.com/docs/guides/images', brand: 'openai' },
+      { name: 'Agnes Image', url: 'https://agnes-ai.com/zh-Hans/docs/overview', brand: 'agnes' },
     ],
   },
 ]

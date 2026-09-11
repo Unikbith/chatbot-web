@@ -4,8 +4,15 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 内容安全策略兜底：限制脚本源，禁止内联脚本执行，缓解 XSS。
+         前端主题预设使用外部 JS 文件，故无需 'unsafe-inline'。 -->
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta name="theme-color" content="#faf7f4" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#191613" media="(prefers-color-scheme: dark)" />
+    <!-- 资源提示：提前建立 API 连接，缩短接口首包时延 -->
+    <link rel="preconnect" href="/" crossorigin />
     <title>心语</title>
     <style>
       /* 首屏底色：JS 包下载/解析完成前先铺满，避免白屏闪烁 */
@@ -62,17 +69,8 @@
         .app-boot-mark, .app-boot-bar > i { animation: none; }
       }
     </style>
-    <script>
-      // 在 CSS/JS 资源加载前同步应用缓存主题，消除首屏闪白/闪黑
-      (function () {
-        try {
-          var t = localStorage.getItem('chatbot_theme') || 'auto';
-          var dark = t === 'dark' ||
-            (t !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-          document.documentElement.classList.toggle('dark', dark);
-        } catch (e) {}
-      })();
-    </script>
+    <!-- 首屏同步应用主题：外部脚本（CSP 不允许内联脚本） -->
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="app">

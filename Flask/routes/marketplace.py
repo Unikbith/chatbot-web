@@ -61,6 +61,33 @@ def _is_adopted(marketplace_id, user_id):
     return PersonaTemplate.query.get(adopt.template_id) is not None
 
 
+def _adjust_persona_counters(pid, like_delta=0, dislike_delta=0):
+    """原子调整卡片点赞/点踩计数（``UPDATE ... SET x = MAX(0, x + delta)``）。
+
+    并发下多个请求同时投票时，先读后写会产生计数漂移；这里直接用 SQL 表达式
+    在数据库端完成自增/自减，保证一致性。
+    """
+    from sqlalchemy import case, func as _func
+    values = {}
+    if like_delta:
+        values['likes'] = case(
+            (PersonaMarketplace.likes + like_delta < 0, 0),
+            else_=PersonaMarketplace.likes + like_delta,
+        )
+    if dislike_delta:
+        values['dislikes'] = case(
+            (PersonaMarketplace.dislikes + dislike_delta < 0, 0),
+            else_=PersonaMarketplace.dislikes + dislike_delta,
+        )
+    if not values:
+        return
+    db.session.execute(
+        db.update(PersonaMarketplace)
+        .where(PersonaMarketplace.id == pid)
+        .values(**values)
+    )
+
+
 # ── 系统默认卡片：保证默认人设始终存在于卡片广场 ────────────────
 def ensure_system_cards():
     """幂等：把系统默认人设（加藤惠、陆驰、苏晚晴、沈砚）补录进卡片广场。
@@ -384,13 +411,55 @@ def list_marketplace():
     query = _apply_marketplace_sort(query, sort)
 
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    page_items = pagination.items
+    page_ids = [p.id for p in page_items]
+
+    # 批量预取：避免逐卡片查询造成的 N+1（原实现每卡 3 次查询 → 3N+1）
+    comment_counts = {}
+    user_votes = {}
+    adopted_ids = set()
+    if page_ids:
+        # 1) 评论数一次性聚合
+        rows = (
+            db.session.query(
+                MarketplaceComment.persona_id, func.count(MarketplaceComment.id)
+            )
+            .filter(MarketplaceComment.persona_id.in_(page_ids))
+            .group_by(MarketplaceComment.persona_id)
+            .all()
+        )
+        comment_counts = {pid: cnt for pid, cnt in rows}
+
+        # 2) 当前用户在本页卡片的投票一次性取回
+        votes = MarketplaceVote.query.filter(
+            MarketplaceVote.user_id == user_id,
+            MarketplaceVote.persona_id.in_(page_ids),
+        ).all()
+        user_votes = {v.persona_id: v.vote_type for v in votes}
+
+        # 3) 当前用户已采用（且对应人物卡仍存在）的卡片一次性取回
+        adopts = MarketplaceAdopt.query.filter(
+            MarketplaceAdopt.user_id == user_id,
+            MarketplaceAdopt.persona_id.in_(page_ids),
+        ).all()
+        from models import PersonaTemplate
+        template_ids = [a.template_id for a in adopts if a.template_id]
+        alive_tpl_ids = set()
+        if template_ids:
+            alive_tpl_ids = {
+                tid for (tid,) in db.session.query(PersonaTemplate.id)
+                .filter(PersonaTemplate.id.in_(template_ids)).all()
+            }
+        adopted_ids = {
+            a.persona_id for a in adopts if a.template_id in alive_tpl_ids
+        }
 
     items = []
-    for p in pagination.items:
+    for p in page_items:
         d = p.to_dict()
-        vote = MarketplaceVote.query.filter_by(persona_id=p.id, user_id=user_id).first()
-        d['user_vote'] = vote.vote_type if vote else None
-        d['is_adopted'] = _is_adopted(p.id, user_id)
+        d['comment_count'] = comment_counts.get(p.id, 0)
+        d['user_vote'] = user_votes.get(p.id)
+        d['is_adopted'] = p.id in adopted_ids
         items.append(d)
 
     return jsonify({
@@ -489,13 +558,12 @@ def vote_persona(pid):
     existing = MarketplaceVote.query.filter_by(persona_id=pid, user_id=user_id).first()
 
     if existing and toggle and existing.vote_type == vote_type:
-        # 同一类型再次点击 → 取消投票
+        # 同一类型再次点击 → 取消投票（原子自减，避免并发下的计数漂移）
         db.session.delete(existing)
-        if vote_type == 'like':
-            persona.likes = max(0, (persona.likes or 0) - 1)
-        else:
-            persona.dislikes = max(0, (persona.dislikes or 0) - 1)
+        _adjust_persona_counters(pid, like_delta=-1 if vote_type == 'like' else 0,
+                                 dislike_delta=-1 if vote_type == 'dislike' else 0)
         db.session.commit()
+        persona = PersonaMarketplace.query.get(pid)
         return jsonify({
             'code': 200,
             'message': '已取消投票',
@@ -510,19 +578,16 @@ def vote_persona(pid):
         # 不同类型 → 旧 -1，新 +1
         old = existing.vote_type
         existing.vote_type = vote_type
-        if old == 'like':
-            persona.likes = max(0, (persona.likes or 0) - 1)
-        else:
-            persona.dislikes = max(0, (persona.dislikes or 0) - 1)
+        like_delta = (1 if vote_type == 'like' else 0) - (1 if old == 'like' else 0)
+        dislike_delta = (1 if vote_type == 'dislike' else 0) - (1 if old == 'dislike' else 0)
+        _adjust_persona_counters(pid, like_delta=like_delta, dislike_delta=dislike_delta)
     else:
         db.session.add(MarketplaceVote(persona_id=pid, user_id=user_id, vote_type=vote_type))
-
-    if vote_type == 'like':
-        persona.likes = (persona.likes or 0) + 1
-    else:
-        persona.dislikes = (persona.dislikes or 0) + 1
+        _adjust_persona_counters(pid, like_delta=1 if vote_type == 'like' else 0,
+                                 dislike_delta=1 if vote_type == 'dislike' else 0)
 
     db.session.commit()
+    persona = PersonaMarketplace.query.get(pid)
     return jsonify({
         'code': 200,
         'message': '投票成功',
@@ -700,12 +765,17 @@ def like_comment(cid):
     if not comment:
         return jsonify({'code': 404, 'message': '评论不存在'}), 404
 
-    # 点赞 / 取消点赞（同一条评论再次点击即取消）
+    # 点赞 / 取消点赞（同一条评论再次点击即取消）；计数用原子 UPDATE 避免并发漂移
     existing = CommentLike.query.filter_by(comment_id=cid, user_id=user_id).first()
     if existing:
         db.session.delete(existing)
-        comment.likes = max(0, (comment.likes or 0) - 1)
+        db.session.execute(
+            db.update(MarketplaceComment)
+            .where(MarketplaceComment.id == cid)
+            .values(likes=func.max(0, MarketplaceComment.likes - 1))
+        )
         db.session.commit()
+        comment = MarketplaceComment.query.get(cid)
         return jsonify({
             'code': 200,
             'message': '已取消点赞',
@@ -713,8 +783,13 @@ def like_comment(cid):
         })
 
     db.session.add(CommentLike(comment_id=cid, user_id=user_id))
-    comment.likes = (comment.likes or 0) + 1
+    db.session.execute(
+        db.update(MarketplaceComment)
+        .where(MarketplaceComment.id == cid)
+        .values(likes=MarketplaceComment.likes + 1)
+    )
     db.session.commit()
+    comment = MarketplaceComment.query.get(cid)
     return jsonify({
         'code': 200,
         'message': '已点赞',
@@ -726,58 +801,61 @@ def like_comment(cid):
 @marketplace_bp.route('/checkin', methods=['POST'])
 @jwt_required()
 def daily_checkin():
-    """每日签到：冷却 24h；签到后向 ImageUsage.free_count 增加 5 次剩余免费生图次数，
-    但累加后不得超过 IMAGE_FREE_LIMIT（与图片生成共享同一免费额度上限）。
+    """每日签到：冷却 24h；签到后向 ImageUsage.free_count 增加 5 次剩余免费生图次数。
 
-    设计：签到奖励直接增加「剩余免费生图次数」。新用户首次签到前已拥有完整额度，
-    若剩余次数已达上限则本次签到不发放奖励（避免越权累计）。
+    设计：签到奖励直接累加「剩余免费生图次数」，不设上限；
+    生图时优先使用用户自有的 Agnes 图片配置，未配置则回退到系统共享免费 Key，
+    每次生图均消耗 1 次剩余次数。
     """
-    from flask import current_app
-
     user_id = int(get_jwt_identity())
     now = local_now()
 
-    last = DailyCheckIn.query.filter_by(user_id=user_id).order_by(DailyCheckIn.checkin_time.desc()).first()
-    if last and last.checkin_time and (now - last.checkin_time).total_seconds() < 86400:
+    # 并发安全：先原子「抢占」签到窗口——仅当不存在近 24h 的签到记录时才插入。
+    # 用带 EXISTS 条件的 INSERT ... SELECT 保证同一用户并发签到只有一个请求成功。
+    from sqlalchemy import text as _text
+    cutoff = now - timedelta(seconds=86400)
+    existing = (
+        db.session.query(DailyCheckIn.id)
+        .filter(DailyCheckIn.user_id == user_id,
+                DailyCheckIn.checkin_time > cutoff)
+        .first()
+    )
+    if existing:
+        last = DailyCheckIn.query.filter_by(user_id=user_id).order_by(
+            DailyCheckIn.checkin_time.desc()).first()
         remaining = 86400 - (now - last.checkin_time).total_seconds()
         hours = int(remaining // 3600)
         minutes = int((remaining % 3600) // 60)
         return jsonify({'code': 400, 'message': f'签到冷却中，还需等待{hours}小时{minutes}分钟'}), 400
 
-    # 与图片生成共享同一 IMAGE_FREE_LIMIT 上限
-    free_limit = int(current_app.config.get('IMAGE_FREE_LIMIT') or 5)
+    bonus = 5
 
     usage = ImageUsage.query.filter_by(user_id=user_id).first()
     if not usage:
-        # 新用户首次签到前已拥有完整免费额度
-        usage = ImageUsage(user_id=user_id, free_count=free_limit, is_remaining_semantics=True)
+        usage = ImageUsage(user_id=user_id, free_count=0, is_remaining_semantics=True)
         db.session.add(usage)
+        try:
+            db.session.flush()
+        except Exception:
+            db.session.rollback()
+            usage = ImageUsage.query.filter_by(user_id=user_id).first()
 
-    current_remaining = usage.free_count or 0
-    if current_remaining >= free_limit:
-        # 已达上限：不发放奖励
-        return jsonify({
-            'code': 400,
-            'message': f'免费生图额度已达上限（{free_limit}），签到奖励无法累加',
-            'data': {'bonus': 0, 'free_images': usage.free_count, 'free_limit': free_limit},
-        }), 400
-
-    bonus = 5
-    new_remaining = current_remaining + bonus
-    if new_remaining > free_limit:
-        bonus = free_limit - current_remaining  # 仅发放剩余空间
-        new_remaining = free_limit
-
-    usage.free_count = new_remaining
+    # 原子累加签到奖励，避免并发下的先读后写
+    db.session.execute(
+        db.update(ImageUsage)
+        .where(ImageUsage.user_id == user_id)
+        .values(free_count=ImageUsage.free_count + bonus, updated_at=now)
+    )
 
     checkin = DailyCheckIn(user_id=user_id, checkin_time=now, bonus_images=bonus)
     db.session.add(checkin)
 
     db.session.commit()
+    usage = ImageUsage.query.filter_by(user_id=user_id).first()
     return jsonify({
         'code': 200,
         'message': f'签到成功，获得{bonus}次免费生图机会',
-        'data': {'bonus': bonus, 'free_images': usage.free_count, 'free_limit': free_limit}
+        'data': {'bonus': bonus, 'free_images': usage.free_count if usage else bonus}
     })
 
 

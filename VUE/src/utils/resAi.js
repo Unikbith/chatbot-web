@@ -1,5 +1,7 @@
+import logger from './logger';
 // utils/resAi.js - API 请求封装
 import axios from "axios";
+import { tokenStore } from './tokenStore';
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -18,9 +20,31 @@ function notifyAuthExpired() {
   window.dispatchEvent(new CustomEvent("auth:expired"));
 }
 
+// 静默续期：access token 过期时用 refresh token 换新，避免打断用户操作。
+// 并发 401 共享同一个刷新 Promise，防止刷新风暴。
+let refreshPromise = null;
+async function tryRefreshToken() {
+  const refreshToken = tokenStore.getRefresh();
+  if (!refreshToken) return null;
+  if (!refreshPromise) {
+    refreshPromise = axios
+      .post(`${baseURL}/api/auth/refresh`, {}, {
+        headers: { Authorization: `Bearer ${refreshToken}` },
+      })
+      .then((res) => {
+        const newToken = res.data?.data?.access_token;
+        if (newToken) tokenStore.setAccess(newToken);
+        return newToken || null;
+      })
+      .catch(() => null)
+      .finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+}
+
 resAi.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("chatbot_token");
+    const token = tokenStore.getAccess();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -31,14 +55,26 @@ resAi.interceptors.request.use(
 
 resAi.interceptors.response.use(
   (response) => response.data,
-  (error) => {
-    console.error("请求错误", error);
-    if (error.response?.status === 401) {
+  async (error) => {
+    const status = error.response?.status;
+    const original = error.config || {};
+    // 401 且未重试过、且存在 refresh token → 静默续期后重放一次原请求
+    if (status === 401 && !original._retried && tokenStore.getRefresh()) {
+      original._retried = true;
+      const newToken = await tryRefreshToken();
+      if (newToken) {
+        original.headers = original.headers || {};
+        original.headers.Authorization = `Bearer ${newToken}`;
+        return resAi(original);
+      }
+    }
+    if (status === 401) {
       // 仅当发请求时确实持有 token 才视为「登录过期」；未登录(无 token)的 401 不弹误导提示
-      const hadToken = !!localStorage.getItem("chatbot_token");
-      localStorage.removeItem("chatbot_token");
-      localStorage.removeItem("chatbot_refresh_token");
+      const hadToken = !!tokenStore.getAccess();
+      tokenStore.clear();
       if (hadToken) notifyAuthExpired();
+    } else {
+      logger.error("请求错误", error);
     }
     return Promise.reject(error);
   },
@@ -46,7 +82,7 @@ resAi.interceptors.response.use(
 
 // 流式请求
 const fetchStream = async (url, data, options = {}) => {
-  const token = localStorage.getItem("chatbot_token");
+  const token = tokenStore.getAccess();
   const response = await fetch(`${baseURL}${url}`, {
     method: "POST",
     headers: {
@@ -59,8 +95,8 @@ const fetchStream = async (url, data, options = {}) => {
   });
   if (!response.ok) {
     if (response.status === 401) {
-      const hadToken = !!localStorage.getItem("chatbot_token");
-      localStorage.removeItem("chatbot_token");
+      const hadToken = !!tokenStore.getAccess();
+      tokenStore.setAccess(null);
       if (hadToken) notifyAuthExpired();
     }
     throw new Error(`HTTP error! status: ${response.status}`);
@@ -70,7 +106,7 @@ const fetchStream = async (url, data, options = {}) => {
 
 // 流式表单请求
 const fetchStreamFormData = async (url, formData, options = {}) => {
-  const token = localStorage.getItem("chatbot_token");
+  const token = tokenStore.getAccess();
   const headers = {
     ...(token && { Authorization: `Bearer ${token}` }),
     ...options.headers,
@@ -83,8 +119,8 @@ const fetchStreamFormData = async (url, formData, options = {}) => {
   });
   if (!response.ok) {
     if (response.status === 401) {
-      const hadToken = !!localStorage.getItem("chatbot_token");
-      localStorage.removeItem("chatbot_token");
+      const hadToken = !!tokenStore.getAccess();
+      tokenStore.setAccess(null);
       if (hadToken) notifyAuthExpired();
     }
     throw new Error(`HTTP error! status: ${response.status}`);
@@ -113,7 +149,7 @@ const readStream = async (response, onChunk) => {
         if (data.error) throw new Error(data.error);
         onChunk(data);
       } catch (e) {
-        console.warn("解析失败", e);
+        logger.warn("解析失败", e);
       }
     }
   }
@@ -138,7 +174,7 @@ const authApi = {
 
   // 刷新 token
   async refresh() {
-    const refreshToken = localStorage.getItem("chatbot_refresh_token");
+    const refreshToken = tokenStore.getRefresh();
     const res = await axios.post(`${baseURL}/api/auth/refresh`, {}, {
       headers: { Authorization: `Bearer ${refreshToken}` }
     });
@@ -172,9 +208,7 @@ const authApi = {
 
   // 登出（清除本地 token）
   logout() {
-    localStorage.removeItem("chatbot_token");
-    localStorage.removeItem("chatbot_refresh_token");
-    localStorage.removeItem("chatbot_user");
+    tokenStore.clear();
   },
 };
 
@@ -286,7 +320,7 @@ const uploadApi = {
   async uploadImage(file) {
     const formData = new FormData();
     formData.append('file', file);
-    const token = localStorage.getItem("chatbot_token");
+    const token = tokenStore.getAccess();
     const response = await fetch(`${baseURL}/api/upload/image`, {
       method: 'POST',
       headers: {
@@ -377,7 +411,7 @@ adminReq.interceptors.request.use(
 adminReq.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    console.error("管理后台请求错误", error);
+    logger.error("管理后台请求错误", error);
     if (error.response?.status === 401) {
       localStorage.removeItem("admin_token");
     }
@@ -396,8 +430,10 @@ const adminApi = {
   async stats() {
     return adminReq.get('/api/admin/stats');
   },
-  async users() {
-    return adminReq.get('/api/admin/users');
+  async users(page = 1, perPage = 200, keyword = '') {
+    const params = new URLSearchParams({ page: String(page), per_page: String(perPage) });
+    if (keyword) params.set('q', keyword);
+    return adminReq.get(`/api/admin/users?${params.toString()}`);
   },
   async userConversations(userId) {
     return adminReq.get(`/api/admin/users/${userId}/conversations`);
@@ -461,7 +497,7 @@ const audioApi = {
     const formData = new FormData();
     formData.append('file', file);
     if (providerId) formData.append('provider_id', providerId);
-    const token = localStorage.getItem("chatbot_token");
+    const token = tokenStore.getAccess();
     const response = await fetch(`${baseURL}/api/audio/transcriptions`, {
       method: 'POST',
       headers: { ...(token && { Authorization: `Bearer ${token}` }) },
@@ -471,7 +507,7 @@ const audioApi = {
     return response.json();
   },
   async textToSpeech(text, voice = 'alloy', providerId = null) {
-    const token = localStorage.getItem("chatbot_token");
+    const token = tokenStore.getAccess();
     const response = await fetch(`${baseURL}/api/audio/speech`, {
       method: 'POST',
       headers: {
@@ -509,14 +545,14 @@ const feedbackApi = {
 };
 
 const marketplaceApi = {
-  list(sort = 'hot', page = 1, keyword = '', gender = '') {
-    let url = `/api/marketplace?sort=${sort}&page=${page}`;
+  list(sort = 'hot', page = 1, keyword = '', gender = '', perPage = 12) {
+    let url = `/api/marketplace?sort=${sort}&page=${page}&per_page=${perPage}`;
     if (keyword) url += `&q=${encodeURIComponent(keyword)}`;
     if (gender) url += `&gender=${encodeURIComponent(gender)}`;
     return resAi.get(url);
   },
-  publicComments(personaId, sort = 'hot', page = 1) {
-    return resAi.get(`/api/marketplace/public/${personaId}/comments?sort=${sort}&page=${page}`);
+  publicComments(personaId, sort = 'hot', page = 1, perPage = 5) {
+    return resAi.get(`/api/marketplace/public/${personaId}/comments?sort=${sort}&page=${page}&per_page=${perPage}`);
   },
   get(id) {
     return resAi.get(`/api/marketplace/${id}`);
@@ -536,8 +572,8 @@ const marketplaceApi = {
   unadopt(id) {
     return resAi.post(`/api/marketplace/${id}/unadopt`);
   },
-  comments(personaId, sort = 'hot', page = 1) {
-    return resAi.get(`/api/marketplace/${personaId}/comments?sort=${sort}&page=${page}`);
+  comments(personaId, sort = 'hot', page = 1, perPage = 5) {
+    return resAi.get(`/api/marketplace/${personaId}/comments?sort=${sort}&page=${page}&per_page=${perPage}`);
   },
   addComment(personaId, content) {
     return resAi.post(`/api/marketplace/${personaId}/comments`, { content });
