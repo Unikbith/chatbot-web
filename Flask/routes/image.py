@@ -17,7 +17,7 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime
-from models import ModelProvider, ImageUsage
+from models import ModelProvider, ImageUsage, local_now
 from extensions import db
 from services.agnes_image import (
     generate_image, IMAGE_RESOLUTIONS, IMAGE_ASPECT_RATIOS, IMAGE_QUALITIES,
@@ -69,7 +69,7 @@ def _increment_free_usage(user_id):
     row = _usage_row(user_id)
     if row:
         row.free_count += 1
-        row.updated_at = datetime.utcnow()
+        row.updated_at = local_now()
     else:
         db.session.add(ImageUsage(user_id=user_id, free_count=1))
     db.session.commit()

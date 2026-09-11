@@ -51,7 +51,7 @@
 
         <!-- AI 人设 -->
         <div class="cv-section">
-          <div class="cv-title">{{ t('AI 人设', 'AI Persona') }}</div>
+          <div class="cv-title">{{ t('人物设定', 'Persona') }}</div>
           <div class="cv-row">
             <el-select
               v-model="form.persona_id"
@@ -147,7 +147,7 @@
 
         <!-- AI 参数（当前对话模型单独设置） -->
         <div class="cv-section">
-          <div class="cv-title">{{ t('AI 参数', 'AI Parameters') }}</div>
+          <div class="cv-title">{{ t('参数微调', 'Parameters') }}</div>
 
           <div class="param-row">
             <div class="slider-label">{{ t('温度', 'Temperature') }}</div>
@@ -203,7 +203,7 @@
           <div class="cv-title">{{ t('语音播报', 'Voice') }}</div>
           <div class="cv-row voice-row">
             <div class="voice-item">
-              <span class="slider-label">{{ t('自动播报 AI 回复', 'Auto-play AI replies') }}</span>
+              <span class="slider-label">{{ t('自动语音回复', 'Auto voice replies') }}</span>
               <el-switch v-model="form.auto_play_voice" />
             </div>
           </div>

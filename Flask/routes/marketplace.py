@@ -7,8 +7,9 @@ from extensions import db
 from models import (
     PersonaMarketplace, MarketplaceVote, MarketplaceComment,
     CommentLike, DailyCheckIn, ImageUsage, User, Conversation,
-    MarketplaceAdopt,
+    MarketplaceAdopt, local_now,
 )
+from sqlalchemy import or_ as _or, func  # noqa: F401  (公开接口筛选使用)
 
 marketplace_bp = Blueprint('marketplace', __name__, url_prefix='/api/marketplace')
 
@@ -48,16 +49,150 @@ def _identicon_seed_for(user_id, persona_id):
     return hashlib.sha256(f"{user_id}:{persona_id}:icon".encode()).hexdigest()[:16]
 
 
-# ── 列表 ────────────────────────────────────────────────────────
-@marketplace_bp.route('', methods=['GET'])
-@jwt_required()
-def list_marketplace():
-    """获取人设广场列表，按 score 排序"""
-    user_id = int(get_jwt_identity())
-    sort = request.args.get('sort', 'hot')  # hot / new
+def _is_adopted(marketplace_id, user_id):
+    """该卡片是否已被用户添加（ adopt 记录存在且对应人物卡未被删除）"""
+    adopt = MarketplaceAdopt.query.filter_by(
+        persona_id=marketplace_id, user_id=user_id
+    ).first()
+    if not adopt:
+        return False
+    # 人物卡已被删除时视为未添加，前端可重新添加
+    from models import PersonaTemplate
+    return PersonaTemplate.query.get(adopt.template_id) is not None
+
+
+# ── 系统默认卡片：保证默认人设始终存在于卡片广场 ────────────────
+def ensure_system_cards():
+    """幂等：把系统默认人设（加藤惠、陆驰、苏晚晴、沈砚）补录进卡片广场。
+    作者挂到最早注册的管理员（或最早的注册用户）名下，仅创建缺失项。
+    已存在的同名系统卡若仍是旧版提示词（缺少【与用户的关系】章节），一并升级。"""
+    from models import PersonaTemplate  # noqa: F401  (保持依赖显式)
+    from routes.auth import _PERSONA_PROMPTS, _DEFAULT_AVATARS, _PRESET_GENDERS
+
+    names = list(_PERSONA_PROMPTS.keys())
+    cards = {
+        c.name: c
+        for c in PersonaMarketplace.query.filter(PersonaMarketplace.name.in_(names)).all()
+    }
+
+    author = User.query.order_by(User.id.asc()).first()
+    if author is None:
+        return
+
+    dirty = False
+    for name, info in _PERSONA_PROMPTS.items():
+        card = cards.get(name)
+        if card is None:
+            db.session.add(
+                PersonaMarketplace(
+                    user_id=author.id,
+                    name=name,
+                    description=info.get('description') or '',
+                    avatar=_DEFAULT_AVATARS.get(name),
+                    system_prompt=info.get('system_prompt') or '',
+                    greeting=info.get('greeting') or '',
+                    gender=_PRESET_GENDERS.get(name),
+                )
+            )
+            dirty = True
+        elif '【与用户的关系】' not in (card.system_prompt or ''):
+            # 旧版提示词且未被用户改动过（新版统一含该章节），升级到新版
+            card.system_prompt = info.get('system_prompt') or card.system_prompt
+            card.greeting = info.get('greeting') or card.greeting
+            card.description = info.get('description') or card.description
+            if not card.gender:
+                card.gender = _PRESET_GENDERS.get(name)
+            dirty = True
+    if dirty:
+        db.session.commit()
+
+
+def ensure_system_adopts(user_id):
+    """把默认人物卡（加藤惠 / 陆驰 / 苏晚晴 / 沈砚）与卡片广场中的同名卡片关联。
+
+    效果：这些人物卡既出现在卡片广场，又默认处于「已添加」状态，
+    并在人物卡管理中带上「卡片广场」来源标签。仅补齐缺失记录，幂等。
+    注意：只处理用户自己的默认人物卡（is_default），用户自行创建的同名卡片不参与。
+    """
+    from models import PersonaTemplate
+    from routes.auth import _PERSONA_PROMPTS, _DEFAULT_AVATARS
+
+    names = list(_PERSONA_PROMPTS.keys())
+    cards = {
+        c.name: c
+        for c in PersonaMarketplace.query.filter(PersonaMarketplace.name.in_(names)).all()
+    }
+    if not cards:
+        return
+
+    # 只认「默认人物卡」：注册时创建的 4 张默认卡之一（性别决定其中一张为默认）
+    templates = PersonaTemplate.query.filter(
+        PersonaTemplate.user_id == user_id,
+        PersonaTemplate.name.in_(list(cards.keys())),
+    ).all()
+
+    changed = False
+    for tp in templates:
+        card = cards.get(tp.name)
+        if not card:
+            continue
+
+        # 该用户是否拥有同名「默认卡」：默认卡自身，或它是 4 张预设之一
+        # （预设卡注册即生成，删掉后不再补，因此以 is_default 或历史无 adopt 的方式判定）
+        if not tp.is_default and MarketplaceAdopt.query.filter_by(
+            template_id=tp.id, user_id=user_id
+        ).first() is None:
+            # 用户自建的同名卡片，不参与默认关联
+            if tp.created_at and card.created_at and tp.created_at > card.created_at:
+                continue
+
+        # 补齐默认人物卡的头像 / 开场白（历史数据可能为空）
+        info = _PERSONA_PROMPTS.get(tp.name) or {}
+        if not tp.avatar and _DEFAULT_AVATARS.get(tp.name):
+            tp.avatar = _DEFAULT_AVATARS.get(tp.name)
+            changed = True
+        if not tp.greeting and info.get('greeting'):
+            tp.greeting = info.get('greeting')
+            changed = True
+
+        adopt = MarketplaceAdopt.query.filter_by(persona_id=card.id, user_id=user_id).first()
+        if adopt:
+            # 人物卡被删除后重新生成时，修正 adopt 指向
+            if adopt.template_id != tp.id:
+                adopt.template_id = tp.id
+                changed = True
+            continue
+        db.session.add(MarketplaceAdopt(persona_id=card.id, user_id=user_id, template_id=tp.id))
+        changed = True
+
+    if changed:
+        db.session.commit()
+
+
+# ── 公开卡片列表（用于未登录入口页） ──────────────────────────────
+@marketplace_bp.route('/public', methods=['GET'])
+def list_marketplace_public():
+    """未登录用户浏览卡片广场的公开接口：不依赖 JWT，不暴露「是否已采用」「我的投票」。
+
+    入口页 / 落地页拉取该接口即可在登录前展示卡片网格；点击卡片进入详情后，
+    详情接口走公开版本（/public/<id>），采纳等操作仍要求登录。
+
+    排序 sort：
+      - hot：赞比例 + 总赞数 + 时间（最热）
+      - new：按发布时间倒序
+      - most_likes：点赞数最多
+      - most_comments：评论数最多
+      - most_disliked：「最不受欢迎」= 踩数明显多于赞数的卡片优先；
+        计算 dislike_ratio = dislikes / (likes + dislikes + 1)，
+        按 ratio desc + dislikes desc 排序，让踩远多于赞的卡片排在前面
+    """
+    from models import PersonaMarketplace  # noqa: F401
+
+    sort = request.args.get('sort', 'hot')
     page = int(request.args.get('page', 1))
-    per_page = min(int(request.args.get('per_page', 20)), 50)
+    per_page = min(int(request.args.get('per_page', 50)), 100)
     keyword = request.args.get('q', '').strip()
+    gender_tag = request.args.get('gender', '').strip()
 
     query = PersonaMarketplace.query
     if keyword:
@@ -67,13 +202,150 @@ def list_marketplace():
                 PersonaMarketplace.description.ilike(f'%{keyword}%'),
             )
         )
+    if gender_tag in ('男', '女'):
+        query = query.filter(PersonaMarketplace.gender == gender_tag)
+    elif gender_tag == '非二元':
+        query = query.filter(
+            db.or_(
+                PersonaMarketplace.gender.is_(None),
+                PersonaMarketplace.gender.notin_(['男', '女']),
+            )
+        )
+
+    query = _apply_marketplace_sort(query, sort)
+
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    items = [p.to_dict() for p in pagination.items]
+
+    return jsonify({
+        'code': 200,
+        'data': {
+            'items': items,
+            'total': pagination.total,
+            'page': page,
+            'pages': pagination.pages,
+        }
+    })
+
+
+@marketplace_bp.route('/public/<int:pid>', methods=['GET'])
+def get_marketplace_persona_public(pid):
+    """未登录用户查看卡片详情：不暴露 user_vote / is_adopted，但保留创作者假名信息。"""
+    persona = PersonaMarketplace.query.get(pid)
+    if not persona:
+        return jsonify({'code': 404, 'message': '人设不存在'}), 404
+    d = persona.to_dict(include_prompt=True)
+    d['creator_pseudonym'] = _pseudonym_for(persona.user_id, pid)
+    d['creator_identicon_seed'] = _identicon_seed_for(persona.user_id, pid)
+    return jsonify({'code': 200, 'data': d})
+
+
+def _apply_marketplace_sort(query, sort):
+    """按 sort 取值给 query 套 order_by。
+
+    支持排序：
+      - new：created_at 倒序
+      - hot：赞比例（likes / (likes+dislikes+1)）降序、总赞数兜底
+      - most_likes：likes 倒序
+      - most_comments：评论数倒序（用子查询聚合，避免 N+1）
+      - most_disliked：踩赞比例倒序（dislikes 远多于 likes），ratio = dislikes / (likes+dislikes+1)
+    """
+    from models import PersonaMarketplace, MarketplaceComment
+
     if sort == 'new':
-        query = query.order_by(PersonaMarketplace.created_at.desc())
-    else:
-        query = query.order_by(
-            (PersonaMarketplace.likes - PersonaMarketplace.dislikes).desc(),
+        return query.order_by(PersonaMarketplace.created_at.desc())
+
+    if sort == 'most_likes':
+        return query.order_by(
+            PersonaMarketplace.likes.desc(),
             PersonaMarketplace.created_at.desc(),
         )
+
+    if sort == 'most_comments':
+        # 子查询：每张卡片的评论数（顶层，不含已删除场景）
+        cmt_count = (
+            db.session.query(
+                MarketplaceComment.persona_id,
+                func.count(MarketplaceComment.id),
+            )
+            .group_by(MarketplaceComment.persona_id)
+            .subquery()
+        )
+        return (
+            query.outerjoin(cmt_count, cmt_count.c.persona_id == PersonaMarketplace.id)
+            .order_by(
+                cmt_count.c.count.desc().nulls_last(),
+                PersonaMarketplace.likes.desc(),
+                PersonaMarketplace.created_at.desc(),
+            )
+        )
+
+    if sort == 'most_disliked':
+        # 优先把「踩远多于赞」的卡片顶到前面；
+        # ratio = dislikes / (likes+dislikes+1)，值越大越不受欢迎
+        d_ratio = PersonaMarketplace.dislikes * 1.0 / (
+            PersonaMarketplace.likes + PersonaMarketplace.dislikes + 1.0
+        )
+        return query.order_by(
+            d_ratio.desc(),
+            PersonaMarketplace.dislikes.desc(),
+            PersonaMarketplace.created_at.desc(),
+        )
+
+    # 默认 hot：赞比例 + 总赞数 + 时间
+    ratio = PersonaMarketplace.likes * 1.0 / (
+        PersonaMarketplace.likes + PersonaMarketplace.dislikes + 1.0
+    )
+    return query.order_by(
+        ratio.desc(),
+        PersonaMarketplace.likes.desc(),
+        PersonaMarketplace.created_at.desc(),
+    )
+
+
+# ── 列表 ────────────────────────────────────────────────────────
+@marketplace_bp.route('', methods=['GET'])
+@jwt_required()
+def list_marketplace():
+    """获取人设广场列表，支持多种排序（详见 _apply_marketplace_sort）。
+
+    sort: hot / new / most_likes / most_comments / most_disliked
+    """
+    user_id = int(get_jwt_identity())
+    sort = request.args.get('sort', 'hot')
+    page = int(request.args.get('page', 1))
+    per_page = min(int(request.args.get('per_page', 20)), 50)
+    keyword = request.args.get('q', '').strip()
+    # 性别筛选：男 / 女 / 非二元（自定义及未填写统一归入非二元）
+    gender_tag = request.args.get('gender', '').strip()
+
+    # 系统默认人物卡补录进卡片广场（幂等）
+    try:
+        ensure_system_cards()
+        ensure_system_adopts(user_id)
+    except Exception:
+        db.session.rollback()
+
+    query = PersonaMarketplace.query
+    if keyword:
+        query = query.filter(
+            db.or_(
+                PersonaMarketplace.name.ilike(f'%{keyword}%'),
+                PersonaMarketplace.description.ilike(f'%{keyword}%'),
+            )
+        )
+    if gender_tag in ('男', '女'):
+        query = query.filter(PersonaMarketplace.gender == gender_tag)
+    elif gender_tag == '非二元':
+        # 非「男/女」的自定义值（含未填写）都归入非二元
+        query = query.filter(
+            db.or_(
+                PersonaMarketplace.gender.is_(None),
+                PersonaMarketplace.gender.notin_(['男', '女']),
+            )
+        )
+
+    query = _apply_marketplace_sort(query, sort)
 
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
@@ -82,8 +354,7 @@ def list_marketplace():
         d = p.to_dict()
         vote = MarketplaceVote.query.filter_by(persona_id=p.id, user_id=user_id).first()
         d['user_vote'] = vote.vote_type if vote else None
-        adopt = MarketplaceAdopt.query.filter_by(persona_id=p.id, user_id=user_id).first()
-        d['is_adopted'] = adopt is not None
+        d['is_adopted'] = _is_adopted(p.id, user_id)
         items.append(d)
 
     return jsonify({
@@ -108,8 +379,7 @@ def get_marketplace_persona(pid):
     d = persona.to_dict(include_prompt=True)
     vote = MarketplaceVote.query.filter_by(persona_id=pid, user_id=user_id).first()
     d['user_vote'] = vote.vote_type if vote else None
-    adopt = MarketplaceAdopt.query.filter_by(persona_id=pid, user_id=user_id).first()
-    d['is_adopted'] = adopt is not None
+    d['is_adopted'] = _is_adopted(pid, user_id)
     d['creator_pseudonym'] = _pseudonym_for(persona.user_id, pid)
     d['creator_identicon_seed'] = _identicon_seed_for(persona.user_id, pid)
     return jsonify({'code': 200, 'data': d})
@@ -126,6 +396,9 @@ def publish_persona():
     system_prompt = (data.get('system_prompt') or '').strip()
     greeting = (data.get('greeting') or '').strip()
     avatar = data.get('avatar')
+    gender = (data.get('gender') or '').strip()
+    if gender and len(gender) > 20:
+        return jsonify({'code': 400, 'message': '性别自定义内容过长（最多20字）'}), 400
 
     if not name or not description or not system_prompt or not greeting or not avatar:
         return jsonify({'code': 400, 'message': '请按规范填写'}), 400
@@ -143,6 +416,7 @@ def publish_persona():
         avatar=avatar,
         system_prompt=system_prompt,
         greeting=greeting,
+        gender=gender or None,
     )
     db.session.add(persona)
     db.session.commit()
@@ -153,6 +427,17 @@ def publish_persona():
 @marketplace_bp.route('/<int:pid>/vote', methods=['POST'])
 @jwt_required()
 def vote_persona(pid):
+    """人设卡片投票（支持「再次点击取消」）。
+
+    行为：
+      - 同类型再投：直接拒绝（返回 code=200 但 user_vote 不变，避免双重计票）
+      - 不同类型切换：撤销旧投票 + 新增新投票（likes/dislikes 计数同步变化）
+      - 未投过：直接 +1
+      - 再次点击同一类型 -> 取消投票：likes/dislikes -1，user_vote 置 None
+        前端需要在切换「目标投票类型」与「取消」时根据 user_vote 决定如何 POST。
+        为简化前端交互，这里同时支持通过可选参数 ``toggle=true``：
+        同一类型再次点击会自动撤销并返回最新状态。
+    """
     user_id = int(get_jwt_identity())
     persona = PersonaMarketplace.query.get(pid)
     if not persona:
@@ -162,27 +447,55 @@ def vote_persona(pid):
     vote_type = data.get('vote_type')
     if vote_type not in ('like', 'dislike'):
         return jsonify({'code': 400, 'message': '无效的投票类型'}), 400
+    # 是否开启「再次点击即取消」语义；默认开启，与前端交互对齐
+    toggle = bool(data.get('toggle', True))
 
     existing = MarketplaceVote.query.filter_by(persona_id=pid, user_id=user_id).first()
+
+    if existing and toggle and existing.vote_type == vote_type:
+        # 同一类型再次点击 → 取消投票
+        db.session.delete(existing)
+        if vote_type == 'like':
+            persona.likes = max(0, (persona.likes or 0) - 1)
+        else:
+            persona.dislikes = max(0, (persona.dislikes or 0) - 1)
+        db.session.commit()
+        return jsonify({
+            'code': 200,
+            'message': '已取消投票',
+            'data': {
+                'likes': persona.likes,
+                'dislikes': persona.dislikes,
+                'user_vote': None,
+            },
+        })
+
     if existing:
-        if existing.vote_type == vote_type:
-            return jsonify({'code': 200, 'message': '已投过', 'data': persona.to_dict()})
+        # 不同类型 → 旧 -1，新 +1
         old = existing.vote_type
         existing.vote_type = vote_type
         if old == 'like':
-            persona.likes = max(0, persona.likes - 1)
+            persona.likes = max(0, (persona.likes or 0) - 1)
         else:
-            persona.dislikes = max(0, persona.dislikes - 1)
+            persona.dislikes = max(0, (persona.dislikes or 0) - 1)
     else:
         db.session.add(MarketplaceVote(persona_id=pid, user_id=user_id, vote_type=vote_type))
 
     if vote_type == 'like':
-        persona.likes += 1
+        persona.likes = (persona.likes or 0) + 1
     else:
-        persona.dislikes += 1
+        persona.dislikes = (persona.dislikes or 0) + 1
 
     db.session.commit()
-    return jsonify({'code': 200, 'data': persona.to_dict()})
+    return jsonify({
+        'code': 200,
+        'message': '投票成功',
+        'data': {
+            'likes': persona.likes,
+            'dislikes': persona.dislikes,
+            'user_vote': vote_type,
+        },
+    })
 
 
 # ── 添加到我的角色 ──────────────────────────────────────────────
@@ -197,17 +510,29 @@ def adopt_persona(pid):
 
     existing_adopt = MarketplaceAdopt.query.filter_by(persona_id=pid, user_id=user_id).first()
     if existing_adopt:
-        return jsonify({'code': 200, 'message': '已采用过该卡片', 'data': {'already': True}})
+        # adopt 记录存在但对应人物卡已被删除 → 清理失效记录，允许重新添加
+        if PersonaTemplate.query.get(existing_adopt.template_id) is None:
+            db.session.delete(existing_adopt)
+            db.session.commit()
+        else:
+            return jsonify({'code': 200, 'message': '已添加过该卡片', 'data': {'already': True}})
+
+    # 人物卡（AI 人设）数量上限
+    ai_count = PersonaTemplate.query.filter_by(user_id=user_id, persona_type='ai').count()
+    if ai_count >= 10:
+        return jsonify({
+            'code': 400,
+            'message': '人物卡数量已达上限（10 个），请先删除部分人物卡'
+        }), 400
 
     tp = PersonaTemplate(
         user_id=user_id,
         name=persona.name,
-        description=f"[来自人设广场] {persona.description or ''}",
+        description=persona.description or '',
         avatar=persona.avatar,
         system_prompt=persona.system_prompt,
         greeting=persona.greeting,
         is_default=False,
-        is_system=False,
         persona_type='ai',
     )
     db.session.add(tp)
@@ -255,19 +580,52 @@ def list_comments(pid):
     page = int(request.args.get('page', 1))
     per_page = min(int(request.args.get('per_page', 30)), 100)
 
-    query = MarketplaceComment.query.filter_by(persona_id=pid)
+    user_id = int(get_jwt_identity())
+
+    # 只取顶层评论（parent_id 为空），子回复一次性批量取出后挂载，避免 N+1 查询
+    query = MarketplaceComment.query.filter_by(persona_id=pid, parent_id=None)
     if sort == 'new':
         query = query.order_by(MarketplaceComment.created_at.desc())
     else:
         query = query.order_by(MarketplaceComment.likes.desc(), MarketplaceComment.created_at.desc())
 
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-    items = []
-    for c in pagination.items:
-        items.append(c.to_dict(
+    tops = list(pagination.items)
+
+    children = []
+    if tops:
+        children = MarketplaceComment.query.filter(
+            MarketplaceComment.parent_id.in_([c.id for c in tops])
+        ).order_by(MarketplaceComment.created_at.asc()).all()
+
+    by_id = {c.id: c for c in tops + list(children)}
+
+    # 当前用户已点赞的评论（顶层 + 子回复）
+    liked_ids = set()
+    if by_id:
+        liked_ids = {
+            r[0] for r in db.session.query(CommentLike.comment_id).filter(
+                CommentLike.user_id == user_id,
+                CommentLike.comment_id.in_(list(by_id.keys())),
+            ).all()
+        }
+
+    def _pack(c, with_replies=True):
+        """打包评论；reply_to_name 为「被回复者」的化名（用于显示 回复 某某）"""
+        target = by_id.get(c.reply_to_id) if c.reply_to_id else None
+        replies = []
+        if with_replies:
+            replies = [_pack(ch, with_replies=False) for ch in children if ch.parent_id == c.id]
+        return c.to_dict(
             pseudonym=_pseudonym_for(c.user_id, pid),
             identicon_seed=_identicon_seed_for(c.user_id, pid),
-        ))
+            liked=c.id in liked_ids,
+            reply_to_name=_pseudonym_for(target.user_id, pid) if target else None,
+            replies=replies,
+            reply_count=len(replies),
+        )
+
+    items = [_pack(c) for c in tops]
     return jsonify({
         'code': 200,
         'data': {'items': items, 'total': pagination.total, 'page': page}
@@ -290,7 +648,34 @@ def add_comment(pid):
     if len(content) > 500:
         return jsonify({'code': 400, 'message': '评论最多500字'}), 400
 
-    comment = MarketplaceComment(persona_id=pid, user_id=user_id, content=content)
+    # 最多只嵌套一层：无论回复的是顶层评论还是其子回复，parent 一律挂到顶层评论上，
+    # reply_to 保留真正被回复的那条（用于展示「回复 某某」）
+    parent = None
+    raw_parent_id = data.get('parent_id')
+    if raw_parent_id:
+        parent = MarketplaceComment.query.get(int(raw_parent_id))
+        if not parent or parent.persona_id != pid:
+            return jsonify({'code': 400, 'message': '被回复的评论不存在'}), 400
+
+    top_id = (parent.parent_id or parent.id) if parent else None
+
+    target = None
+    raw_reply_to = data.get('reply_to_id')
+    if raw_reply_to:
+        t = MarketplaceComment.query.get(int(raw_reply_to))
+        # 目标评论必须和 parent 属于同一颗评论树
+        if t and (t.parent_id or t.id) == top_id:
+            target = t
+    if parent and target is None:
+        target = parent
+
+    comment = MarketplaceComment(
+        persona_id=pid,
+        user_id=user_id,
+        content=content,
+        parent_id=top_id,
+        reply_to_id=target.id if target and target.id != top_id else None,
+    )
     db.session.add(comment)
     db.session.commit()
     return jsonify({
@@ -299,6 +684,10 @@ def add_comment(pid):
         'data': comment.to_dict(
             pseudonym=_pseudonym_for(user_id, pid),
             identicon_seed=_identicon_seed_for(user_id, pid),
+            liked=False,
+            # 与列表接口保持一致：只有真正指向某条子评论时才带「回复 某某」
+            reply_to_name=_pseudonym_for(target.user_id, pid)
+            if (comment.reply_to_id and target) else None,
         )
     })
 
@@ -312,22 +701,42 @@ def like_comment(cid):
     if not comment:
         return jsonify({'code': 404, 'message': '评论不存在'}), 404
 
+    # 点赞 / 取消点赞（同一条评论再次点击即取消）
     existing = CommentLike.query.filter_by(comment_id=cid, user_id=user_id).first()
     if existing:
-        return jsonify({'code': 200, 'message': '已点赞过'})
+        db.session.delete(existing)
+        comment.likes = max(0, (comment.likes or 0) - 1)
+        db.session.commit()
+        return jsonify({
+            'code': 200,
+            'message': '已取消点赞',
+            'data': {'likes': comment.likes, 'liked': False},
+        })
 
     db.session.add(CommentLike(comment_id=cid, user_id=user_id))
-    comment.likes += 1
+    comment.likes = (comment.likes or 0) + 1
     db.session.commit()
-    return jsonify({'code': 200, 'data': {'likes': comment.likes}})
+    return jsonify({
+        'code': 200,
+        'message': '已点赞',
+        'data': {'likes': comment.likes, 'liked': True},
+    })
 
 
 # ── 每日签到 ────────────────────────────────────────────────────
 @marketplace_bp.route('/checkin', methods=['POST'])
 @jwt_required()
 def daily_checkin():
+    """每日签到：冷却 24h；签到后向 ImageUsage.free_count 累加 +5，
+    但累加后不得超过 IMAGE_FREE_LIMIT（与图片生成共享同一免费额度上限）。
+
+    设计：签到奖励是「免费生图次数」的补充来源，必须与生成共享同一上限。
+    若用户在签到前 free_count 已等于上限：本次签到奖励 +5 会被回退，提示额度已满。
+    """
+    from flask import current_app
+
     user_id = int(get_jwt_identity())
-    now = datetime.utcnow()
+    now = local_now()
 
     last = DailyCheckIn.query.filter_by(user_id=user_id).order_by(DailyCheckIn.checkin_time.desc()).first()
     if last and last.checkin_time and (now - last.checkin_time).total_seconds() < 86400:
@@ -336,28 +745,52 @@ def daily_checkin():
         minutes = int((remaining % 3600) // 60)
         return jsonify({'code': 400, 'message': f'签到冷却中，还需等待{hours}小时{minutes}分钟'}), 400
 
-    checkin = DailyCheckIn(user_id=user_id, checkin_time=now, bonus_images=5)
-    db.session.add(checkin)
+    # 与图片生成共享同一 IMAGE_FREE_LIMIT 上限
+    free_limit = int(current_app.config.get('IMAGE_FREE_LIMIT') or 10)
 
     usage = ImageUsage.query.filter_by(user_id=user_id).first()
     if not usage:
         usage = ImageUsage(user_id=user_id, free_count=0)
         db.session.add(usage)
-    usage.free_count = (usage.free_count or 0) + 5
+
+    bonus = 5
+    # 累加后不超过上限：超出部分按实际上限裁剪；若已无余额则本次签到不发放奖励
+    new_count = (usage.free_count or 0) + bonus
+    if usage.free_count >= free_limit:
+        # 已达上限：拒绝签到，避免越权累计导致无效额度
+        return jsonify({
+            'code': 400,
+            'message': f'免费生图额度已达上限（{free_limit}），签到奖励无法累加',
+            'data': {'bonus': 0, 'free_images': usage.free_count, 'free_limit': free_limit},
+        }), 400
+
+    if new_count > free_limit:
+        bonus = free_limit - usage.free_count  # 仅发放剩余空间
+        new_count = free_limit
+
+    usage.free_count = new_count
+
+    checkin = DailyCheckIn(user_id=user_id, checkin_time=now, bonus_images=bonus)
+    db.session.add(checkin)
 
     db.session.commit()
     return jsonify({
         'code': 200,
-        'message': '签到成功，获得5次免费生图机会',
-        'data': {'bonus': 5, 'free_images': usage.free_count}
+        'message': f'签到成功，获得{bonus}次免费生图机会',
+        'data': {'bonus': bonus, 'free_images': usage.free_count, 'free_limit': free_limit}
     })
 
 
 @marketplace_bp.route('/checkin/status', methods=['GET'])
 @jwt_required()
 def checkin_status():
+    """返回当前用户的签到状态、剩余免费生图额度与上限。
+    上限来自 IMAGE_FREE_LIMIT，与图片生成共享同一上限。
+    """
+    from flask import current_app
     user_id = int(get_jwt_identity())
-    now = datetime.utcnow()
+    now = local_now()
+    free_limit = int(current_app.config.get('IMAGE_FREE_LIMIT') or 10)
 
     last = DailyCheckIn.query.filter_by(user_id=user_id).order_by(DailyCheckIn.checkin_time.desc()).first()
     can_checkin = True
@@ -375,5 +808,6 @@ def checkin_status():
             'can_checkin': can_checkin,
             'next_checkin': next_checkin,
             'free_images': usage.free_count if usage else 0,
+            'free_limit': free_limit,
         }
     })

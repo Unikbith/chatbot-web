@@ -63,8 +63,13 @@ const opacityVal = computed(() => {
 
 const greetingText = () => t('你好！有什么可以帮你的吗？', 'Hello! How can I help you?');
 
-// 开场白：仅在没有任何 AI 回复消息时展示，避免与已持久化的开场白消息重复
-const showWelcome = computed(() => !messages.value.some(m => m.role === 'assistant' && (m.content || m.raw)))
+// 开场白：作为会话首条消息常驻展示，发送消息/收到回复后不会消失；
+// 仅当载入已有历史消息的对话时隐藏（历史中没有开场白，避免重复）。
+// 初始为 false：页面刷新/首次挂载时还不知道对话是否为空，
+// 先不渲染开场白，等 setMessages/resetMessages 明确后再显示，
+// 避免刷新瞬间闪现默认招呼语再消失的错误画面。
+const greetingActive = ref(false);
+const showWelcome = computed(() => greetingActive.value);
 
 // 消息
 const createMessage = (role, content = '', imageUrl = null) => ({ 
@@ -591,10 +596,13 @@ const handlePromptInsert = (text) => {
 defineExpose({
   setMessages: (msgList) => {
     messages.value = msgList.map(m => createMessage(m.role, m.content, m.image_url || m.imageUrl));
+    // 载入历史对话：仅空对话展示开场白
+    greetingActive.value = messages.value.length === 0;
     scrollToBottom();
   },
   resetMessages: () => {
     messages.value = [];
+    greetingActive.value = true;
     scrollToBottom();
   },
   getMessages: () => messages.value,
@@ -646,17 +654,20 @@ onUnmounted(() => {
 
     <!-- 消息列表 -->
     <div class="chat-body">
-      <!-- 空对话开场白：尚未产生 AI 回复时始终展示，切换对话/发送消息也不会突兀消失 -->
-      <div v-if="showWelcome" class="chat-welcome">
-        <div class="welcome-avatar">
-          <img v-if="aiAvatar" :src="aiAvatar" class="avatar-img" alt="AI" style="cursor: pointer" @click="previewImage(aiAvatar)" />
-          <span v-else>AI</span>
-        </div>
-        <div class="welcome-text">{{ props.personaGreeting || greetingText() }}</div>
-      </div>
-
       <el-scrollbar ref="messageListRef" class="message-scrollbar">
         <div class="message-container">
+          <!-- 人设开场白：作为首条消息展示，发送消息/收到回复后不会消失 -->
+          <div v-if="showWelcome" class="message-item message-ai greeting-item">
+            <div class="message-avatar">
+              <div class="avatar-circle assistant">
+                <img v-if="aiAvatar" :src="aiAvatar" class="avatar-img" alt="AI" style="cursor: pointer" @click="previewImage(aiAvatar)" />
+                <span v-else>AI</span>
+              </div>
+            </div>
+            <div class="message-content">
+              <div class="content-text">{{ props.personaGreeting || greetingText() }}</div>
+            </div>
+          </div>
           <div
             v-for="(item, index) in messages"
             :key="index"
@@ -930,8 +941,10 @@ onUnmounted(() => {
   height: 100%;
 }
 
+/* 内容框宽度收窄到 720：配合 Home 的背景智能适配，
+   让大多数比例的背景图在 contain 完整显示时也能横向盖住整个聊天框 */
 .message-container {
-  max-width: 768px;
+  max-width: 720px;
   margin: 0 auto;
   padding: 24px 20px;
   display: flex;
@@ -941,7 +954,7 @@ onUnmounted(() => {
 
 /* 空对话开场白 */
 .chat-welcome {
-  max-width: 768px;
+  max-width: 720px;
   margin: 0 auto;
   padding: 48px 20px;
   display: flex;
@@ -979,6 +992,11 @@ onUnmounted(() => {
   padding: 10px 16px;
   border-radius: 14px;
   border-top-left-radius: 4px;
+}
+
+/* 开场白消息：与普通消息同构，作为首条常驻 */
+.greeting-item {
+  opacity: 0.95;
 }
 
 .message-item {
@@ -1197,7 +1215,7 @@ onUnmounted(() => {
 }
 
 .input-wrapper {
-  max-width: 768px;
+  max-width: 720px;
   margin: 0 auto;
   background: rgba(120, 130, 145, calc(var(--message-opacity, 1) * 0.12));
   border-radius: 16px;
@@ -1294,7 +1312,7 @@ onUnmounted(() => {
   gap: 2px;
   margin-left: 8px;
   padding: 2px;
-  height: 24px;
+  height: 26px;
   border-radius: 999px;
   border: 1px solid rgba(120, 130, 145, 0.18);
   background: transparent;
@@ -1304,7 +1322,7 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 20px;
+  height: 22px;
   padding: 0 10px;
   border: none;
   border-radius: 999px;
@@ -1312,17 +1330,27 @@ onUnmounted(() => {
   color: #6b7280;
   background: transparent;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background 0.18s, color 0.18s, box-shadow 0.18s;
   user-select: none;
 }
 
+/* 未选中态：纯文字提示，hover 时只做轻微变化以避免误以为已选中 */
 .gen-mode-btn:hover {
   color: var(--brand);
+  background: rgba(120, 130, 145, 0.06);
 }
 
+/* 选中态：明确的色块 + 阴影；
+   注：rgba 不支持 calc(...) 嵌套，因此使用静态 0.16 透明度保持稳定。 */
 .gen-mode-btn.active {
-  color: var(--brand);
-  background: rgba(120, 130, 145, calc(var(--message-opacity, 1) * 0.14));
+  color: #fff;
+  background: var(--brand);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+
+/* 选中态再 hover 时略提亮，提示「再点一下取消选中」 */
+.gen-mode-btn.active:hover {
+  filter: brightness(1.08);
 }
 
 /* Markdown 样式补充 */

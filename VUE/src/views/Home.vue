@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Menu } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Menu, Search, Sunny, Plus, ZoomIn, ChatLineRound } from '@element-plus/icons-vue'
 import {
   authApi, providersApi, personaApi, settingsApi, conversationApi, chatApi
 } from '../utils/resAi'
@@ -16,12 +16,14 @@ import SystemSettings from '../components/SystemSettings.vue'
 import PersonaPanel from '../components/PersonaPanel.vue'
 import ConversationSettings from '../components/ConversationSettings.vue'
 import PersonaMarketplace from '../components/PersonaMarketplace.vue'
+import ThumbIcon from '../components/ThumbIcon.vue'
 
 import defaultUserAvatar from '../assets/images/avatar-user.jpg'
 import defaultAiAvatar from '../assets/images/avatar-megumi.jpg'
 
 const sidebarRef = ref(null)
 const chatAreaRef = ref(null)
+const personaPanelRef = ref(null)
 
 // 用户状态
 const user = ref(null)
@@ -92,6 +94,9 @@ const sidebarCollapsed = computed(() => userSettings.sidebar_collapsed)
 
 // 移动端适配：窄屏时侧边栏改为浮层
 const isMobile = ref(false)
+// 视口尺寸（背景智能适配需要按容器比例实时计算）
+const viewportW = ref(typeof window !== 'undefined' ? window.innerWidth : 1280)
+const viewportH = ref(typeof window !== 'undefined' ? window.innerHeight : 800)
 let prevMobile = false
 function updateViewport() {
   const mobile = window.innerWidth <= 768
@@ -102,6 +107,8 @@ function updateViewport() {
   }
   prevMobile = mobile
   isMobile.value = mobile
+  viewportW.value = window.innerWidth
+  viewportH.value = window.innerHeight
 }
 
 // 默认头像回退
@@ -131,15 +138,185 @@ const backgroundCover = computed(() =>
   currentConv.value?.background_cover || userSettings.background_cover || 'contain'
 )
 
+// ===== 背景智能适配 =====
+// 目标：背景图必须盖住整个聊天框（消息区 + 底部输入框）。
+// contain 模式下只有当「图片等比缩小后仍比聊天内容框宽（左右留白在内容区之外），
+// 且上下留白不深于输入框高度」时才完整显示；否则兜底 cover
+// （强制放大、不破坏比例、铺满整个聊天区，保证输入框一定被背景覆盖）。
+const BG_CONTENT_FRAME = 720     // 聊天内容框宽度（消息/输入区，与 ChatArea 内 max-width 一致）
+const BG_FRAME_MARGIN = 24       // 图片需比内容框两侧再宽出的余量
+const BG_VERTICAL_TOLERANCE = 300 // contain 上下留白总和上限（约每侧 150px ≈ 输入框高度）
+
+const bgNatural = ref({ w: 0, h: 0 })
+watch(effectiveBackground, (url) => {
+  bgNatural.value = { w: 0, h: 0 }
+  if (!url) return
+  const img = new Image()
+  img.onload = () => { bgNatural.value = { w: img.naturalWidth || 0, h: img.naturalHeight || 0 } }
+  img.onerror = () => { bgNatural.value = { w: 0, h: 0 } }
+  img.src = url
+}, { immediate: true })
+
+const effectiveBgSize = computed(() => {
+  if (backgroundCover.value === 'cover') return 'cover'
+  const { w: imgW, h: imgH } = bgNatural.value
+  // 尺寸未知（未加载完/加载失败）时先按用户设置，图片加载完成后会自动重算
+  if (!imgW || !imgH) return backgroundCover.value
+
+  const sidebarPx = isMobile.value ? 0 : (sidebarCollapsed.value ? 60 : 280)
+  const boxW = Math.max(1, viewportW.value - sidebarPx)
+  const boxH = Math.max(1, viewportH.value)
+
+  const scale = Math.min(boxW / imgW, boxH / imgH) // contain 缩放比
+  const containedW = imgW * scale
+  const containedH = imgH * scale
+  const frameW = Math.min(BG_CONTENT_FRAME, boxW - 40)
+
+  // 完整显示需同时满足：横向盖住内容框；纵向留白不露出输入框
+  const coversFrame = containedW >= frameW + BG_FRAME_MARGIN
+  const notTooShort = boxH - containedH <= BG_VERTICAL_TOLERANCE
+  return coversFrame && notTooShort ? 'contain' : 'cover'
+})
+
 const bgStyle = computed(() => {
   const url = effectiveBackground.value
   if (!url) return {}
   return {
     backgroundImage: `url(${url})`,
-    backgroundSize: backgroundCover.value,
+    backgroundSize: effectiveBgSize.value,
     backgroundPosition: 'center',
     backgroundRepeat: 'no-repeat',
   }
+})
+
+// 未登录首屏没有用户设置，用默认形象图兜底，保证一进网站就有氛围背景
+const ambientBackground = computed(() => effectiveBackground.value || defaultAiAvatar)
+
+// 全屏氛围底图：contain 完整可见 + 平铺铺满 + 重度模糊，作为整站背景；
+// 聊天区上方的 .bg-layer 仍按用户设置原样显示（不模糊）
+const ambientStyle = computed(() => {
+  const url = ambientBackground.value
+  if (!url) return {}
+  return {
+    backgroundImage: `url(${url})`,
+    backgroundSize: 'contain',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'repeat',
+  }
+})
+
+// 首屏未登录引导层（一进网站展示的图示状态）
+const guestHeroVisible = computed(() => !isLoggedIn.value)
+
+// ========== 入口页（未登录）的卡片广场数据 ==========
+// 公开接口，无需登录；保持与原 marketplaceApi 同构
+async function fetchLandingCardsPublic(sort, page, keyword, gender, perPage = 60) {
+  const params = new URLSearchParams()
+  params.set('sort', sort)
+  params.set('page', String(page))
+  params.set('per_page', String(perPage))
+  if (keyword) params.set('q', keyword)
+  if (gender) params.set('gender', gender)
+  const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/marketplace/public?${params}`)
+  if (!res.ok) return { items: [], total: 0 }
+  const data = await res.json()
+  return data.code === 200 ? data.data : { items: [], total: 0 }
+}
+async function fetchLandingDetailPublic(id) {
+  const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/marketplace/public/${id}`)
+  if (!res.ok) return null
+  const data = await res.json()
+  return data.code === 200 ? data.data : null
+}
+
+// 入口页展示的卡片：固定 4 张，加权随机抽样（高赞+高评论数更易被抽中）
+// 用 hot 排序拉一大份候选池，前端按权重抽样；命中不可预测 + 高热内容优先。
+const LANDING_SHOW_COUNT = 4
+const LANDING_POOL_SIZE = 60
+
+const landingLoading = ref(false)
+const landingCards = ref([])
+// 入口页固定展示 4 张随机卡片（不再支持分页与排序切换）
+const landingPage = ref(1)
+const landingPageSize = LANDING_SHOW_COUNT
+
+function weightedRandomPick(pool, n) {
+  // 权重公式 = 1 + likes + 2 * sqrt(comment_count)
+  //   - +1 保证所有卡片都有最低被抽中的概率（避免冷启动被完全埋没）
+  //   - likes 越多越易被抽中
+  //   - 评论数多的卡片额外加权，强化「人气内容优先」
+  const weighted = pool.map(c => {
+    const w = 1 + (c.likes || 0) + 2 * Math.sqrt(c.comment_count || 0)
+    return { card: c, weight: Math.max(w, 0.01) }
+  })
+  const result = []
+  const used = new Set()
+  for (let i = 0; i < n && weighted.length > used.size; i++) {
+    const totalWeight = weighted.reduce((sum, w) => used.has(w.card.id) ? sum : sum + w.weight, 0)
+    if (totalWeight <= 0) break
+    let r = Math.random() * totalWeight
+    let chosen = weighted[weighted.length - 1].card
+    for (const w of weighted) {
+      if (used.has(w.card.id)) continue
+      r -= w.weight
+      if (r <= 0) { chosen = w.card; break }
+    }
+    result.push(chosen)
+    used.add(chosen.id)
+  }
+  return result
+}
+
+async function loadLandingCards() {
+  landingLoading.value = true
+  try {
+    // 取一个较大的候选池（hot 排序），按权重随机抽 4 张
+    const data = await fetchLandingCardsPublic('hot', 1, '', '', LANDING_POOL_SIZE)
+    const pool = data.items || []
+    landingCards.value = weightedRandomPick(pool, LANDING_SHOW_COUNT)
+  } catch (e) {
+    console.warn('加载入口页卡片失败', e)
+    landingCards.value = []
+  } finally {
+    landingLoading.value = false
+  }
+}
+
+async function openLandingDetail(card) {
+  const detail = await fetchLandingDetailPublic(card.id)
+  if (detail) {
+    landingDetail.value = detail
+    landingDetailVisible.value = true
+  }
+}
+
+function openLandingPreview(url) {
+  if (!url) return
+  landingPreviewUrl.value = url
+  landingPreviewVisible.value = true
+}
+
+// 千位 k 计数：1000 -> 1k，1500 -> 1.5k，10000 -> 10k，百万及以上用 m
+function formatCount(n) {
+  const v = Number(n) || 0
+  if (v < 1000) return String(v)
+  if (v < 1000000) {
+    const k = v / 1000
+    return (k >= 100 ? Math.round(k) : Math.round(k * 10) / 10) + 'k'
+  }
+  const m = v / 1000000
+  return (m >= 100 ? Math.round(m) : Math.round(m * 10) / 10) + 'm'
+}
+
+// 入口页详情弹窗状态
+const landingDetailVisible = ref(false)
+const landingDetail = ref(null)
+const landingPreviewVisible = ref(false)
+const landingPreviewUrl = ref('')
+// 入口页详情：人物提示词默认收起，避免长文一进来就占满整个右半区
+const landingPromptExpanded = ref(false)
+watch(landingDetailVisible, (val) => {
+  if (val) landingPromptExpanded.value = false
 })
 
 // ========== 初始化 ==========
@@ -159,6 +336,9 @@ onMounted(async () => {
     } catch (e) {
       authModalVisible.value = true
     }
+  } else {
+    // 未登录：立刻拉一次入口页卡片，刷新即可看到最新内容
+    loadLandingCards()
   }
   // 未登录时首屏不弹登录框：仅在用户进行需要登录的操作（发消息/新对话/角色/设置等）时才提示，避免一进来就打扰
 
@@ -235,8 +415,14 @@ async function loadPersonas() {
     if (res.code === 200) {
       personas.value = res.data
       if (!currentPersona.value) {
-        const defaultPersona = res.data.find(p => p.is_default) || res.data[0] || null
-        currentPersona.value = defaultPersona
+        // 注册时按性别生成的默认 AI 人物卡优先（is_default），避免误取到用户人设
+        const list = res.data || []
+        currentPersona.value =
+          aiPersonas.value.find(p => p.is_default) ||
+          list.find(p => p.is_default) ||
+          aiPersonas.value[0] ||
+          list[0] ||
+          null
       }
     }
   } catch (e) {
@@ -302,7 +488,14 @@ async function ensureInitialConversation() {
 }
 
 async function handleNewChat() {
-  const personaId = ( personas.value.find(p => p.is_default) || personas.value[0] || currentPersona.value )?.id || null
+  // 默认人物卡来自注册时选择的性别（后端按性别把对应人物卡标记为 is_default）
+  const personaId = (
+    aiPersonas.value.find(p => p.is_default) ||
+    personas.value.find(p => p.is_default) ||
+    aiPersonas.value[0] ||
+    personas.value[0] ||
+    currentPersona.value
+  )?.id || null
   currentProviderId.value = pickEnabledChatProviderId()
   try {
     const res = await conversationApi.create({
@@ -316,9 +509,9 @@ async function handleNewChat() {
     if (res.code === 409) {
       try {
         await ElMessageBox.confirm(
-          res.message || t('最多保存10个对话，新建将删除最早的对话', 'Max 10 conversations. Creating will delete the oldest.'),
-          t('对话上限', 'Conversation Limit'),
-          { confirmButtonText: t('确定', 'Confirm'), cancelButtonText: t('取消', 'Cancel'), type: 'warning' }
+          res.message || t('已达对话保存上限（10 个），继续将删除最早创建的对话', 'Conversation limit reached (10). Continue to delete the oldest one.'),
+          t('已达保存的上限', 'Conversation Limit'),
+          { confirmButtonText: t('继续', 'Continue'), cancelButtonText: t('取消', 'Cancel'), type: 'warning' }
         )
         const retry = await conversationApi.create({
           title: t('新对话', 'New Chat'),
@@ -444,6 +637,8 @@ async function handleLoginSuccess(userData) {
   user.value = userData
   isLoggedIn.value = true
   authModalVisible.value = false
+  // 清空旧人设，让 loadPersonas 按新登录用户的性别重新挑默认人物卡
+  currentPersona.value = null
   await loadAllData()
   await ensureInitialConversation()
 }
@@ -459,7 +654,11 @@ function handleLogout() {
   conversations.value = []
   convGroups.value = { pinned: [], today: [], yesterday: [], week: [], month: [], older: [] }
   chatAreaRef.value?.resetMessages()
-  authModalVisible.value = true
+  // 退出登录后页面刷新重定向到入口页（路由 / 即入口页）：
+  // 使用 reload 让 Vue 完全重新挂载，避免旧对话/旧状态闪一下；同时保证内存中的
+  // 用户态、对话态彻底清空，避免下一次直接复用旧组件导致脏读。
+  authModalVisible.value = false
+  setTimeout(() => { window.location.reload() }, 50)
 }
 
 // ========== 设置更新 ==========
@@ -476,17 +675,46 @@ function handleUserUpdated(userData) {
 }
 
 // ========== 角色变更 ==========
+// 人物卡列表版本号：任何增删改都会自增，用于通知卡片广场刷新「已添加」状态
+const personaVersion = ref(0)
+
 function handlePersonaChanged(persona) {
-  // 应用到当前对话（若存在则保存）
+  // 对话中的独立人设只能通过「对话设置」修改：
+  // 这里不改写当前对话的 persona_id，只刷新列表与内存中的当前人物卡（同步头像/开场白）
   if (persona) {
-    currentPersona.value = persona
-    if (currentConvId.value) {
-      conversationApi.update(currentConvId.value, { persona_id: persona.id }).then(() => {
-        loadConversations()
-      }).catch(() => {})
+    if (!currentPersona.value || currentPersona.value.id === persona.id) {
+      currentPersona.value = persona
     }
   }
+  personaVersion.value++
   loadPersonas()
+}
+
+// 侧边栏人物卡点击：打开人物卡管理并弹出编辑，不再直接切换对话人设
+function handleSidebarEditPersona(persona) {
+  personaPanelRef.value?.openEdit(persona)
+}
+
+// 从卡片广场添加人物卡后：刷新侧边栏人物卡列表 + 同步卡片广场状态
+function handleCardAdopted() {
+  personaVersion.value++
+  loadPersonas()
+}
+
+// 人物卡删除后同步侧边栏与当前对话人设
+function handlePersonaDeleted(personaId) {
+  personas.value = personas.value.filter(p => p.id !== personaId)
+  // 删除后立刻同步卡片广场的「已添加 / 添加」状态
+  personaVersion.value++
+  if (currentPersona.value && currentPersona.value.id === personaId) {
+    const defaultPersona = personas.value.find(p => p.is_default) || personas.value[0] || null
+    currentPersona.value = defaultPersona
+    if (currentConvId.value && defaultPersona) {
+      conversationApi.update(currentConvId.value, { persona_id: defaultPersona.id }).catch(() => {})
+    } else if (currentConvId.value) {
+      conversationApi.update(currentConvId.value, { persona_id: null }).catch(() => {})
+    }
+  }
 }
 
 // ========== 提供商变更 ==========
@@ -549,12 +777,16 @@ async function handleConvoSettingsSaved(payload) {
 <template>
   <div
     class="home-container"
-    :style="{ '--sidebar-width': sidebarCollapsed ? (isMobile ? '0px' : '60px') : (isMobile ? '0px' : '280px') }"
+    :style="isLoggedIn ? { '--sidebar-width': sidebarCollapsed ? (isMobile ? '0px' : '60px') : (isMobile ? '0px' : '280px') } : { '--sidebar-width': '0px' }"
   >
-    <!-- 背景层：仅覆盖聊天区域（红线标注区），侧边栏收起时自动铺满 -->
+    <!-- 全屏氛围底图：contain 平铺 + 模糊覆盖整个页面 -->
+    <div class="bg-ambient" :style="ambientStyle"></div>
+
+    <!-- 背景层：仅覆盖聊天区域（红线标注区），侧边栏收起时自动铺满；此处正常显示不模糊 -->
     <div class="bg-layer" :style="bgStyle"></div>
 
-    <!-- 侧边栏 -->
+    <!-- 侧边栏（仅登录后展示；入口页隐藏） -->
+    <template v-if="isLoggedIn">
     <!-- 移动端：收起时显示的菜单按钮 -->
     <button v-if="isMobile && sidebarCollapsed" class="mobile-menu-btn" @click="toggleSidebar">
       <el-icon><Menu /></el-icon>
@@ -584,13 +816,171 @@ async function handleConvoSettingsSaved(payload) {
       @open-settings="requireLogin(() => settingsVisible = true)"
       @open-persona="requireLogin(() => personaPanelVisible = true)"
       @open-marketplace="requireLogin(() => marketplaceVisible = true)"
-      @select-persona="handlePersonaChanged"
+      @edit-persona="handleSidebarEditPersona"
       @login="authModalVisible = true"
       @logout="handleLogout"
     />
+    </template>
 
-    <!-- 聊天主区域 -->
+    <!-- 首屏未登录态：图示欢迎层 -->
+    <div v-if="guestHeroVisible" class="landing-page">
+      <!-- 顶部导航 -->
+      <header class="lp-header">
+        <div class="lp-brand">
+          <img :src="defaultAiAvatar" class="lp-brand-icon" alt="Confide" />
+          <span class="lp-brand-text">Confide<span class="lp-divider">·</span>心语</span>
+        </div>
+        <div class="lp-header-right">
+          <el-button class="lp-pill-btn" round @click="authModalVisible = true">
+            {{ t('登录 / 注册', 'Sign in / Sign up') }}
+          </el-button>
+        </div>
+      </header>
+
+      <!-- 主体 -->
+      <main class="lp-main">
+        <!-- Hero 区：标题 + 登录引导（入口页极简：去掉搜索/筛选/排序，4 张卡片才是主舞台） -->
+        <section class="lp-hero">
+          <div class="lp-tagline">
+            <span class="lp-dot">◆</span>
+            <span>{{ t('心语 v1.0 · 多人设 AI 角色陪伴 · 多种对话风格 · 对话永久保存', 'Confide · many personas · endless conversations · saved forever') }}</span>
+          </div>
+          <h1 class="lp-title">{{ t('与心语，开始你的对话', 'Start a conversation with Confide') }}</h1>
+          <p class="lp-sub">{{ t('随机挑选 4 张人气人物卡，选择一张开启属于你的私人对话。', 'A random hand-pick of 4 popular personas. Start a private chat of your own.') }}</p>
+        </section>
+
+        <!-- 卡片广场：固定展示 4 张人气卡片 + 首位 CTA 登录卡 -->
+        <section class="lp-market">
+          <div v-loading="landingLoading" class="lp-grid lp-grid-fixed">
+            <!-- 登录引导卡（始终首位；点击进入登录） -->
+            <div class="lp-card lp-card-cta" @click="authModalVisible = true">
+              <div class="lp-cta-avatar">
+                <img :src="defaultAiAvatar" :alt="t('心语', 'Confide')" />
+              </div>
+              <h3 class="lp-cta-title">Confide · 心语</h3>
+              <p class="lp-cta-sub">{{ t('选择一个人物卡，开启一段只属于你的对话', 'Pick a persona and start a chat of your own') }}</p>
+              <el-button type="primary" round class="lp-cta-btn">
+                {{ t('登录 / 注册', 'Sign in / Sign up') }}
+              </el-button>
+              <div class="lp-cta-tips">
+                <span>{{ t('多种人物卡', 'Many personas') }}</span>
+                <i>·</i>
+                <span>{{ t('自定义背景', 'Custom background') }}</span>
+                <i>·</i>
+                <span>{{ t('对话永久保存', 'Chats saved') }}</span>
+              </div>
+            </div>
+
+            <!-- 卡片列表：固定 4 张加权随机卡片 -->
+            <div
+              v-for="card in landingCards"
+              :key="card.id"
+              class="lp-card"
+              @click="openLandingDetail(card)"
+            >
+              <div class="lp-card-image">
+                <img v-if="card.avatar" :src="card.avatar" :alt="card.name" loading="lazy" decoding="async" />
+                <div v-else class="lp-card-placeholder">{{ card.name?.charAt(0) }}</div>
+              </div>
+              <div class="lp-card-body">
+                <div class="lp-card-name">{{ card.name }}</div>
+                <p class="lp-card-desc">{{ card.description }}</p>
+                <div class="lp-card-meta">
+                  <!-- 入口页只展示点赞数 + 评论数，k 单位（1k = 1000，10k = 10000） -->
+                  <span class="lp-card-stat" :title="t('点赞数', 'Likes')">
+                    <ThumbIcon :size="13" /> {{ formatCount(card.likes) }}
+                  </span>
+                  <span class="lp-card-stat" :title="t('评论数', 'Comments')">
+                    <el-icon><ChatLineRound /></el-icon> {{ formatCount(card.comment_count || 0) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="!landingLoading && landingCards.length === 0" class="lp-empty">
+              {{ t('暂无卡片', 'No cards yet') }}
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <!-- 底部声明 -->
+      <footer class="lp-footer">
+        <span>© {{ new Date().getFullYear() }} Confide · 心语</span>
+        <span class="lp-footer-sep">·</span>
+        <span>{{ t('每一个人物卡，都是一颗等你的心', 'Every persona is a heart waiting for you') }}</span>
+      </footer>
+    </div>
+
+    <!-- 卡片详情弹窗（在未登录入口页使用） -->
+    <el-dialog
+      v-model="landingDetailVisible"
+      width="min(720px, 96vw)"
+      align-center
+      destroy-on-close
+      class="lp-detail-dialog"
+    >
+      <template #header><span></span></template>
+      <div v-if="landingDetail" class="lp-detail">
+        <div class="lp-detail-left" @click="openLandingPreview(landingDetail.avatar)" :class="{ 'is-clickable': !!landingDetail.avatar }">
+          <img v-if="landingDetail.avatar" :src="landingDetail.avatar" :alt="landingDetail.name" />
+          <div v-else class="lp-detail-placeholder">{{ landingDetail.name?.charAt(0) }}</div>
+          <div v-if="landingDetail.avatar" class="lp-detail-zoom"><el-icon><ZoomIn /></el-icon></div>
+        </div>
+        <div class="lp-detail-right">
+          <h2 class="lp-detail-name">{{ landingDetail.name }}</h2>
+          <div class="lp-detail-meta">
+            <ThumbIcon :size="13" /> {{ formatCount(landingDetail.likes) }}
+            ·
+            <el-icon><ChatLineRound /></el-icon> {{ formatCount(landingDetail.comment_count || 0) }}
+          </div>
+          <p class="lp-detail-desc">{{ landingDetail.description }}</p>
+          <div class="lp-detail-section" v-if="landingDetail.greeting">
+            <div class="lp-detail-label">{{ t('开场白', 'Greeting') }}</div>
+            <div class="lp-detail-box lp-greeting-box">{{ landingDetail.greeting }}</div>
+          </div>
+          <div class="lp-detail-section">
+            <div class="lp-detail-label lp-detail-label-row">
+              <span>{{ t('人设提示词', 'Character Prompt') }}</span>
+              <button
+                type="button"
+                class="lp-detail-toggle"
+                @click="landingPromptExpanded = !landingPromptExpanded"
+              >
+                {{ landingPromptExpanded
+                    ? t('收起', 'Collapse')
+                    : t('展开全文', 'Expand all') }}
+              </button>
+            </div>
+            <div
+              class="lp-detail-box"
+              :class="{ 'lp-prompt-collapsed': !landingPromptExpanded }"
+              @click="!landingPromptExpanded && (landingPromptExpanded = true)"
+            >
+              {{ landingDetail.system_prompt }}
+            </div>
+          </div>
+          <div class="lp-detail-bottom">
+            <el-button type="primary" size="large" round class="lp-detail-btn" @click="authModalVisible = true">
+              {{ t('登录后开始对话', 'Sign in to chat') }}
+            </el-button>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
+
+    <!-- 大图预览（与详情页头像共用） -->
+    <el-image-viewer
+      v-if="landingPreviewVisible && landingPreviewUrl"
+      :url-list="[landingPreviewUrl]"
+      :zoom-rate="1.2"
+      hide-on-click-modal
+      @close="landingPreviewVisible = false"
+    />
+
+    <!-- 聊天主区域（仅登录后展示） -->
     <ChatArea
+      v-if="isLoggedIn"
       ref="chatAreaRef"
       class="chat-wrap"
       :conversation-id="currentConvId"
@@ -635,11 +1025,13 @@ async function handleConvoSettingsSaved(payload) {
       @logout="handleLogout"
     />
 
-    <!-- 角色人设面板 -->
+    <!-- 人物卡管理面板 -->
     <PersonaPanel
+      ref="personaPanelRef"
       v-model="personaPanelVisible"
       :selected-id="currentPersona?.id"
       @persona-changed="handlePersonaChanged"
+      @persona-deleted="handlePersonaDeleted"
     />
 
     <!-- 对话独立设置 -->
@@ -656,11 +1048,12 @@ async function handleConvoSettingsSaved(payload) {
       @save="handleConvoSettingsSaved"
     />
 
-    <!-- 人设广场 -->
+    <!-- 卡片广场 -->
     <PersonaMarketplace
       v-model="marketplaceVisible"
       :current-user-id="user?.id"
-      @adopted="loadPersonas"
+      :persona-version="personaVersion"
+      @adopted="handleCardAdopted"
     />
   </div>
 </template>
@@ -676,14 +1069,583 @@ async function handleConvoSettingsSaved(payload) {
   position: relative;
 }
 
-/* 背景层：仅覆盖聊天区域（从侧边栏右侧开始），侧边栏收起时自动铺满 */
+/* 全屏氛围底图：contain 平铺 + 重度模糊，作为整站背景（图完整可见但被模糊化） */
+.bg-ambient {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  /* contain 平铺保证原图完整不被裁切，放大后模糊消除平铺接缝并覆盖整屏 */
+  transform: scale(1.6);
+  filter: blur(28px) saturate(1.15);
+  opacity: 0.35;
+  background-color: var(--app-bg);
+}
+
+.bg-ambient::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--app-bg);
+  opacity: 0.55;
+}
+
+/* 背景层：仅覆盖聊天区域（从侧边栏右侧开始），侧边栏收起时自动铺满；正常显示不模糊 */
 .bg-layer {
   position: absolute;
   inset: 0 0 0 var(--sidebar-width, 0);
   z-index: 0;
   pointer-events: none;
-  background-color: var(--app-bg);
+  background-color: transparent;
   transition: background-image 0.3s;
+}
+
+/* ======================================================
+ * DeepSeek 风格入口页（未登录态）
+ *  - 顶部品牌区
+ *  - 中央 hero：标语 + 标题 + 副标题 + 搜索 + 模式胶囊
+ *  - 下方市场区：网格排布卡片，首位为「Confide · 心语」登录引导卡
+ *  - 全屏氛围底图复用 .bg-ambient
+ * ====================================================== */
+
+.landing-page {
+  position: absolute;
+  inset: 0 0 0 var(--sidebar-width, 0);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  color: #2a3a55;
+  background:
+    radial-gradient(circle at 50% 14%, rgba(220, 232, 250, 0.55), transparent 55%),
+    radial-gradient(circle at 80% 18%, rgba(228, 240, 255, 0.45), transparent 50%),
+    radial-gradient(circle at 20% 18%, rgba(238, 232, 252, 0.4), transparent 55%),
+    linear-gradient(180deg, #f4f8ff 0%, #eef3fc 100%);
+}
+
+.lp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 28px;
+  flex-shrink: 0;
+}
+
+.lp-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0.4px;
+  color: #2c3e6e;
+}
+
+.lp-brand-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  object-fit: cover;
+  box-shadow: 0 4px 12px rgba(60, 100, 180, 0.18);
+}
+
+.lp-divider {
+  margin: 0 6px;
+  opacity: 0.45;
+  font-weight: 400;
+}
+
+.lp-pill-btn {
+  border-radius: 999px !important;
+  padding: 8px 20px !important;
+  font-weight: 500;
+}
+
+.lp-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+  padding: 8px 24px 24px;
+}
+
+.lp-hero {
+  text-align: center;
+  padding: 24px 16px 8px;
+}
+
+.lp-tagline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(120, 145, 195, 0.25);
+  color: #5e7baf;
+  font-size: 12px;
+  margin-bottom: 22px;
+  backdrop-filter: blur(6px);
+}
+
+.lp-dot {
+  color: #6e8fdf;
+  font-size: 10px;
+}
+
+.lp-title {
+  margin: 0;
+  font-size: 42px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: linear-gradient(135deg, #2c3e6e 0%, #5e7baf 60%, #6e8fdf 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.lp-sub {
+  margin: 12px 0 22px;
+  color: #6e7fa3;
+  font-size: 15px;
+}
+
+.lp-searchbar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  max-width: 720px;
+  margin: 0 auto;
+  flex-wrap: wrap;
+}
+
+.lp-search-input {
+  flex: 1;
+  min-width: 280px;
+  max-width: 520px;
+}
+
+.lp-search-input :deep(.el-input__wrapper) {
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: 14px;
+  padding: 6px 14px;
+  box-shadow: 0 6px 24px rgba(80, 110, 170, 0.12);
+  border: 1px solid rgba(120, 145, 195, 0.22);
+}
+
+.lp-gender-select {
+  width: 140px;
+}
+
+.lp-gender-select :deep(.el-select__wrapper) {
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: 14px;
+  box-shadow: 0 6px 24px rgba(80, 110, 170, 0.12);
+  border: 1px solid rgba(120, 145, 195, 0.22);
+  height: 42px;
+}
+
+.lp-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.lp-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 145, 195, 0.3);
+  background: rgba(255, 255, 255, 0.6);
+  color: #5e7baf;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+
+.lp-pill:hover {
+  border-color: rgba(120, 145, 195, 0.6);
+  color: #2c3e6e;
+}
+
+.lp-pill.active {
+  background: linear-gradient(135deg, #5e7baf, #6e8fdf);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 6px 14px rgba(80, 110, 170, 0.25);
+}
+
+.lp-market {
+  max-width: 1180px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 8px 4px;
+}
+
+.lp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 16px;
+}
+
+/* 入口页固定 5 列（1 个 CTA + 4 张卡片），更紧凑、对齐更整齐 */
+.lp-grid-fixed {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+@media (max-width: 980px) {
+  .lp-grid-fixed {
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  }
+}
+
+.lp-card {
+  width: 0;
+  min-width: 100%;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(120, 145, 195, 0.18);
+  border-radius: 14px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+  display: flex;
+  flex-direction: column;
+  backdrop-filter: blur(6px);
+}
+
+.lp-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px rgba(80, 110, 170, 0.18);
+  border-color: rgba(120, 145, 195, 0.45);
+}
+
+.lp-card-cta {
+  background: linear-gradient(160deg, #ffffff, #f6f8ff);
+  border: 1px dashed rgba(120, 145, 195, 0.45);
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 22px 18px;
+  gap: 8px;
+}
+
+.lp-card-cta:hover {
+  border-color: #5e7baf;
+  background: linear-gradient(160deg, #ffffff, #eef3fc);
+}
+
+.lp-cta-avatar img {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  object-fit: cover;
+  box-shadow: 0 6px 16px rgba(80, 110, 170, 0.18);
+}
+
+.lp-cta-title {
+  margin: 8px 0 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #2c3e6e;
+}
+
+.lp-cta-sub {
+  margin: 0;
+  font-size: 12px;
+  color: #6e7fa3;
+  line-height: 1.5;
+}
+
+.lp-cta-btn {
+  margin-top: 8px;
+  min-width: 140px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #5e7baf, #6e8fdf);
+  border: none;
+}
+
+.lp-cta-tips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #8aa0c4;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.lp-cta-tips i {
+  font-style: normal;
+  opacity: 0.6;
+}
+
+.lp-card-image {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  background: linear-gradient(135deg, #e8efff, #d6e4ff);
+}
+
+.lp-card-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.lp-card-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36px;
+  color: rgba(94, 123, 175, 0.5);
+  background: linear-gradient(135deg, #e8efff, #d6e4ff);
+}
+
+.lp-card-body {
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.lp-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #2c3e6e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lp-card-desc {
+  font-size: 11.5px;
+  color: #6e7fa3;
+  line-height: 1.4;
+  margin: 3px 0 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+  min-height: calc(1.4em * 2);
+}
+
+.lp-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  font-size: 11px;
+  color: #8aa0c4;
+}
+
+.lp-card-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.lp-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 40px 20px;
+  color: #8aa0c4;
+  font-size: 14px;
+}
+
+.lp-pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: 18px;
+}
+
+.lp-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px 16px 28px;
+  font-size: 12px;
+  color: #8aa0c4;
+}
+
+.lp-footer-sep {
+  opacity: 0.5;
+}
+
+/* 详情弹窗：左右分栏 */
+.lp-detail {
+  display: flex;
+  gap: 24px;
+  min-height: 460px;
+}
+
+.lp-detail-left {
+  width: 240px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #e8efff, #d6e4ff);
+  position: relative;
+  cursor: zoom-in;
+}
+
+.lp-detail-left.is-clickable:hover img {
+  transform: scale(1.02);
+}
+
+.lp-detail-left img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.2s;
+}
+
+.lp-detail-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  color: rgba(94, 123, 175, 0.5);
+}
+
+.lp-detail-zoom {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.lp-detail-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lp-detail-name {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: #2c3e6e;
+}
+
+.lp-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #6e7fa3;
+}
+
+.lp-detail-desc {
+  margin: 0;
+  font-size: 13px;
+  color: #4f6393;
+  line-height: 1.5;
+}
+
+.lp-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lp-detail-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #2c3e6e;
+}
+
+.lp-detail-box {
+  background: rgba(238, 243, 252, 0.7);
+  border: 1px solid rgba(120, 145, 195, 0.18);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: #4f6393;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.lp-greeting-box {
+  border-left: 3px solid #6e8fdf;
+}
+
+/* 入口页详情：人物提示词折叠样式 */
+.lp-detail-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lp-detail-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: #6e8fdf;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.lp-detail-toggle:hover {
+  text-decoration: underline;
+}
+
+/* 收起态：限高 + 渐变遮罩；展开态：内容自然撑开 */
+.lp-prompt-collapsed {
+  max-height: 96px;
+  overflow: hidden;
+  position: relative;
+  cursor: pointer;
+  -webkit-mask-image: linear-gradient(to bottom, #000 60%, rgba(0, 0, 0, 0) 100%);
+  mask-image: linear-gradient(to bottom, #000 60%, rgba(0, 0, 0, 0) 100%);
+}
+
+.lp-detail-bottom {
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.lp-detail-btn {
+  width: 100%;
+  background: linear-gradient(135deg, #5e7baf, #6e8fdf);
+  border: none;
+}
+
+@media (max-width: 768px) {
+  .lp-title { font-size: 28px; }
+  .lp-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+  .lp-detail { flex-direction: column; }
+  .lp-detail-left { width: 100%; height: 220px; }
 }
 
 .sidebar-wrap,

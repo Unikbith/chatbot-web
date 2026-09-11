@@ -217,6 +217,21 @@ def _ensure_schema_columns(app):
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE daily_checkins ADD COLUMN checkin_time DATETIME"))
                     print('[迁移] 已为 daily_checkins 增加 checkin_time 字段')
+            # persona_marketplace.gender - 人物卡性别（男/女/自定义，非男非女筛选归入非二元）
+            if 'persona_marketplace' in inspector.get_table_names():
+                cols = {c['name'] for c in inspector.get_columns('persona_marketplace')}
+                if 'gender' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text('ALTER TABLE persona_marketplace ADD COLUMN gender VARCHAR(20)'))
+                    print('[迁移] 已为 persona_marketplace 增加 gender 字段')
+            # marketplace_comments.parent_id / reply_to_id - 评论一层嵌套回复
+            if 'marketplace_comments' in inspector.get_table_names():
+                cols = {c['name'] for c in inspector.get_columns('marketplace_comments')}
+                for cname in ('parent_id', 'reply_to_id'):
+                    if cname not in cols:
+                        with db.engine.begin() as conn:
+                            conn.execute(text(f'ALTER TABLE marketplace_comments ADD COLUMN {cname} INTEGER'))
+                        print(f'[迁移] 已为 marketplace_comments 增加 {cname} 字段')
             # persona_templates.persona_type - AI/用户人设区分
             if 'persona_templates' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('persona_templates')}
@@ -224,6 +239,11 @@ def _ensure_schema_columns(app):
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE persona_templates ADD COLUMN persona_type VARCHAR(10) DEFAULT 'ai'"))
                     print('[迁移] 已为 persona_templates 增加 persona_type 字段')
+                # 系统内置人物卡已改为「普通人物卡」，不再区分系统/用户，移除废弃字段
+                if 'is_system' in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE persona_templates DROP COLUMN is_system"))
+                    print('[迁移] 已移除 persona_templates.is_system 废弃字段')
     except Exception as e:
         print(f'[迁移] schema 检查/补列跳过: {e}')
 
@@ -259,11 +279,17 @@ def _init_default_data(app):
             system_prompt=default_prompt,
             greeting='你好呀~ 今天想聊些什么呢？',
             is_default=True,
-            is_system=True,
             weight=100
         )
         db.session.add(persona)
         print("[初始化] 创建默认角色: 加藤惠")
+
+    # 旧版默认人物卡提示词一次性升级（幂等：新版含【与用户的关系】章节即跳过）
+    try:
+        from routes.auth import _upgrade_legacy_default_personas
+        _upgrade_legacy_default_personas()
+    except Exception as e:
+        print(f'[初始化] 默认人物卡升级跳过: {e}')
 
     # 如果环境变量中有 API Key，创建默认配置
     default_api_key = os.getenv('AI_API_KEY')

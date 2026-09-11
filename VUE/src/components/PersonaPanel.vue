@@ -1,7 +1,7 @@
 <template>
   <el-drawer
     v-model="visible"
-    title="角色人设管理"
+    title="人物卡管理"
     size="min(500px, 100vw)"
     class="persona-drawer"
     @close="handleClose"
@@ -22,7 +22,7 @@
             <div class="persona-name">
               {{ persona.name }}
               <el-tag v-if="persona.is_default" size="small" type="success" effect="light" class="default-tag">默认</el-tag>
-              <el-tag v-if="persona.is_system" size="small" type="info" effect="light" class="system-tag">系统</el-tag>
+              <el-tag v-if="persona.source === 'marketplace'" size="small" type="warning" effect="light" class="source-tag">卡片广场</el-tag>
             </div>
             <div class="persona-desc">{{ persona.description || '暂无描述' }}</div>
           </div>
@@ -43,10 +43,9 @@
             >
               编辑
             </el-button>
-            <el-button 
-              v-if="!persona.is_system"
-              size="small" 
-              text 
+            <el-button
+              size="small"
+              text
               type="danger"
               @click="confirmDelete(persona.id)"
             >
@@ -56,21 +55,27 @@
         </div>
 
         <div v-if="personas.length === 0" class="empty-tip">
-          <el-empty description="暂无角色，点击下方按钮创建" :image-size="80" />
+          <el-empty description="暂无人物卡，点击下方按钮创建" :image-size="80" />
         </div>
       </div>
 
       <div class="panel-footer">
-        <el-button type="primary" icon="Plus" @click="openCreateDialog">
-          新建角色
+        <span class="footer-count">人物卡 {{ personas.length }}/{{ PERSONA_CARD_LIMIT }}</span>
+        <el-button
+          type="primary"
+          icon="Plus"
+          :disabled="personas.length >= PERSONA_CARD_LIMIT"
+          @click="openCreateDialog"
+        >
+          新建人物卡
         </el-button>
       </div>
     </div>
 
     <!-- 编辑/创建对话框 -->
-    <el-dialog 
-      v-model="editDialogVisible" 
-      :title="editingPersona ? '编辑角色' : '新建角色'"
+    <el-dialog
+      v-model="editDialogVisible"
+      :title="editingPersona ? '编辑人物卡' : '新建人物卡'"
       width="min(560px, 94vw)"
       @close="resetForm"
     >
@@ -96,22 +101,26 @@
           <el-input v-model="form.description" placeholder="简短描述角色特点" />
         </el-form-item>
         <el-form-item label="系统提示词">
-          <el-input 
-            v-model="form.system_prompt" 
-            type="textarea" 
+          <el-input
+            v-model="form.system_prompt"
+            type="textarea"
             :rows="8"
+            :autosize="false"
+            resize="none"
             placeholder="详细的角色设定，指导 AI 如何扮演这个角色..."
           />
         </el-form-item>
         <el-form-item label="开场问候语">
-          <el-input 
-            v-model="form.greeting" 
-            type="textarea" 
+          <el-input
+            v-model="form.greeting"
+            type="textarea"
             :rows="2"
+            :autosize="false"
+            resize="none"
             placeholder="角色第一次打招呼时说的话（可选）"
           />
         </el-form-item>
-        <el-form-item v-if="!editingPersona || !editingPersona.is_system">
+        <el-form-item>
           <el-checkbox v-model="form.is_default">设为默认角色</el-checkbox>
         </el-form-item>
       </el-form>
@@ -134,12 +143,15 @@ const props = defineProps({
   selectedId: [String, Number],
 })
 
-const emit = defineEmits(['update:modelValue', 'update:selectedId', 'persona-changed'])
+const emit = defineEmits(['update:modelValue', 'update:selectedId', 'persona-changed', 'persona-deleted'])
 
 const visible = computed({
   get: () => props.modelValue,
   set: (v) => emit('update:modelValue', v),
 })
+
+// 人物卡（AI 人设）数量上限，与后端 PERSONA_CARD_LIMIT 保持一致
+const PERSONA_CARD_LIMIT = 10
 
 const personas = ref([])
 const editDialogVisible = ref(false)
@@ -208,6 +220,19 @@ function editPersona(persona) {
   editDialogVisible.value = true
 }
 
+/**
+ * 供侧边栏「人物卡」列表点击后直接打开对应人物卡的编辑详情。
+ * 打开抽屉 → 拉取最新列表 → 弹出编辑对话框。
+ */
+async function openEdit(persona) {
+  visible.value = true
+  await loadPersonas()
+  const fresh = personas.value.find(p => p.id === persona.id) || persona
+  editPersona(fresh)
+}
+
+defineExpose({ openEdit })
+
 function openCreateDialog() {
   editingPersona.value = null
   resetForm()
@@ -241,6 +266,12 @@ async function savePersona() {
     return
   }
 
+  // 新建时前端先拦截上限，避免无谓请求
+  if (!editingPersona.value && personas.value.length >= PERSONA_CARD_LIMIT) {
+    ElMessage.warning(`人物卡数量已达上限（${PERSONA_CARD_LIMIT} 个），请先删除部分人物卡`)
+    return
+  }
+
   saving.value = true
   try {
     let res
@@ -254,16 +285,18 @@ async function savePersona() {
       editDialogVisible.value = false
       loadPersonas()
       emit('persona-changed', res.data)
+    } else {
+      ElMessage.error(res.message || '保存失败')
     }
   } catch (e) {
-    ElMessage.error('保存失败')
+    ElMessage.error(e.response?.data?.message || '保存失败')
   } finally {
     saving.value = false
   }
 }
 
 function confirmDelete(id) {
-  ElMessageBox.confirm('确定删除这个角色吗？', '确认删除', {
+  ElMessageBox.confirm('确定删除这个人物卡吗？', '确认删除', {
     type: 'warning',
     confirmButtonText: '删除',
     cancelButtonText: '取消',
@@ -272,6 +305,8 @@ function confirmDelete(id) {
     if (res.code === 200) {
       ElMessage.success('已删除')
       loadPersonas()
+      // 通知主页面同步侧边栏人物卡列表（删除后卡片广场恢复为「添加」状态）
+      emit('persona-deleted', id)
     }
   }).catch(() => {})
 }
@@ -336,10 +371,6 @@ function confirmDelete(id) {
   font-size: 11px;
 }
 
-.system-tag {
-  font-size: 11px;
-}
-
 .persona-desc {
   font-size: 12px;
   color: #909399;
@@ -367,6 +398,28 @@ function confirmDelete(id) {
   padding-top: 16px;
   border-top: 1px solid #ebeef5;
   margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.footer-count {
+  font-size: 12px;
+  color: var(--text-muted, #909399);
+  white-space: nowrap;
+}
+
+/* 来源标签：与「默认 / 系统」同款小方框 */
+.source-tag {
+  font-size: 11px;
+}
+
+.persona-name :deep(.el-tag) {
+  margin-right: 0;
+  padding: 0 5px;
+  height: 18px;
+  line-height: 17px;
 }
 
 .avatar-upload {

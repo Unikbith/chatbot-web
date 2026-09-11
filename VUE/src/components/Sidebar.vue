@@ -12,7 +12,8 @@
         <el-icon><Menu /></el-icon>
       </div>
       <div class="mini-spacer"></div>
-      <div class="mini-user" @click="openUserMenu">
+      <!-- 左下角个人头像：点击展开侧边栏（与左上角 logo/菜单一致） -->
+      <div class="mini-user" :title="t('展开侧边栏', 'Expand sidebar')" @click="toggleCollapse">
         <el-avatar :size="32" :src="userAvatar || user?.avatar">
           {{ user?.username?.charAt(0)?.toUpperCase() }}
         </el-avatar>
@@ -60,14 +61,16 @@
           <el-icon class="btn-icon"><Plus /></el-icon>
           {{ t('开启新对话', 'New Chat') }}
         </el-button>
-        <span class="conv-count">{{ conversations.length }}/10</span>
       </div>
 
       <!-- 人设列表 -->
       <div class="persona-list-section">
         <div class="persona-group">
           <div class="persona-group-header">
-            <span class="persona-group-title">{{ t('AI 人设', 'AI Personas') }}</span>
+            <span class="persona-group-title">
+              {{ t('人物卡', 'Persona Cards') }}
+              <span class="persona-count">{{ aiPersonas.length }}/10</span>
+            </span>
             <el-button text size="small" circle @click.stop="emit('open-persona')">
               <el-icon><Plus /></el-icon>
             </el-button>
@@ -77,7 +80,7 @@
             :key="p.id"
             class="persona-list-item"
             :class="{ active: currentPersona?.id === p.id }"
-            @click="selectPersona(p)"
+            @click="openPersonaEdit(p)"
           >
             <el-avatar :size="24" :src="p.avatar" class="pl-avatar">
               {{ p.name?.charAt(0) }}
@@ -90,6 +93,12 @@
       </div>
       
       <div class="conversation-list">
+        <!-- 对话列表标题 + 上限计数：固定在列表上方，不随列表滚动 -->
+        <div class="conv-list-header">
+          <span class="group-title">{{ t('对话列表', 'Conversations') }}</span>
+          <span class="conv-count">{{ conversations.length }}/10</span>
+        </div>
+        <div class="conv-list-scroll">
         <template v-if="groups.pinned.length > 0">
           <div class="group-title">{{ t('置顶', 'Pinned') }}</div>
           <div 
@@ -110,10 +119,9 @@
             </div>
           </div>
         </template>
-        
-        <div class="group-title">{{ t('今天', 'Today') }}</div>
-        <div 
-          v-for="conv in groups.today" 
+
+        <div
+          v-for="conv in groups.today"
           :key="conv.id"
           class="conv-item"
           :class="{ active: currentConvId == conv.id }"
@@ -209,6 +217,7 @@
         <div v-if="conversations.length === 0" class="empty-tip">
           {{ t('暂无对话，点击上方按钮开始', 'No conversations yet. Click the button to start.') }}
         </div>
+        </div>
       </div>
       
       <div class="sidebar-footer">
@@ -229,7 +238,7 @@
                 {{ user?.username }}
               </el-dropdown-item>
               <el-dropdown-item v-if="user" command="marketplace">
-                <el-icon><ShoppingBag /></el-icon> {{ t('人设广场', 'Marketplace') }}
+                <el-icon><ShoppingBag /></el-icon> {{ t('卡片广场', 'Card Marketplace') }}
               </el-dropdown-item>
               <el-dropdown-item v-if="user" command="provider">
                 <el-icon><Setting /></el-icon> {{ t('模型设置', 'Model Settings') }}
@@ -278,8 +287,8 @@ const props = defineProps({
 const emit = defineEmits([
   'create', 'select', 'toggle-pin', 'delete',
   'toggle-collapse', 'open-provider', 'open-settings',
-  'open-persona', 'open-marketplace', 'select-persona',
-  'login', 'logout', 'open-user-menu',
+  'open-persona', 'open-marketplace', 'edit-persona',
+  'login', 'logout',
   'dismiss-free-api'
 ])
 
@@ -317,8 +326,12 @@ function openPersonaPanel() {
   emit('open-persona')
 }
 
-function selectPersona(persona) {
-  emit('select-persona', persona)
+/**
+ * 点击人物卡：打开该人物卡的详细信息进行编辑
+ * （不再切换当前对话人设；对话人设只能通过「对话设置」修改）
+ */
+function openPersonaEdit(persona) {
+  emit('edit-persona', persona)
 }
 
 function handleCommand(cmd) {
@@ -339,10 +352,6 @@ function handleCommand(cmd) {
       emit('login')
       break
   }
-}
-
-function openUserMenu() {
-  emit('open-user-menu')
 }
 </script>
 
@@ -565,6 +574,19 @@ function openUserMenu() {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 人物卡列表上限计数 */
+.persona-count {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--surface-hover);
+  border-radius: 8px;
+  padding: 1px 6px;
 }
 
 .persona-list-item {
@@ -606,8 +628,30 @@ function openUserMenu() {
 
 .conversation-list {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   padding: 0 8px;
+  overflow: hidden;
+}
+
+/* 列表标题 + 上限计数：固定在滚动区上方 */
+.conv-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding-right: 8px;
+}
+
+.conv-list-header .group-title {
+  padding: 12px 8px 6px;
+}
+
+.conv-list-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .group-title {

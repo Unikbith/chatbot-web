@@ -39,14 +39,78 @@
           <div class="admin-toolbar">
             <span class="admin-title">{{ t('用户数据', 'User Data') }}</span>
             <div class="toolbar-actions">
-              <el-select v-model="genderFilter" placeholder="性别筛选" size="small" style="width: 120px" @change="applyGenderFilter">
-                <el-option label="全部" value="" />
-                <el-option label="男" value="男" />
-                <el-option label="女" value="女" />
-                <el-option label="神秘" value="神秘" />
-              </el-select>
               <el-button size="small" :icon="Refresh" @click="loadAll">{{ t('刷新', 'Refresh') }}</el-button>
             </div>
+          </div>
+
+          <!-- 混合筛选：可只选一个条件，也可叠加多个条件 -->
+          <div class="filter-panel">
+            <el-input
+              v-model="filters.keyword"
+              :placeholder="t('用户名 / 邮箱关键词', 'Keyword: username or email')"
+              size="small"
+              clearable
+              class="filter-input"
+              @input="applyFilters"
+            />
+            <el-select
+              v-model="filters.genders"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              :placeholder="t('性别', 'Gender')"
+              size="small"
+              class="filter-select"
+              @change="applyFilters"
+            >
+              <el-option label="男" value="男" />
+              <el-option label="女" value="女" />
+              <el-option label="神秘" value="神秘" />
+            </el-select>
+            <el-select
+              v-model="filters.statuses"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              :placeholder="t('账号状态', 'Status')"
+              size="small"
+              class="filter-select"
+              @change="applyFilters"
+            >
+              <el-option :label="t('正常', 'Active')" value="active" />
+              <el-option :label="t('停用', 'Disabled')" value="disabled" />
+              <el-option :label="t('已注销', 'Deleted')" value="deleted" />
+            </el-select>
+            <el-select
+              v-model="filters.activity"
+              :placeholder="t('活跃度', 'Activity')"
+              size="small"
+              class="filter-select"
+              clearable
+              @change="applyFilters"
+            >
+              <el-option :label="t('有对话', 'Has chats')" value="has_conversation" />
+              <el-option :label="t('有消息', 'Has messages')" value="has_message" />
+              <el-option :label="t('从未对话', 'No chats')" value="no_conversation" />
+              <el-option :label="t('今日活跃', 'Active today')" value="today" />
+              <el-option :label="t('7 天内活跃', 'Active in 7d')" value="week" />
+            </el-select>
+            <el-select
+              v-model="filters.hasConfig"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              :placeholder="t('配置情况', 'Config')"
+              size="small"
+              class="filter-select"
+              @change="applyFilters"
+            >
+              <el-option :label="t('已配模型', 'Has provider')" value="provider" />
+              <el-option :label="t('有人物卡', 'Has persona')" value="persona" />
+              <el-option :label="t('有头像', 'Has avatar')" value="avatar" />
+            </el-select>
+            <el-button size="small" plain @click="resetFilters">{{ t('重置', 'Reset') }}</el-button>
+            <span class="filter-count">{{ t('命中', 'Matched') }} {{ users.length }} / {{ allUsers.length }}</span>
           </div>
 
           <el-table
@@ -65,28 +129,56 @@
                   row-key="id"
                   v-loading="row._loading"
                 >
-                  <el-table-column prop="title" :label="t('对话标题', 'Conversation')" min-width="160" show-overflow-tooltip />
-                  <el-table-column prop="message_count" :label="t('消息数', 'Msgs')" width="80" align="center" />
-                  <el-table-column :label="t('AI人设', 'Persona')" width="130" show-overflow-tooltip>
+                  <el-table-column prop="title" :label="t('对话标题', 'Conversation')" min-width="150" show-overflow-tooltip />
+                  <el-table-column prop="message_count" :label="t('消息数', 'Msgs')" width="80" align="center">
                     <template #default="{ row: conv }">
-                      <span v-if="conv.persona_name" class="persona-link" @click.stop="showPersonaDetail(conv)">{{ conv.persona_name }}</span>
+                      <span class="msg-count-link" @click.stop="viewConversation(conv)">{{ conv.message_count }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('是否存在', 'Exists')" width="90" align="center">
+                    <template #default="{ row: conv }">
+                      <el-tag :type="conv.exists ? 'success' : 'info'" size="small" effect="plain">
+                        {{ conv.exists ? t('存在', 'Yes') : t('已移除', 'Removed') }}
+                      </el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('AI人设', 'AI Persona')" width="130" show-overflow-tooltip>
+                    <template #default="{ row: conv }">
+                      <span v-if="conv.persona_name" class="persona-link" @click.stop="showPersonaDetail(conv, 'ai')">{{ conv.persona_name }}</span>
                       <span v-else>-</span>
                     </template>
                   </el-table-column>
                   <el-table-column :label="t('背景图', 'Background')" width="90" align="center">
                     <template #default="{ row: conv }">
-                      <img v-if="conv.background_image" :src="conv.background_image" class="bg-thumb" alt="" />
+                      <el-image
+                        v-if="conv.background_image"
+                        :src="conv.background_image"
+                        :preview-src-list="[conv.background_image]"
+                        :initial-index="0"
+                        preview-teleported
+                        fit="cover"
+                        class="bg-thumb"
+                        hide-on-click-modal
+                      />
                       <span v-else>-</span>
                     </template>
                   </el-table-column>
                   <el-table-column :label="t('更新时间', 'Updated')" width="150">
                     <template #default="{ row: conv }">{{ formatTime(conv.updated_at) }}</template>
                   </el-table-column>
-                  <el-table-column :label="t('消息', 'Messages')" width="90" align="center">
+                  <el-table-column :label="t('操作', 'Actions')" width="120" align="center">
                     <template #default="{ row: conv }">
-                      <el-button size="small" type="primary" plain @click.stop="exportConversation(conv)">
-                        {{ t('导出', 'Export') }}
-                      </el-button>
+                      <div class="mp-actions">
+                        <el-tooltip :content="t('查看消息记录', 'View messages')" placement="top">
+                          <el-button size="small" type="primary" plain :icon="View" @click.stop="viewConversation(conv)" />
+                        </el-tooltip>
+                        <el-tooltip :content="t('导出 Markdown', 'Export as Markdown')" placement="top">
+                          <el-button size="small" plain :icon="Download" @click.stop="exportConversation(conv)" />
+                        </el-tooltip>
+                        <el-tooltip :content="t('删除对话', 'Delete conversation')" placement="top">
+                          <el-button size="small" type="danger" plain :icon="Delete" @click.stop="deleteConversation(conv)" />
+                        </el-tooltip>
+                      </div>
                     </template>
                   </el-table-column>
                 </el-table>
@@ -95,6 +187,33 @@
             </el-table-column>
 
             <el-table-column prop="username" :label="t('用户名', 'Username')" min-width="110" show-overflow-tooltip />
+            <el-table-column :label="t('头像', 'Avatar')" width="90" align="center">
+              <template #default="{ row }">
+                <div class="avatar-cell">
+                  <el-image
+                    v-if="row.avatar"
+                    :src="row.avatar"
+                    :preview-src-list="avatarPreviewList(row)"
+                    :initial-index="0"
+                    preview-teleported
+                    fit="cover"
+                    class="avatar-thumb"
+                    hide-on-click-modal
+                  />
+                  <span v-else class="avatar-thumb avatar-fallback">{{ (row.username || '?').charAt(0).toUpperCase() }}</span>
+                  <el-image
+                    v-if="row.ai_avatar"
+                    :src="row.ai_avatar"
+                    :preview-src-list="avatarPreviewList(row)"
+                    :initial-index="row.avatar ? 1 : 0"
+                    preview-teleported
+                    fit="cover"
+                    class="avatar-thumb avatar-ai"
+                    hide-on-click-modal
+                  />
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column prop="email" :label="t('邮箱', 'Email')" min-width="160" show-overflow-tooltip />
             <el-table-column prop="gender" :label="t('性别', 'Gender')" width="80" align="center">
               <template #default="{ row }">{{ row.gender || '-' }}</template>
@@ -125,15 +244,71 @@
             <span class="admin-title">{{ t('卡片广场管理', 'Marketplace Management') }}</span>
             <el-button size="small" :icon="Refresh" @click="loadMarketplaceCards">{{ t('刷新', 'Refresh') }}</el-button>
           </div>
+
+          <!-- 筛选：关键词（创建者用户名/邮箱）+ 人物卡性别 + 创建者性别 -->
+          <div class="filter-panel">
+            <el-input
+              v-model="mpFilters.keyword"
+              :placeholder="t('创建者用户名 / 邮箱', 'Creator username or email')"
+              size="small"
+              clearable
+              class="filter-input"
+              @input="applyMpFilters"
+            />
+            <el-select
+              v-model="mpFilters.genders"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              :placeholder="t('人物卡性别', 'Persona gender')"
+              size="small"
+              class="filter-select"
+              @change="applyMpFilters"
+            >
+              <el-option label="男" value="男" />
+              <el-option label="女" value="女" />
+              <el-option label="非二元" value="非二元" />
+            </el-select>
+            <el-select
+              v-model="mpFilters.creatorGender"
+              :placeholder="t('创建者性别', 'Creator gender')"
+              clearable
+              size="small"
+              class="filter-select"
+              @change="applyMpFilters"
+            >
+              <el-option label="男" value="男" />
+              <el-option label="女" value="女" />
+              <el-option label="神秘" value="神秘" />
+            </el-select>
+            <el-button size="small" plain @click="resetMpFilters">{{ t('重置', 'Reset') }}</el-button>
+            <span class="filter-count">{{ t('命中', 'Matched') }} {{ mpCards.length }} / {{ mpAllCards.length }}</span>
+          </div>
+
           <el-table :data="mpCards" v-loading="mpLoading" class="admin-table">
             <el-table-column :label="t('头像', 'Avatar')" width="70" align="center">
               <template #default="{ row }">
-                <el-avatar :size="36" :src="row.avatar">{{ row.name?.charAt(0) }}</el-avatar>
+                <el-image
+                  v-if="row.avatar"
+                  :src="row.avatar"
+                  :preview-src-list="[row.avatar]"
+                  preview-teleported
+                  fit="cover"
+                  class="avatar-thumb"
+                  hide-on-click-modal
+                />
+                <el-avatar v-else :size="36">{{ row.name?.charAt(0) }}</el-avatar>
               </template>
             </el-table-column>
             <el-table-column prop="name" :label="t('名称', 'Name')" min-width="120" show-overflow-tooltip />
+            <el-table-column :label="t('性别', 'Gender')" width="90" align="center">
+              <template #default="{ row }">{{ row.gender_tag || (row.gender || '-') }}</template>
+            </el-table-column>
             <el-table-column prop="description" :label="t('描述', 'Description')" min-width="180" show-overflow-tooltip />
             <el-table-column prop="author_username" :label="t('创建者', 'Creator')" width="120" show-overflow-tooltip />
+            <el-table-column :label="t('创建者性别', 'Creator gender')" width="100" align="center">
+              <template #default="{ row }">{{ row.author_gender || '-' }}</template>
+            </el-table-column>
             <el-table-column prop="author_email" :label="t('邮箱', 'Email')" width="180" show-overflow-tooltip />
             <el-table-column :label="t('点赞/踩', 'Likes')" width="100" align="center">
               <template #default="{ row }">{{ row.likes }} / {{ row.dislikes }}</template>
@@ -144,9 +319,16 @@
             <el-table-column :label="t('发布时间', 'Created')" width="150">
               <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
             </el-table-column>
-            <el-table-column :label="t('操作', 'Actions')" width="90" align="center">
+            <el-table-column :label="t('操作', 'Actions')" width="120" align="center" fixed="right">
               <template #default="{ row }">
-                <el-button size="small" type="danger" plain @click="deleteMpCard(row)">{{ t('删除', 'Delete') }}</el-button>
+                <div class="mp-actions">
+                  <el-tooltip :content="t('查看卡片', 'View card')" placement="top">
+                    <el-button size="small" type="primary" plain :icon="View" @click="previewMpCard(row)" />
+                  </el-tooltip>
+                  <el-tooltip :content="t('删除', 'Delete')" placement="top">
+                    <el-button size="small" type="danger" plain :icon="Delete" @click="deleteMpCard(row)" />
+                  </el-tooltip>
+                </div>
               </template>
             </el-table-column>
           </el-table>
@@ -155,13 +337,27 @@
     </main>
 
     <!-- 人设详情模态框 -->
-    <el-dialog v-model="personaDetailVisible" :title="personaDetailData?.persona_name" width="min(500px, 90vw)" align-center>
+    <el-dialog v-model="personaDetailVisible" :title="personaDetailData?.persona_name" width="min(520px, 90vw)" align-center>
       <div v-if="personaDetailData" class="persona-detail-modal">
         <div class="pdm-row">
-          <el-avatar v-if="personaDetailData.persona_avatar" :size="64" :src="personaDetailData.persona_avatar" />
+          <el-image
+            v-if="personaDetailData.persona_avatar"
+            :src="personaDetailData.persona_avatar"
+            :preview-src-list="[personaDetailData.persona_avatar]"
+            preview-teleported
+            fit="cover"
+            class="pdm-avatar"
+            hide-on-click-modal
+          />
+          <el-avatar v-else :size="64">{{ personaDetailData.persona_name?.charAt(0) }}</el-avatar>
           <div class="pdm-info">
-            <h3>{{ personaDetailData.persona_name }}</h3>
-            <p>{{ personaDetailData.persona_description }}</p>
+            <h3>
+              {{ personaDetailData.persona_name }}
+              <el-tag size="small" effect="plain" :type="personaDetailData.persona_kind === 'user' ? 'warning' : 'primary'">
+                {{ personaDetailData.persona_kind === 'user' ? t('用户人设', 'User Persona') : t('AI人设', 'AI Persona') }}
+              </el-tag>
+            </h3>
+            <p>{{ personaDetailData.persona_description || t('暂无简介', 'No description') }}</p>
           </div>
         </div>
         <div v-if="personaDetailData.persona_system_prompt" class="pdm-section">
@@ -172,17 +368,141 @@
           <div class="pdm-label">{{ t('开场白', 'Greeting') }}</div>
           <div class="pdm-box">{{ personaDetailData.persona_greeting }}</div>
         </div>
+
+        <!-- 对话中设置的用户人设（表格不再单列，在弹窗内一并展示） -->
+        <template v-if="personaDetailData.user_persona">
+          <el-divider content-position="left">
+            <el-tag size="small" effect="plain" type="warning">{{ t('对话中的用户人设', 'User Persona in Chat') }}</el-tag>
+          </el-divider>
+          <div class="pdm-row">
+            <el-image
+              v-if="personaDetailData.user_persona.avatar"
+              :src="personaDetailData.user_persona.avatar"
+              :preview-src-list="[personaDetailData.user_persona.avatar]"
+              preview-teleported
+              fit="cover"
+              class="pdm-avatar"
+              hide-on-click-modal
+            />
+            <div class="pdm-info">
+              <h3>{{ personaDetailData.user_persona.name }}</h3>
+              <p>{{ personaDetailData.user_persona.description || t('暂无简介', 'No description') }}</p>
+            </div>
+          </div>
+          <div v-if="personaDetailData.user_persona.system_prompt" class="pdm-section">
+            <div class="pdm-label">{{ t('人设提示词', 'System Prompt') }}</div>
+            <div class="pdm-box">{{ personaDetailData.user_persona.system_prompt }}</div>
+          </div>
+          <div v-if="personaDetailData.user_persona.greeting" class="pdm-section">
+            <div class="pdm-label">{{ t('开场白', 'Greeting') }}</div>
+            <div class="pdm-box">{{ personaDetailData.user_persona.greeting }}</div>
+          </div>
+        </template>
+      </div>
+    </el-dialog>
+
+    <!-- 对话消息记录抽屉 -->
+    <el-drawer
+      v-model="msgDrawerVisible"
+      :title="t('对话记录', 'Conversation Messages')"
+      size="min(560px, 92vw)"
+      direction="rtl"
+    >
+      <div class="msg-drawer" v-loading="msgDrawerLoading">
+        <div v-if="msgDrawerData.conversation" class="md-head">
+          <div class="md-title">{{ msgDrawerData.conversation.title || t('(无标题)', '(Untitled)') }}</div>
+          <div class="md-meta">
+            <el-tag size="small" effect="plain">{{ t('共', 'Total') }} {{ msgDrawerData.messages.length }} {{ t('条', 'msgs') }}</el-tag>
+            <el-tag v-if="msgDrawerData.conversation.username" size="small" effect="plain" type="info">
+              {{ msgDrawerData.conversation.username }}
+            </el-tag>
+            <el-tag v-if="msgDrawerData.conversation.deleted_at" size="small" effect="plain" type="warning">
+              {{ t('用户已移除该对话', 'Removed by user') }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div v-if="!msgDrawerLoading && msgDrawerData.messages.length === 0" class="md-empty">
+          {{ t('该对话暂无消息', 'No messages yet') }}
+        </div>
+
+        <div v-for="m in msgDrawerData.messages" :key="m.id" class="md-msg" :class="m.role">
+          <div class="md-msg-head">
+            <span class="md-role">{{ roleLabel(m.role) }}</span>
+            <span class="md-time">{{ formatTime(m.created_at) }}</span>
+          </div>
+          <div class="md-content">{{ m.content }}</div>
+          <el-image
+            v-if="m.image_url"
+            :src="m.image_url"
+            :preview-src-list="msgDrawerData.messages.filter(x => x.image_url).map(x => x.image_url)"
+            :initial-index="msgDrawerData.messages.filter(x => x.image_url).findIndex(x => x.id === m.id)"
+            preview-teleported
+            fit="contain"
+            class="md-image"
+            hide-on-click-modal
+          />
+        </div>
+      </div>
+    </el-drawer>
+
+    <!-- 卡片广场详情弹窗（管理员查看完整信息） -->
+    <el-dialog
+      v-model="mpDetailVisible"
+      :title="t('卡片详情', 'Card Details')"
+      width="min(560px, 92vw)"
+      align-center
+      destroy-on-close
+      class="mp-detail-dialog"
+    >
+      <div v-if="mpDetailData" v-loading="mpDetailLoading" class="mp-detail-body">
+        <div class="mp-detail-head">
+          <el-image
+            v-if="mpDetailData.avatar"
+            :src="mpDetailData.avatar"
+            :preview-src-list="[mpDetailData.avatar]"
+            preview-teleported
+            fit="cover"
+            class="mp-detail-avatar"
+            hide-on-click-modal
+          />
+          <el-avatar v-else :size="80">{{ mpDetailData.name?.charAt(0) }}</el-avatar>
+          <div class="mp-detail-meta">
+            <h3 class="mp-detail-name">{{ mpDetailData.name }}</h3>
+            <div class="mp-detail-tags">
+              <el-tag size="small" effect="plain">{{ mpDetailData.gender_tag || (mpDetailData.gender || '-') }}</el-tag>
+              <el-tag size="small" type="info" effect="plain">{{ mpDetailData.author_username }}</el-tag>
+              <el-tag size="small" type="warning" effect="plain" v-if="mpDetailData.author_gender">
+                {{ t('创建者', 'Creator') }} {{ mpDetailData.author_gender }}
+              </el-tag>
+            </div>
+            <div class="mp-detail-stats">
+              <span>👍 {{ mpDetailData.likes || 0 }}</span>
+              <span>👎 {{ mpDetailData.dislikes || 0 }}</span>
+              <span>💬 {{ mpDetailData.comment_count || 0 }}</span>
+            </div>
+          </div>
+        </div>
+        <p class="mp-detail-desc">{{ mpDetailData.description }}</p>
+        <div v-if="mpDetailData.greeting" class="mp-detail-section">
+          <div class="mp-detail-label">{{ t('开场白', 'Greeting') }}</div>
+          <div class="mp-detail-box mp-detail-greeting">{{ mpDetailData.greeting }}</div>
+        </div>
+        <div class="mp-detail-section">
+          <div class="mp-detail-label">{{ t('人设提示词', 'System Prompt') }}</div>
+          <div class="mp-detail-box mp-detail-prompt">{{ mpDetailData.system_prompt }}</div>
+        </div>
       </div>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Back, SwitchButton, Monitor } from '@element-plus/icons-vue'
-import { adminApi } from '@/utils/resAi'
+import { Refresh, Back, SwitchButton, Monitor, View, Download, Delete } from '@element-plus/icons-vue'
+import { adminApi, resAi } from '@/utils/resAi'
 import { t } from '../i18n'
 import brandIcon from '@/assets/icon/ChatBotIcon.png'
 
@@ -193,17 +513,130 @@ const stats = ref({})
 const users = ref([])
 const statsLoading = ref(false)
 const usersLoading = ref(false)
-const genderFilter = ref('')
 const allUsers = ref([])
 const activeTab = ref('users')
+
+// 混合筛选条件（每个条件都可单独使用，也可任意叠加）
+const emptyFilters = () => ({
+  keyword: '',
+  genders: [],
+  statuses: [],
+  activity: '',
+  hasConfig: [],
+})
+const filters = ref(emptyFilters())
 
 // 卡片广场
 const mpCards = ref([])
 const mpLoading = ref(false)
+const mpAllCards = ref([])
+const mpFilters = ref({
+  keyword: '',
+  genders: [], // 人物卡性别：男 / 女 / 非二元
+  creatorGender: '', // 创建者（用户）性别：男 / 女 / 神秘
+})
+
+// 管理员卡片详情弹窗状态（复用公共详情接口，无需额外后端）
+const mpDetailVisible = ref(false)
+const mpDetailLoading = ref(false)
+const mpDetailData = ref(null)
+
+function applyMpFilters() {
+  const kw = (mpFilters.value.keyword || '').trim().toLowerCase()
+  const gs = mpFilters.value.genders
+  const cg = mpFilters.value.creatorGender
+  mpCards.value = mpAllCards.value.filter((c) => {
+    if (kw) {
+      const hay = `${c.author_username || ''} ${c.author_email || ''}`.toLowerCase()
+      if (!hay.includes(kw)) return false
+    }
+    if (gs.length) {
+      // 人物卡 gender 筛选：「神秘」与「自定义 / 未填写」一并归入非二元桶
+      const rawGender = c.gender || ''
+      const tag =
+        rawGender === '男' ? '男' :
+        rawGender === '女' ? '女' :
+        '非二元'
+      if (!gs.includes(tag)) return false
+    }
+    if (cg) {
+      // 创建者（用户）性别：直接匹配 users.gender
+      if ((c.author_gender || '') !== cg) return false
+    }
+    return true
+  })
+}
+
+function resetMpFilters() {
+  mpFilters.value = { keyword: '', genders: [], creatorGender: '' }
+  applyMpFilters()
+}
 
 // 人设详情模态框
 const personaDetailVisible = ref(false)
 const personaDetailData = ref(null)
+
+// 对话消息抽屉
+const msgDrawerVisible = ref(false)
+const msgDrawerLoading = ref(false)
+const msgDrawerData = ref({ conversation: null, messages: [] })
+
+function avatarPreviewList(row) {
+  return [row.avatar, row.ai_avatar].filter(Boolean)
+}
+
+function roleLabel(role) {
+  return { user: t('用户', 'User'), assistant: t('AI', 'AI'), system: t('系统', 'System') }[role] || role
+}
+
+function _startOfToday() {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+function applyFilters() {
+  const kw = (filters.value.keyword || '').trim().toLowerCase()
+  const today0 = _startOfToday()
+  const weekAgo = today0 - 7 * 86400000
+
+  users.value = allUsers.value.filter((u) => {
+    // 1) 关键词（用户名 / 邮箱）
+    if (kw) {
+      const hay = `${u.username || ''} ${u.email || ''}`.toLowerCase()
+      if (!hay.includes(kw)) return false
+    }
+    // 2) 性别（多选：任一命中即可）
+    if (filters.value.genders.length && !filters.value.genders.includes(u.gender)) return false
+    // 3) 账号状态（多选）
+    if (filters.value.statuses.length) {
+      const status = u.deleted_at ? 'deleted' : (u.is_active ? 'active' : 'disabled')
+      if (!filters.value.statuses.includes(status)) return false
+    }
+    // 4) 活跃度
+    const act = filters.value.activity
+    if (act) {
+      const ts = u.last_active ? new Date(u.last_active).getTime() : NaN
+      if (act === 'has_conversation' && !(u.conversation_count > 0)) return false
+      if (act === 'has_message' && !(u.message_count > 0)) return false
+      if (act === 'no_conversation' && u.conversation_count > 0) return false
+      if (act === 'today' && !(Number.isFinite(ts) && ts >= today0)) return false
+      if (act === 'week' && !(Number.isFinite(ts) && ts >= weekAgo)) return false
+    }
+    // 5) 配置情况（多选：需全部满足）
+    for (const cfg of filters.value.hasConfig) {
+      if (cfg === 'provider' && !(u.provider_count > 0)) return false
+      if (cfg === 'persona' && !(u.persona_count > 0)) return false
+      if (cfg === 'avatar' && !u.avatar) return false
+    }
+    return true
+  })
+}
+
+function resetFilters() {
+  filters.value = emptyFilters()
+  applyFilters()
+}
 
 function formatTime(iso) {
   if (!iso) return '-'
@@ -231,7 +664,7 @@ async function loadUsers() {
     const res = await adminApi.users()
     if (res.code === 200) {
       allUsers.value = (res.data || []).map(u => ({ ...u, _conversations: null, _loading: false }))
-      applyGenderFilter()
+      applyFilters()
     } else if (res.code === 403) {
       ElMessage.warning(t('无管理员权限', 'No admin permission'))
     }
@@ -239,14 +672,6 @@ async function loadUsers() {
     ElMessage.error(t('加载用户失败', 'Failed to load users'))
   } finally {
     usersLoading.value = false
-  }
-}
-
-function applyGenderFilter() {
-  if (!genderFilter.value) {
-    users.value = [...allUsers.value]
-  } else {
-    users.value = allUsers.value.filter(u => u.gender === genderFilter.value)
   }
 }
 
@@ -281,17 +706,99 @@ async function exportConversation(conv) {
   }
 }
 
+// 点击「消息数」或「查看」直接查看该对话的完整消息记录
+async function viewConversation(conv) {
+  msgDrawerData.value = { conversation: { id: conv.id, title: conv.title }, messages: [] }
+  msgDrawerVisible.value = true
+  msgDrawerLoading.value = true
+  try {
+    const res = await adminApi.conversationMessages(conv.id)
+    if (res.code === 200) {
+      msgDrawerData.value = {
+        conversation: res.data.conversation || { id: conv.id, title: conv.title },
+        messages: res.data.messages || [],
+      }
+    }
+  } catch (e) {
+    ElMessage.error(t('加载消息失败', 'Failed to load messages'))
+  } finally {
+    msgDrawerLoading.value = false
+  }
+}
+
+async function deleteConversation(conv) {
+  try {
+    await ElMessageBox.confirm(
+      t(`确定彻底删除对话「${conv.title}」及其全部消息吗？该操作不可恢复。`,
+        `Permanently delete "${conv.title}" and all its messages? This cannot be undone.`),
+      t('确认删除', 'Confirm delete'),
+      { type: 'warning', confirmButtonText: t('删除', 'Delete'), cancelButtonText: t('取消', 'Cancel') }
+    )
+  } catch (e) {
+    return // 用户取消
+  }
+  try {
+    const res = await adminApi.deleteConversation(conv.id)
+    if (res.code === 200) {
+      ElMessage.success(t('已删除', 'Deleted'))
+      // 从当前展开的列表里移除，并刷新统计
+      const owner = allUsers.value.find(u => Array.isArray(u._conversations) && u._conversations.some(c => c.id === conv.id))
+      if (owner) {
+        owner._conversations = owner._conversations.filter(c => c.id !== conv.id)
+        owner.conversation_count = Math.max(0, (owner.conversation_count || 0) - 1)
+        owner.message_count = Math.max(0, (owner.message_count || 0) - (conv.message_count || 0))
+      }
+      loadStats()
+    }
+  } catch (e) {
+    ElMessage.error(t('删除失败', 'Delete failed') + `：${e.message || ''}`)
+  }
+}
+
 async function loadMarketplaceCards() {
   mpLoading.value = true
   try {
-    const res = await adminApi.marketplaceCards()
-    if (res.code === 200) {
-      mpCards.value = res.data.items || []
-    }
+    // 一次性拉完所有页，存入 mpAllCards 用于筛选；mpCards 仅作为渲染列表
+    const collected = []
+    let page = 1
+    let pages = 1
+    do {
+      const res = await adminApi.marketplaceCards(page)
+      if (res.code === 200) {
+        const data = res.data || {}
+        collected.push(...(data.items || []))
+        pages = data.pages || 1
+        page += 1
+      } else {
+        break
+      }
+    } while (page <= pages)
+    mpAllCards.value = collected
+    applyMpFilters()
   } catch (e) {
     ElMessage.error(t('加载卡片失败', 'Failed to load cards'))
   } finally {
     mpLoading.value = false
+  }
+}
+
+// 查看卡片详情：拉取完整数据（含 system_prompt / greeting）并打开弹窗
+async function previewMpCard(card) {
+  if (!card) return
+  mpDetailVisible.value = true
+  mpDetailLoading.value = true
+  // 先把基本信息塞进去，让弹窗立即有内容显示
+  mpDetailData.value = card
+  try {
+    const res = await resAi.get(`/api/marketplace/${card.id}`)
+    if (res.code === 200 && mpDetailData.value?.id === card.id) {
+      // 合并后端最新数据（更权威的统计数字）
+      mpDetailData.value = { ...card, ...res.data }
+    }
+  } catch (e) {
+    ElMessage.warning(t('加载完整详情失败，仅展示已缓存信息', 'Failed to load full details'))
+  } finally {
+    mpDetailLoading.value = false
   }
 }
 
@@ -308,8 +815,29 @@ async function deleteMpCard(card) {
   }
 }
 
-function showPersonaDetail(conv) {
-  personaDetailData.value = conv
+// 旧版「打开新窗口预览头像」已被「弹窗查看完整详情」替代，无需保留。
+// 原函数已合并至 previewMpCard 上面那个异步实现。
+
+// kind: 'ai' 对话中的 AI 人设；'user' 对话中设置的用户人设
+function showPersonaDetail(conv, kind = 'ai') {
+  const name = conv.persona_name
+  if (!name) return
+  personaDetailData.value = {
+    persona_name: name,
+    persona_avatar: conv.persona_avatar,
+    persona_description: conv.persona_description,
+    persona_system_prompt: conv.persona_system_prompt,
+    persona_greeting: conv.persona_greeting,
+    persona_kind: 'ai',
+    // 对话中设置的用户人设：表格已去掉该列，统一在弹窗里一并展示
+    user_persona: conv.user_persona_name ? {
+      name: conv.user_persona_name,
+      avatar: conv.user_persona_avatar,
+      description: conv.user_persona_description,
+      system_prompt: conv.user_persona_system_prompt,
+      greeting: conv.user_persona_greeting,
+    } : null,
+  }
   personaDetailVisible.value = true
 }
 
@@ -337,6 +865,13 @@ onMounted(async () => {
     router.replace('/admin')
   }
   await loadAll()
+})
+
+// 切换到「卡片广场」Tab 时自动加载一次（首次进入也会触发）
+watch(activeTab, (val) => {
+  if (val === 'marketplace' && mpAllCards.value.length === 0 && !mpLoading.value) {
+    loadMarketplaceCards()
+  }
 })
 </script>
 
@@ -526,12 +1061,270 @@ onMounted(async () => {
   opacity: 0.8;
 }
 
+/* 混合筛选区 */
+.filter-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-color, #e9e0d4);
+  border-radius: 10px;
+}
+
+.filter-input {
+  width: 200px;
+}
+
+.filter-select {
+  width: 150px;
+}
+
+.filter-count {
+  font-size: 12px;
+  color: #a9815a;
+  margin-left: auto;
+}
+
+/* 头像预览 */
+.avatar-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.avatar-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border-color, #e9e0d4);
+  cursor: zoom-in;
+  flex: none;
+}
+
+.avatar-thumb.avatar-ai {
+  border-radius: 8px;
+}
+
+.avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #a9815a;
+  background: var(--surface-hover, #faf3ea);
+  cursor: default;
+}
+
+.msg-count-link {
+  color: var(--brand, #b06a2e);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 600;
+}
+
+/* 操作列图标按钮：更紧凑，一行排列 */
+.inner-table :deep(.el-button + .el-button) {
+  margin-left: 4px;
+}
+
+.inner-table :deep(.el-button--small) {
+  padding: 5px 8px;
+}
+
+/* 卡片广场操作列：让「查看 / 删除」两个图标按钮水平排列，不会换行 */
+.mp-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: center;
+}
+.mp-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+.mp-actions :deep(.el-button--small) {
+  padding: 5px 8px;
+}
+
+/* 管理员卡片详情弹窗 */
+.mp-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mp-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.mp-detail-avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 12px;
+  object-fit: cover;
+}
+.mp-detail-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mp-detail-name {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.mp-detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mp-detail-stats {
+  display: flex;
+  gap: 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.mp-detail-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.mp-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mp-detail-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.mp-detail-box {
+  background: var(--surface-hover);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.mp-detail-greeting {
+  border-left: 3px solid var(--brand);
+}
+
+.msg-count-link:hover {
+  opacity: 0.75;
+}
+
 .bg-thumb {
   width: 40px;
   height: 28px;
   border-radius: 4px;
   object-fit: cover;
   border: 1px solid var(--border-color, #e9e0d4);
+  cursor: zoom-in;
+}
+
+.pdm-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid var(--border-color, #e9e0d4);
+  cursor: zoom-in;
+  flex: none;
+}
+
+/* 对话消息抽屉 */
+.msg-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.md-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-color, #e9e0d4);
+}
+
+.md-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #4a3520);
+  word-break: break-word;
+}
+
+.md-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.md-empty {
+  font-size: 13px;
+  color: #a9815a;
+  text-align: center;
+  padding: 24px 0;
+}
+
+.md-msg {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-hover, #faf3ea);
+  border: 1px solid var(--border-color, #e9e0d4);
+}
+
+.md-msg.user {
+  background: rgba(176, 106, 46, 0.08);
+}
+
+.md-msg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.md-role {
+  font-size: 12px;
+  font-weight: 600;
+  color: #b06a2e;
+}
+
+.md-time {
+  font-size: 12px;
+  color: #a9815a;
+}
+
+.md-content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary, #4a3520);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.md-image {
+  margin-top: 8px;
+  max-width: 220px;
+  max-height: 220px;
+  border-radius: 8px;
+  cursor: zoom-in;
 }
 
 .persona-detail-modal {
@@ -595,6 +1388,13 @@ onMounted(async () => {
   }
   .admin-header {
     padding: 12px 14px;
+  }
+  .filter-input,
+  .filter-select {
+    width: calc(50% - 4px);
+  }
+  .filter-count {
+    margin-left: 0;
   }
   .admin-table :deep(.el-table__cell),
   .admin-table :deep(th.el-table__cell) {

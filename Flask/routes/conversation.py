@@ -2,7 +2,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
-from models import Conversation, Message, ModelProvider, PersonaTemplate
+from models import Conversation, Message, ModelProvider, PersonaTemplate, local_now
 from datetime import datetime, timedelta
 
 conversation_bp = Blueprint('conversation', __name__, url_prefix='/api/conversations')
@@ -22,7 +22,7 @@ def list_conversations():
     ).all()
     
     # 按日期分组
-    now = datetime.utcnow()
+    now = local_now()
     today_start = datetime(now.year, now.month, now.day)
     yesterday_start = today_start - timedelta(days=1)
     week_ago_start = today_start - timedelta(days=7)
@@ -98,7 +98,7 @@ def create_conversation():
         if not force:
             return jsonify({
                 'code': 409,
-                'message': f'最多保存{MAX_CONVERSATIONS}个对话，新建将删除最早的对话',
+                'message': f'已达对话保存上限（{MAX_CONVERSATIONS} 个），继续新建将删除最早创建的对话',
                 'data': {'count': existing_count, 'max': MAX_CONVERSATIONS}
             }), 200
         oldest = Conversation.query.filter_by(user_id=user_id).filter(
@@ -107,7 +107,7 @@ def create_conversation():
             Conversation.created_at.asc()
         ).first()
         if oldest:
-            oldest.deleted_at = datetime.utcnow()
+            oldest.deleted_at = local_now()
             db.session.flush()
 
     conv = Conversation(
@@ -209,7 +209,7 @@ def update_conversation(conv_id):
     if 'auto_play_voice' in data:
         conv.auto_play_voice = bool(data['auto_play_voice'])
     
-    conv.updated_at = datetime.utcnow()
+    conv.updated_at = local_now()
     db.session.commit()
     
     return jsonify({
@@ -231,7 +231,7 @@ def toggle_pin(conv_id):
         return jsonify({'code': 404, 'message': '对话不存在'}), 404
     
     conv.is_pinned = not conv.is_pinned
-    conv.updated_at = datetime.utcnow()
+    conv.updated_at = local_now()
     db.session.commit()
     
     return jsonify({
@@ -252,7 +252,7 @@ def delete_conversation(conv_id):
     if not conv:
         return jsonify({'code': 404, 'message': '对话不存在'}), 404
 
-    conv.deleted_at = datetime.utcnow()
+    conv.deleted_at = local_now()
     db.session.commit()
 
     return jsonify({
@@ -273,7 +273,7 @@ def clear_messages(conv_id):
         return jsonify({'code': 404, 'message': '对话不存在'}), 404
     
     Message.query.filter_by(conversation_id=conv_id).delete()
-    conv.updated_at = datetime.utcnow()
+    conv.updated_at = local_now()
     db.session.commit()
     
     return jsonify({

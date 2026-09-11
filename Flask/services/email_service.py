@@ -16,7 +16,7 @@ class EmailService:
     SMTP_PORT = int(os.getenv('SMTP_PORT', '465'))
     SMTP_USER = os.getenv('SMTP_USER', '')  # QQ 邮箱地址（生产务必通过 .env 配置，禁止写死）
     SMTP_PASS = os.getenv('SMTP_PASS', '')  # QQ 邮箱授权码（生产务必通过 .env 配置，禁止写死）
-    SENDER_NAME = os.getenv('SENDER_NAME', '心语')
+    SENDER_NAME = os.getenv('SENDER_NAME', '心语|confide')
 
     @classmethod
     def is_configured(cls):
@@ -27,6 +27,11 @@ class EmailService:
     def generate_code(cls, length=6):
         """生成随机验证码"""
         return ''.join(random.choices(string.digits, k=length))
+
+    @classmethod
+    def _brand_title(cls):
+        """品牌主标题：邮箱模板顶部的 hero 标题，使用「心语|confide」标识"""
+        return '心语<span style="opacity:0.55;margin-left:6px;font-weight:500;">|</span><span style="opacity:0.85;">confide</span>'
 
     @classmethod
     def send_verification_code(cls, to_email, code, purpose='register'):
@@ -47,10 +52,11 @@ class EmailService:
             purpose_text = '注册验证' if purpose == 'register' else '重置密码'
             subject = f'{cls.SENDER_NAME} - {purpose_text}验证码'
 
+            brand_title = cls._brand_title()
             html = f"""
             <div style="max-width: 600px; margin: 0 auto; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
                 <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 12px 12px 0 0; color: white; text-align: center;">
-                    <h2 style="margin: 0; font-size: 24px;">{cls.SENDER_NAME}</h2>
+                    <h2 style="margin: 0; font-size: 26px; letter-spacing: 0.5px;">{brand_title}</h2>
                     <p style="margin: 8px 0 0 0; opacity: 0.9;">{purpose_text}</p>
                 </div>
                 <div style="background: #f9fafb; padding: 40px 30px; border-radius: 0 0 12px 12px;">

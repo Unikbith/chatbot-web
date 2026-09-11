@@ -4,6 +4,17 @@ from extensions import db
 import json
 
 
+def local_now():
+    """返回服务器所在时区的「现实世界」时间（naive datetime）。
+
+    历史实现统一使用 datetime.utcnow() 写入 UTC，但序列化成 ISO 字符串时不带时区后缀，
+    前端 `new Date(iso)` 会按浏览器本地时区解析，导致管理后台的「注册时间 / 最近活跃」
+    与实际时间相差一个时区偏移（中国为 -8 小时）。统一改为写入本地时间，
+    前后端对同一字符串的解读即保持一致。
+    """
+    return datetime.now()
+
+
 class User(db.Model):
     """用户表"""
     __tablename__ = 'users'
@@ -18,8 +29,8 @@ class User(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     deleted_at = db.Column(db.DateTime, nullable=True)
     token_version = db.Column(db.Integer, default=0)  # 令牌版本：改密/注销时自增以吊销旧 token
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=local_now)
+    updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
 
     # 关联
     providers = db.relationship('ModelProvider', backref='user', lazy='dynamic', cascade='all, delete-orphan')
@@ -56,7 +67,7 @@ class VerificationCode(db.Model):
     purpose = db.Column(db.String(20), nullable=False, default='register')  # register/reset_password
     expires_at = db.Column(db.DateTime, nullable=False)
     used = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=local_now)
 
     @classmethod
     def create(cls, email, code, purpose='register', minutes=5):
@@ -65,7 +76,7 @@ class VerificationCode(db.Model):
             email=email,
             code=code,
             purpose=purpose,
-            expires_at=datetime.utcnow() + timedelta(minutes=minutes)
+            expires_at=local_now() + timedelta(minutes=minutes)
         )
         db.session.add(vc)
         db.session.commit()
@@ -73,7 +84,7 @@ class VerificationCode(db.Model):
 
     def is_valid(self):
         """检查是否有效"""
-        return not self.used and self.expires_at > datetime.utcnow()
+        return not self.used and self.expires_at > local_now()
 
     def mark_used(self):
         """标记为已使用"""
@@ -106,8 +117,8 @@ class UserSettings(db.Model):
     default_voice = db.Column(db.String(100), default='alloy')
     auto_play_voice = db.Column(db.Boolean, default=False)  # 自动播报
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=local_now)
+    updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
 
     def to_dict(self):
         return {
@@ -138,11 +149,10 @@ class PersonaTemplate(db.Model):
     system_prompt = db.Column(db.Text, nullable=False)  # 系统提示词
     greeting = db.Column(db.Text, nullable=True)  # 开场问候语
     is_default = db.Column(db.Boolean, default=False)  # 是否为默认角色
-    is_system = db.Column(db.Boolean, default=False)  # 是否系统内置（不可删除）
     persona_type = db.Column(db.String(10), default='ai')  # ai / user
     weight = db.Column(db.Integer, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=local_now)
+    updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
 
     def to_dict(self):
         return {
@@ -153,7 +163,6 @@ class PersonaTemplate(db.Model):
             'system_prompt': self.system_prompt,
             'greeting': self.greeting,
             'is_default': self.is_default,
-            'is_system': self.is_system,
             'persona_type': self.persona_type or 'ai',
             'weight': self.weight,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -187,8 +196,8 @@ class ModelProvider(db.Model):
     is_default = db.Column(db.Boolean, default=False)
     enabled = db.Column(db.Boolean, default=True)  # 是否启用（未指定时作为候选配置，可多个同时启用）
     weight = db.Column(db.Integer, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=local_now)
+    updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
 
     # 关联：该提供商下配置的模型
     models = db.relationship(
@@ -267,7 +276,7 @@ class ProviderModel(db.Model):
     enabled = db.Column(db.Boolean, default=True)  # 是否启用
     is_custom = db.Column(db.Boolean, default=False)  # 是否为手动添加的自定义模型
     vision = db.Column(db.Boolean, default=False)  # 是否支持视觉
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=local_now)
 
     __table_args__ = (
         db.Index('idx_provider_model', 'provider_id', 'model_id', unique=False),
@@ -310,8 +319,8 @@ class Conversation(db.Model):
     auto_play_voice = db.Column(db.Boolean, nullable=True)  # 对话独立：AI 回复自动播报
     deleted_at = db.Column(db.DateTime, nullable=True)
     settings = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=local_now)
+    updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
 
     messages = db.relationship('Message', backref='conversation', lazy='dynamic',
                                cascade='all, delete-orphan', order_by='Message.created_at')
@@ -351,7 +360,7 @@ class ImageUsage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True, index=True)
     free_count = db.Column(db.Integer, default=0, nullable=False)  # 免费生成累计次数
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
 
     def to_dict(self):
         return {
@@ -371,7 +380,7 @@ class Message(db.Model):
     reasoning_content = db.Column(db.Text, nullable=True)
     image_url = db.Column(db.String(500), nullable=True)
     model = db.Column(db.String(100), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=local_now)
 
     def to_dict(self):
         return {
@@ -396,10 +405,24 @@ class PersonaMarketplace(db.Model):
     avatar = db.Column(db.String(500), nullable=True)
     system_prompt = db.Column(db.Text, nullable=False)
     greeting = db.Column(db.Text, nullable=True)
+    # 人物卡性别：男 / 女 / 自定义文本（非男非女在筛选里统一归入「非二元」）
+    gender = db.Column(db.String(20), nullable=True)
     likes = db.Column(db.Integer, default=0)
     dislikes = db.Column(db.Integer, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=local_now)
+    updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
+
+    # 性别归一化标签：男 / 女 / 非二元（自定义及未填写均归入非二元筛选桶）
+    GENDER_TAGS = ('男', '女', '非二元')
+
+    @staticmethod
+    def gender_tag_of(gender):
+        g = (gender or '').strip()
+        if g == '男':
+            return '男'
+        if g == '女':
+            return '女'
+        return '非二元'
 
     author = db.relationship('User', backref='marketplace_personas')
     comments = db.relationship('MarketplaceComment', backref='persona_card', lazy='dynamic',
@@ -412,6 +435,8 @@ class PersonaMarketplace(db.Model):
             'description': self.description,
             'avatar': self.avatar,
             'greeting': self.greeting,
+            'gender': self.gender,
+            'gender_tag': self.gender_tag_of(self.gender),
             'likes': self.likes,
             'dislikes': self.dislikes,
             'score': self.likes - self.dislikes,
@@ -448,11 +473,23 @@ class MarketplaceComment(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     content = db.Column(db.Text, nullable=False)
     likes = db.Column(db.Integer, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # 仅支持一层嵌套：parent 指向所属顶层评论（顶层为 NULL），
+    # reply_to 指向被回复的具体那条评论（可能是顶层本身，也可能是同层的兄弟评论）
+    parent_id = db.Column(db.Integer, db.ForeignKey('marketplace_comments.id'), nullable=True, index=True)
+    reply_to_id = db.Column(db.Integer, db.ForeignKey('marketplace_comments.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=local_now)
 
     commenter = db.relationship('User', backref='marketplace_comments')
+    # 两个自引用外键（parent_id / reply_to_id），必须显式指定用哪一条做关联
+    replies = db.relationship(
+        'MarketplaceComment',
+        foreign_keys=[parent_id],
+        backref=db.backref('parent', remote_side=[id]),
+        lazy='dynamic', cascade='all, delete-orphan'
+    )
 
-    def to_dict(self, pseudonym=None, identicon_seed=None):
+    def to_dict(self, pseudonym=None, identicon_seed=None, liked=False, reply_to_name=None,
+                replies=None, reply_count=0):
         return {
             'id': self.id,
             'content': self.content,
@@ -460,6 +497,12 @@ class MarketplaceComment(db.Model):
             'pseudonym': pseudonym,
             'identicon_seed': identicon_seed,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+            'parent_id': self.parent_id,
+            'reply_to_id': self.reply_to_id,
+            'reply_to_name': reply_to_name,
+            'liked': bool(liked),
+            'reply_count': reply_count,
+            'replies': replies if replies is not None else [],
         }
 
 
@@ -484,7 +527,7 @@ class MarketplaceAdopt(db.Model):
     persona_id = db.Column(db.Integer, db.ForeignKey('persona_marketplace.id'), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     template_id = db.Column(db.Integer, db.ForeignKey('persona_templates.id'), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=local_now)
 
     __table_args__ = (
         db.UniqueConstraint('persona_id', 'user_id', name='uq_marketplace_adopt'),
@@ -497,6 +540,6 @@ class DailyCheckIn(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
-    checkin_time = db.Column(db.DateTime, default=datetime.utcnow)
+    checkin_time = db.Column(db.DateTime, default=local_now)
     bonus_images = db.Column(db.Integer, default=5)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=local_now)

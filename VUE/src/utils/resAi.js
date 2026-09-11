@@ -405,6 +405,9 @@ const adminApi = {
   async conversationMessages(convId) {
     return adminReq.get(`/api/admin/conversations/${convId}/messages`);
   },
+  async deleteConversation(convId) {
+    return adminReq.delete(`/api/admin/conversations/${convId}`);
+  },
   async exportConversation(convId) {
     const token = localStorage.getItem("admin_token");
     const response = await fetch(`${baseURL}/api/admin/conversations/${convId}/export`, {
@@ -429,8 +432,13 @@ const adminApi = {
     a.remove();
     window.URL.revokeObjectURL(url);
   },
-  async marketplaceCards(page = 1) {
-    return adminReq.get(`/api/admin/marketplace?page=${page}`);
+  async marketplaceCards(page = 1, extra = {}) {
+    const params = new URLSearchParams()
+    params.set('page', String(page))
+    if (extra.keyword) params.set('keyword', extra.keyword)
+    if (extra.gender) params.set('gender', extra.gender)
+    if (extra.creator_gender) params.set('creator_gender', extra.creator_gender)
+    return adminReq.get(`/api/admin/marketplace?${params.toString()}`);
   },
   async deleteMarketplaceCard(pid) {
     return adminReq.delete(`/api/admin/marketplace/${pid}`);
@@ -485,10 +493,21 @@ const audioApi = {
 };
 
 const marketplaceApi = {
-  list(sort = 'hot', page = 1, keyword = '') {
+  list(sort = 'hot', page = 1, keyword = '', gender = '') {
     let url = `/api/marketplace?sort=${sort}&page=${page}`;
     if (keyword) url += `&q=${encodeURIComponent(keyword)}`;
+    if (gender) url += `&gender=${encodeURIComponent(gender)}`;
     return resAi.get(url);
+  },
+  publicList(sort = 'hot', page = 1, keyword = '', gender = '') {
+    // 不带 JWT 的公开版本，用于入口页 / 未登录用户浏览
+    let url = `/api/marketplace/public?sort=${sort}&page=${page}`;
+    if (keyword) url += `&q=${encodeURIComponent(keyword)}`;
+    if (gender) url += `&gender=${encodeURIComponent(gender)}`;
+    return resAi.get(url);
+  },
+  publicDetail(id) {
+    return resAi.get(`/api/marketplace/public/${id}`);
   },
   get(id) {
     return resAi.get(`/api/marketplace/${id}`);
@@ -511,10 +530,14 @@ const marketplaceApi = {
   comments(personaId, sort = 'hot', page = 1) {
     return resAi.get(`/api/marketplace/${personaId}/comments?sort=${sort}&page=${page}`);
   },
-  addComment(personaId, content) {
-    return resAi.post(`/api/marketplace/${personaId}/comments`, { content });
+  addComment(personaId, content, parentId = null, replyToId = null) {
+    const payload = { content };
+    if (parentId) payload.parent_id = parentId;
+    if (replyToId) payload.reply_to_id = replyToId;
+    return resAi.post(`/api/marketplace/${personaId}/comments`, payload);
   },
-  likeComment(commentId) {
+  // 再次点赞即取消点赞，服务端返回 { likes, liked }
+  toggleCommentLike(commentId) {
     return resAi.post(`/api/marketplace/comments/${commentId}/like`);
   },
   checkin() {

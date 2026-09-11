@@ -124,7 +124,7 @@
           </div>
 
           <div class="settings-section">
-            <div class="section-title">{{ t('AI 参数微调', 'AI Parameters') }}</div>
+            <div class="section-title">{{ t('参数微调', 'Parameters') }}</div>
             <p class="section-desc">{{ t('以下为各模型通用参数，小众参数未包含以保持简洁。', 'Common parameters across models; niche ones omitted for clarity.') }}</p>
 
             <div class="setting-item">

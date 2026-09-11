@@ -6,12 +6,12 @@
 """
 from flask import Blueprint, request, jsonify, current_app, Response
 from flask_jwt_extended import jwt_required, get_jwt, create_access_token
-from sqlalchemy import func
+from sqlalchemy import func, or_ as _or
 from functools import wraps
 from extensions import db
 from services.rate_limit import limiter
 from models import (
-    User, Conversation, Message, ModelProvider, PersonaTemplate,
+    User, Conversation, Message, ModelProvider, PersonaTemplate, local_now,
 )
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
@@ -84,9 +84,9 @@ def platform_stats():
     provider_count = ModelProvider.query.count()
     persona_count = PersonaTemplate.query.count()
 
-    # 今日新增
-    from datetime import datetime
-    today_start = datetime(datetime.utcnow().year, datetime.utcnow().month, datetime.utcnow().day)
+    # 今日新增（按服务器本地「现实世界」时间的零点切分）
+    now = local_now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     recent_users = User.query.filter(User.created_at >= today_start).filter(
         User.deleted_at.is_(None)
     ).count()
@@ -145,17 +145,34 @@ def list_users():
         .group_by(Conversation.user_id).all()
     )
     for uid, ts in latest_rows:
-        latest_msg_by_user[uid] = ts.isoformat() if ts else None
+        latest_msg_by_user[uid] = ts
+
+    # 没有消息但有对话（如刚建对话就离开）的用户，退化为对话更新时间
+    latest_conv_by_user = dict(
+        db.session.query(Conversation.user_id, func.max(Conversation.updated_at))
+        .filter(Conversation.deleted_at.is_(None))
+        .group_by(Conversation.user_id).all()
+    )
+
+    def _pick(u):
+        ts = latest_msg_by_user.get(u.id)
+        alt = latest_conv_by_user.get(u.id)
+        for candidate in (ts, alt, u.created_at):
+            if candidate:
+                return candidate
+        return None
 
     result = []
     for u in users:
         conv_ids = [c.id for c in u.conversations if c.deleted_at is None]
         msg_count = sum(msg_counts.get(cid, 0) for cid in conv_ids)
+        last = _pick(u)
         result.append({
             'id': u.id,
             'username': u.username,
             'email': u.email,
             'avatar': u.avatar,
+            'ai_avatar': u.ai_avatar,
             'gender': u.gender,
             'is_active': u.is_active,
             'deleted_at': u.deleted_at.isoformat() if u.deleted_at else None,
@@ -164,7 +181,7 @@ def list_users():
             'message_count': msg_count,
             'provider_count': prov_counts.get(u.id, 0),
             'persona_count': persona_counts.get(u.id, 0),
-            'last_active': latest_msg_by_user.get(u.id),
+            'last_active': last.isoformat() if last else None,
         })
 
     return jsonify({'code': 200, 'data': result})
@@ -186,23 +203,75 @@ def user_conversations(user_id):
             .group_by(Message.conversation_id).all()
         )
 
-    return jsonify({
-        'code': 200,
-        'data': [{
+    def _persona_block(p):
+        """抽取人设展示字段（AI 人设 / 用户人设共用）"""
+        if not p:
+            return {
+                'persona_name': None, 'persona_avatar': None,
+                'persona_description': None, 'persona_system_prompt': None,
+                'persona_greeting': None,
+            }
+        return {
+            'persona_name': p.name,
+            'persona_avatar': p.avatar,
+            'persona_description': p.description,
+            'persona_system_prompt': p.system_prompt,
+            'persona_greeting': p.greeting,
+        }
+
+    data = []
+    for c in convs:
+        row = {
             'id': c.id,
             'title': c.title,
             'is_pinned': c.is_pinned,
             'message_count': msg_counts.get(c.id, 0),
-            'persona_name': c.persona.name if c.persona else None,
-            'persona_system_prompt': c.persona.system_prompt if c.persona else None,
-            'persona_avatar': c.persona.avatar if c.persona else None,
-            'persona_description': c.persona.description if c.persona else None,
-            'persona_greeting': c.persona.greeting if c.persona else None,
             'background_image': c.background_image,
+            'background_cover': c.background_cover,
+            'ai_avatar': c.ai_avatar,
+            'user_avatar': c.user_avatar,
             'provider_id': c.provider_id,
+            # 用户是否在自己的对话面板里删掉了这条对话（软删除即视为「已移除」）
+            'deleted_at': c.deleted_at.isoformat() if c.deleted_at else None,
+            'exists': c.deleted_at is None,
             'created_at': c.created_at.isoformat() if c.created_at else None,
             'updated_at': c.updated_at.isoformat() if c.updated_at else None,
-        } for c in convs]
+        }
+        row.update(_persona_block(c.persona))
+        up = _persona_block(c.user_persona)
+        row.update({
+            'user_persona_name': up['persona_name'],
+            'user_persona_avatar': up['persona_avatar'],
+            'user_persona_description': up['persona_description'],
+            'user_persona_system_prompt': up['persona_system_prompt'],
+            'user_persona_greeting': up['persona_greeting'],
+        })
+        data.append(row)
+
+    return jsonify({'code': 200, 'data': data})
+
+
+@admin_bp.route('/conversations/<int:conv_id>', methods=['DELETE'])
+@admin_required
+def delete_conversation(conv_id):
+    """管理员彻底删除对话（连同消息一起从数据库移除）。
+
+    用户侧删除是软删除（写入 deleted_at，仍可在后台看到）；管理员删除为真删，
+    确保数据库内不再残留，避免后台统计与用户面板不一致。
+    """
+    conv = Conversation.query.get(conv_id)
+    if not conv:
+        return jsonify({'code': 404, 'message': '对话不存在'}), 404
+
+    title = conv.title
+    owner_id = conv.user_id
+    Message.query.filter_by(conversation_id=conv_id).delete(synchronize_session=False)
+    db.session.delete(conv)
+    db.session.commit()
+    return jsonify({
+        'code': 200,
+        'message': '已删除',
+        'data': {'id': conv_id, 'title': title, 'user_id': owner_id},
     })
 
 
@@ -218,11 +287,14 @@ def conversation_messages(conv_id):
         Message.created_at.asc()
     ).all()
 
+    # 管理员需要看到接近完整的对话记录，仅对超长单条做保护性截断
+    MAX_LEN = 4000
+
     def _short(txt):
         if not txt:
             return ''
         txt = str(txt)
-        return txt if len(txt) <= 200 else txt[:200] + '…'
+        return txt if len(txt) <= MAX_LEN else txt[:MAX_LEN] + '…（已截断）'
 
     return jsonify({
         'code': 200,
@@ -232,6 +304,8 @@ def conversation_messages(conv_id):
                 'title': conv.title,
                 'user_id': conv.user_id,
                 'username': conv.user.username if conv.user else None,
+                'persona_name': conv.persona.name if conv.persona else None,
+                'deleted_at': conv.deleted_at.isoformat() if conv.deleted_at else None,
             },
             'messages': [{
                 'id': m.id,
@@ -281,12 +355,56 @@ def export_conversation(conv_id):
 @admin_bp.route('/marketplace', methods=['GET'])
 @admin_required
 def list_marketplace_cards():
-    """管理员查看广场卡片列表（含真实创建者信息）"""
-    from models import PersonaMarketplace
-    page = int(request.args.get('page', 1))
-    per_page = min(int(request.args.get('per_page', 20)), 50)
+    """管理员查看广场卡片列表（含真实创建者信息）
 
-    pagination = PersonaMarketplace.query.order_by(PersonaMarketplace.created_at.desc()).paginate(
+    支持筛选：
+      - keyword：按创建者用户名 / 邮箱模糊匹配
+      - gender：人物卡自身性别（男 / 女 / 非二元）。
+                「人物卡」字段在创建时可填「男 / 女 / 神秘 / 自定义」，
+                由于「神秘」与「自定义 / 未填写」在内容上更接近「非二元」，
+                「神秘」也归入「非二元」桶；传空或「神秘」则视为不过滤。
+      - creator_gender：创建者（发布该卡片的用户）的性别，
+                取值 男 / 女 / 神秘 / 空（不过滤）。
+                注意：用户注册时的性别枚举是 男 / 女 / 神秘 三选一。
+      - page / per_page：分页
+    """
+    from models import PersonaMarketplace
+    from sqlalchemy import or_
+
+    page = int(request.args.get('page', 1))
+    per_page = min(int(request.args.get('per_page', 50)), 100)
+    keyword = (request.args.get('keyword') or '').strip()
+    gender = (request.args.get('gender') or '').strip()
+    creator_gender = (request.args.get('creator_gender') or '').strip()
+
+    query = PersonaMarketplace.query.join(User, User.id == PersonaMarketplace.user_id)
+
+    if keyword:
+        query = query.filter(
+            _or(
+                User.username.ilike(f'%{keyword}%'),
+                User.email.ilike(f'%{keyword}%'),
+            )
+        )
+
+    if gender:
+        if gender in ('男', '女'):
+            query = query.filter(PersonaMarketplace.gender == gender)
+        elif gender == '非二元':
+            # 自定义或未填写（含「神秘」）都归入非二元
+            query = query.filter(
+                or_(
+                    PersonaMarketplace.gender.is_(None),
+                    PersonaMarketplace.gender.notin_(['男', '女']),
+                )
+            )
+        # gender == '神秘' / 空：不过滤
+
+    if creator_gender in ('男', '女', '神秘'):
+        query = query.filter(User.gender == creator_gender)
+    # creator_gender == '' 视为不过滤
+
+    pagination = query.order_by(PersonaMarketplace.created_at.desc()).paginate(
         page=page, per_page=per_page, error_out=False
     )
     items = []
@@ -294,6 +412,7 @@ def list_marketplace_cards():
         d = p.to_dict(include_prompt=True)
         d['author_username'] = p.author.username if p.author else None
         d['author_email'] = p.author.email if p.author else None
+        d['author_gender'] = p.author.gender if p.author else None
         items.append(d)
 
     return jsonify({

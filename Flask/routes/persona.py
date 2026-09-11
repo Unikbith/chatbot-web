@@ -2,9 +2,20 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
-from models import PersonaTemplate
+from models import PersonaTemplate, MarketplaceAdopt
 
 persona_bp = Blueprint('persona', __name__, url_prefix='/api/personas')
+
+# 人物卡（AI 人设）数量上限
+PERSONA_CARD_LIMIT = 10
+
+
+def _card_source(persona, user_id):
+    """人物卡来源：卡片广场（通过 adopt 记录判断）或 None"""
+    adopt = MarketplaceAdopt.query.filter_by(
+        template_id=persona.id, user_id=user_id
+    ).first()
+    return 'marketplace' if adopt else None
 
 
 @persona_bp.route('', methods=['GET'])
@@ -12,16 +23,29 @@ persona_bp = Blueprint('persona', __name__, url_prefix='/api/personas')
 def list_personas():
     """获取角色模板列表"""
     user_id = int(get_jwt_identity())
-    
+
+    # 系统自带人物卡与卡片广场系统卡的关联补齐（幂等），保证「卡片广场」来源标签可用
+    try:
+        from routes.marketplace import ensure_system_adopts
+        ensure_system_adopts(user_id)
+    except Exception:
+        db.session.rollback()
+
     personas = PersonaTemplate.query.filter_by(user_id=user_id).order_by(
         PersonaTemplate.is_default.desc(),
         PersonaTemplate.weight.desc(),
         PersonaTemplate.created_at.desc()
     ).all()
     
+    data = []
+    for p in personas:
+        d = p.to_dict()
+        d['source'] = _card_source(p, user_id)
+        data.append(d)
+
     return jsonify({
         'code': 200,
-        'data': [p.to_dict() for p in personas]
+        'data': data
     })
 
 
@@ -34,10 +58,12 @@ def get_persona(persona_id):
     
     if not persona:
         return jsonify({'code': 404, 'message': '角色不存在'}), 404
-    
+
+    d = persona.to_dict()
+    d['source'] = _card_source(persona, user_id)
     return jsonify({
         'code': 200,
-        'data': persona.to_dict()
+        'data': d
     })
 
 
@@ -57,13 +83,24 @@ def create_persona():
     
     if not name or not system_prompt:
         return jsonify({'code': 400, 'message': '角色名和系统提示词不能为空'}), 400
-    
+
+    persona_type = data.get('persona_type', 'ai') or 'ai'
+
+    # 人物卡（AI 人设）数量上限
+    if persona_type == 'ai':
+        ai_count = PersonaTemplate.query.filter_by(user_id=user_id, persona_type='ai').count()
+        if ai_count >= PERSONA_CARD_LIMIT:
+            return jsonify({
+                'code': 400,
+                'message': f'人物卡数量已达上限（{PERSONA_CARD_LIMIT} 个）'
+            }), 400
+
     # 如果设为默认，取消其他默认
     if is_default:
         PersonaTemplate.query.filter_by(
             user_id=user_id, is_default=True
         ).update({'is_default': False})
-    
+
     persona = PersonaTemplate(
         user_id=user_id,
         name=name,
@@ -72,8 +109,7 @@ def create_persona():
         system_prompt=system_prompt,
         greeting=greeting,
         is_default=is_default,
-        is_system=False,
-        persona_type=data.get('persona_type', 'ai'),
+        persona_type=persona_type,
     )
     db.session.add(persona)
     
@@ -99,11 +135,7 @@ def update_persona(persona_id):
     
     if not persona:
         return jsonify({'code': 404, 'message': '角色不存在'}), 404
-    
-    # 系统内置角色不可修改
-    if persona.is_system:
-        return jsonify({'code': 400, 'message': '系统内置角色不可修改'}), 400
-    
+
     data = request.get_json() or {}
     
     if 'name' in data:
@@ -150,11 +182,15 @@ def delete_persona(persona_id):
     
     if not persona:
         return jsonify({'code': 404, 'message': '角色不存在'}), 404
-    
-    if persona.is_system:
-        return jsonify({'code': 400, 'message': '系统内置角色不可删除'}), 400
-    
+
     was_default = persona.is_default
+
+    # 清理该人物卡对应的卡片广场 adopt 记录，
+    # 保证卡片广场的「已添加」状态与人物卡列表实时同步
+    MarketplaceAdopt.query.filter_by(
+        template_id=persona.id, user_id=user_id
+    ).delete()
+
     db.session.delete(persona)
     db.session.commit()
     

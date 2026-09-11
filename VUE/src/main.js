@@ -16,3 +16,7 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 app.use(ElementPlus)
 app.use(router)
 app.mount('#app')
+
+// 移除 index.html 中的首屏骨架（Vue 挂载后通常已清空，这里兜底防止残留遮挡）
+const bootEl = document.querySelector('.app-boot')
+if (bootEl) bootEl.remove()

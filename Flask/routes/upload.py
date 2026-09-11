@@ -10,6 +10,9 @@ upload_bp = Blueprint('upload', __name__, url_prefix='/api/upload')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'}
 MAX_FILE_SIZE = MAX_IMAGE_SIZE
 
+# 图片属于不可变资源：文件名即 uuid，内容不会变更，可长时间强缓存
+IMAGE_CACHE_MAX_AGE = 30 * 24 * 3600  # 30 天
+
 
 def _allowed_file(filename):
     return '.' in filename and \
@@ -75,6 +78,23 @@ def upload_image():
 
 @upload_bp.route('/image/<filename>', methods=['GET'])
 def get_image(filename):
-    """获取上传的图片"""
+    """获取上传的图片
+
+    文件名是 uuid，内容不可变，因此开启长缓存 + 条件请求（ETag/Last-Modified），
+    避免每次刷新页面都重新下载头像，解决新用户/首次进入时头像加载慢的问题。
+    """
     upload_dir = _ensure_upload_dir()
-    return send_from_directory(upload_dir, filename)
+    resp = send_from_directory(
+        upload_dir,
+        filename,
+        max_age=IMAGE_CACHE_MAX_AGE,
+        conditional=True,      # 支持 If-None-Match / If-Modified-Since -> 304
+        etag=True,
+        last_modified=True,
+    )
+    resp.cache_control.public = True
+    resp.cache_control.max_age = IMAGE_CACHE_MAX_AGE
+    resp.cache_control.immutable = True
+    # 兼容部分代理/调试场景：允许跨域读取图片
+    resp.headers.setdefault('Access-Control-Allow-Origin', '*')
+    return resp
