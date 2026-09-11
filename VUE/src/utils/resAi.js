@@ -515,16 +515,6 @@ const marketplaceApi = {
     if (gender) url += `&gender=${encodeURIComponent(gender)}`;
     return resAi.get(url);
   },
-  publicList(sort = 'hot', page = 1, keyword = '', gender = '') {
-    // 不带 JWT 的公开版本，用于入口页 / 未登录用户浏览
-    let url = `/api/marketplace/public?sort=${sort}&page=${page}`;
-    if (keyword) url += `&q=${encodeURIComponent(keyword)}`;
-    if (gender) url += `&gender=${encodeURIComponent(gender)}`;
-    return resAi.get(url);
-  },
-  publicDetail(id) {
-    return resAi.get(`/api/marketplace/public/${id}`);
-  },
   publicComments(personaId, sort = 'hot', page = 1) {
     return resAi.get(`/api/marketplace/public/${personaId}/comments?sort=${sort}&page=${page}`);
   },
@@ -549,11 +539,8 @@ const marketplaceApi = {
   comments(personaId, sort = 'hot', page = 1) {
     return resAi.get(`/api/marketplace/${personaId}/comments?sort=${sort}&page=${page}`);
   },
-  addComment(personaId, content, parentId = null, replyToId = null) {
-    const payload = { content };
-    if (parentId) payload.parent_id = parentId;
-    if (replyToId) payload.reply_to_id = replyToId;
-    return resAi.post(`/api/marketplace/${personaId}/comments`, payload);
+  addComment(personaId, content) {
+    return resAi.post(`/api/marketplace/${personaId}/comments`, { content });
   },
   // 再次点赞即取消点赞，服务端返回 { likes, liked }
   toggleCommentLike(commentId) {

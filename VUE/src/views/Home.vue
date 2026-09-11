@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Menu, Search, Sunny, Plus, ZoomIn, ChatLineRound } from '@element-plus/icons-vue'
+import { Menu, ZoomIn, ChatLineRound } from '@element-plus/icons-vue'
 import {
   authApi, providersApi, personaApi, settingsApi, conversationApi, chatApi, marketplaceApi
 } from '../utils/resAi'
@@ -34,6 +34,8 @@ const isLoggedIn = ref(false)
 const authModalVisible = ref(false)
 const providerPanelVisible = ref(false)
 const settingsVisible = ref(false)
+// 系统设置打开时定位到的标签页（如从模型配置的帮助引导跳转到「帮助和反馈」）
+const settingsInitialTab = ref('profile')
 const personaPanelVisible = ref(false)
 const convoSettingsVisible = ref(false)
 const marketplaceVisible = ref(false)
@@ -237,9 +239,6 @@ const LANDING_POOL_SIZE = 60
 
 const landingLoading = ref(false)
 const landingCards = ref([])
-// 入口页固定展示 4 张随机卡片（不再支持分页与排序切换）
-const landingPage = ref(1)
-const landingPageSize = LANDING_SHOW_COUNT
 
 function weightedRandomPick(pool, n) {
   // 权重公式 = 1 + likes + 2 * sqrt(comment_count)
@@ -778,12 +777,18 @@ function handleProviderSelect({ provider, type }) {
   }
 }
 
+// 从模型配置的帮助引导跳到「设置 - 帮助和反馈」
+function openSettingsHelp() {
+  settingsInitialTab.value = 'feedback'
+  providerPanelVisible.value = false
+  settingsVisible.value = true
+}
+
 // ========== 对话独立设置 ==========
 function openConversationSettings() {
   // 对话设置需登录（未登录点到时直接弹登录框）
   requireLogin(() => { convoSettingsVisible.value = true })
 }
-
 async function handleConvoSettingsSaved(payload) {
   if (!currentConvId.value) {
     ElMessage.warning(t('请先创建或选择一个对话', 'Create or select a conversation first'))
@@ -973,20 +978,46 @@ async function handleConvoSettingsSaved(payload) {
     >
       <template #header><span></span></template>
       <div v-if="landingDetail" class="lp-detail">
-        <div class="lp-detail-left" @click="openLandingPreview(landingDetail.avatar)" :class="{ 'is-clickable': !!landingDetail.avatar }">
-          <img v-if="landingDetail.avatar" :src="landingDetail.avatar" :alt="landingDetail.name" />
-          <div v-else class="lp-detail-placeholder">{{ landingDetail.name?.charAt(0) }}</div>
-          <div v-if="landingDetail.avatar" class="lp-detail-zoom"><el-icon><ZoomIn /></el-icon></div>
+        <div class="lp-detail-left">
+          <div
+            class="lp-detail-avatar-box"
+            @click="openLandingPreview(landingDetail.avatar)"
+            :class="{ 'is-clickable': !!landingDetail.avatar }"
+          >
+            <img v-if="landingDetail.avatar" :src="landingDetail.avatar" :alt="landingDetail.name" />
+            <div v-else class="lp-detail-placeholder">{{ landingDetail.name?.charAt(0) }}</div>
+            <div v-if="landingDetail.avatar" class="lp-detail-zoom"><el-icon><ZoomIn /></el-icon></div>
+          </div>
+
+          <!-- 图片下方：点赞 / 评论 / 创作者（与卡片广场一致的统计展示） -->
+          <div class="lp-detail-stats">
+            <div class="lp-detail-stat like">
+              <ThumbIcon :size="16" />
+              <span class="lp-detail-stat-num">{{ formatCount(landingDetail.likes || 0) }}</span>
+              <span class="lp-detail-stat-label">{{ t('点赞', 'Likes') }}</span>
+            </div>
+            <div class="lp-detail-stat comment">
+              <el-icon :size="15"><ChatLineRound /></el-icon>
+              <span class="lp-detail-stat-num">{{ formatCount(landingDetail.comment_total || landingDetail.comment_count || 0) }}</span>
+              <span class="lp-detail-stat-label">{{ t('评论', 'Comments') }}</span>
+            </div>
+          </div>
+
+          <div class="lp-detail-creator-card">
+            <img
+              v-if="landingDetail.creator_identicon_seed"
+              :src="identiconDataUrl(landingDetail.creator_identicon_seed, 34)"
+              class="lp-detail-creator-avatar"
+              alt=""
+            />
+            <div class="lp-detail-creator-info">
+              <span class="lp-detail-creator-label">{{ t('创作者', 'Creator') }}</span>
+              <span class="lp-detail-creator-name">{{ landingDetail.creator_pseudonym || t('匿名', 'Anonymous') }}</span>
+            </div>
+          </div>
         </div>
         <div class="lp-detail-right">
           <h2 class="lp-detail-name">{{ landingDetail.name }}</h2>
-          <div class="lp-detail-meta">
-            <ThumbIcon :size="13" /> {{ formatCount(landingDetail.likes) }}
-            ·
-            <el-icon><ChatLineRound /></el-icon> {{ formatCount(landingDetail.comment_total || landingDetail.comment_count || 0) }}
-            ·
-            <span class="lp-detail-creator">{{ t('创作者', 'Creator') }}: {{ landingDetail.creator_pseudonym }}</span>
-          </div>
           <p class="lp-detail-desc">{{ landingDetail.description }}</p>
           <div class="lp-detail-section" v-if="landingDetail.greeting">
             <div class="lp-detail-label">{{ t('开场白', 'Greeting') }}</div>
@@ -1026,13 +1057,6 @@ async function handleConvoSettingsSaved(payload) {
                   <span class="lp-comment-time">{{ formatTime(c.created_at) }}</span>
                 </div>
                 <p class="lp-comment-text">{{ c.content }}</p>
-                <div v-if="c.replies && c.replies.length" class="lp-replies">
-                  <div v-for="r in c.replies" :key="r.id" class="lp-reply">
-                    <span class="lp-reply-pseudonym">{{ r.pseudonym }}</span>
-                    <span v-if="r.reply_to_name" class="lp-reply-to">{{ t('回复', 'reply to') }} {{ r.reply_to_name }}</span>
-                    <p class="lp-comment-text">{{ r.content }}</p>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
@@ -1091,12 +1115,14 @@ async function handleConvoSettingsSaved(payload) {
       v-model="providerPanelVisible"
       :current-provider-id="currentProviderId"
       @select="handleProviderSelect"
+      @open-settings-help="openSettingsHelp"
     />
 
     <!-- 系统设置面板 -->
     <SystemSettings
       v-model="settingsVisible"
       :user="user"
+      :initial-tab="settingsInitialTab"
       @settings-updated="handleSettingsUpdated"
       @user-updated="handleUserUpdated"
       @logout="handleLogout"
@@ -1570,21 +1596,30 @@ async function handleConvoSettingsSaved(payload) {
   min-height: 460px;
 }
 
+/* 左栏：头像 + 图片下方统计 + 创作者 */
 .lp-detail-left {
   width: 240px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lp-detail-avatar-box {
+  position: relative;
+  width: 100%;
+  height: 260px;
   border-radius: 14px;
   overflow: hidden;
   background: linear-gradient(135deg, #e8efff, #d6e4ff);
-  position: relative;
   cursor: zoom-in;
 }
 
-.lp-detail-left.is-clickable:hover img {
+.lp-detail-avatar-box.is-clickable:hover img {
   transform: scale(1.02);
 }
 
-.lp-detail-left img {
+.lp-detail-avatar-box img {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -1616,6 +1651,82 @@ async function handleConvoSettingsSaved(payload) {
   font-size: 14px;
 }
 
+/* 图片下方统计：点赞 / 评论 */
+.lp-detail-stats {
+  display: flex;
+  gap: 8px;
+}
+
+.lp-detail-stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  border-radius: 10px;
+  background: rgba(110, 143, 223, 0.07);
+  border: 1px solid rgba(110, 143, 223, 0.14);
+}
+
+.lp-detail-stat.like {
+  color: #e0603f;
+}
+
+.lp-detail-stat.comment {
+  color: #5e7baf;
+}
+
+.lp-detail-stat-num {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.lp-detail-stat-label {
+  font-size: 11px;
+  color: #8796b5;
+}
+
+/* 创作者卡片 */
+.lp-detail-creator-card {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(110, 143, 223, 0.14);
+}
+
+.lp-detail-creator-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.lp-detail-creator-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.lp-detail-creator-label {
+  font-size: 10px;
+  color: #8796b5;
+  line-height: 1.2;
+}
+
+.lp-detail-creator-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #2c3e6e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .lp-detail-right {
   flex: 1;
   min-width: 0;
@@ -1629,14 +1740,6 @@ async function handleConvoSettingsSaved(payload) {
   font-size: 22px;
   font-weight: 700;
   color: #2c3e6e;
-}
-
-.lp-detail-meta {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  color: #6e7fa3;
 }
 
 .lp-detail-desc {
@@ -1718,11 +1821,6 @@ async function handleConvoSettingsSaved(payload) {
   border: none;
 }
 
-.lp-detail-creator {
-  margin-left: 4px;
-  color: #6e7fa3;
-}
-
 /* 入口页详情评论区 */
 .lp-comments-section {
   border-top: 1px solid rgba(120, 145, 195, 0.22);
@@ -1781,32 +1879,6 @@ async function handleConvoSettingsSaved(payload) {
   line-height: 1.5;
   margin: 0;
   word-break: break-word;
-}
-
-.lp-replies {
-  margin-top: 8px;
-  padding-left: 10px;
-  border-left: 2px solid rgba(120, 145, 195, 0.22);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.lp-reply {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.lp-reply-pseudonym {
-  font-size: 12px;
-  font-weight: 600;
-  color: #2c3e6e;
-}
-
-.lp-reply-to {
-  font-size: 11px;
-  color: #8aa0c4;
 }
 
 @media (max-width: 768px) {

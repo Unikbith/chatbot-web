@@ -470,7 +470,7 @@ class MarketplaceVote(db.Model):
 
 
 class MarketplaceComment(db.Model):
-    """人设广场评论"""
+    """人设广场评论（扁平结构：只评论人物卡，不支持对评论的回复）"""
     __tablename__ = 'marketplace_comments'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -478,23 +478,11 @@ class MarketplaceComment(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     content = db.Column(db.Text, nullable=False)
     likes = db.Column(db.Integer, default=0)
-    # 仅支持一层嵌套：parent 指向所属顶层评论（顶层为 NULL），
-    # reply_to 指向被回复的具体那条评论（可能是顶层本身，也可能是同层的兄弟评论）
-    parent_id = db.Column(db.Integer, db.ForeignKey('marketplace_comments.id'), nullable=True, index=True)
-    reply_to_id = db.Column(db.Integer, db.ForeignKey('marketplace_comments.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=local_now)
 
     commenter = db.relationship('User', backref='marketplace_comments')
-    # 两个自引用外键（parent_id / reply_to_id），必须显式指定用哪一条做关联
-    replies = db.relationship(
-        'MarketplaceComment',
-        foreign_keys=[parent_id],
-        backref=db.backref('parent', remote_side=[id]),
-        lazy='dynamic', cascade='all, delete-orphan'
-    )
 
-    def to_dict(self, pseudonym=None, identicon_seed=None, liked=False, reply_to_name=None,
-                replies=None, reply_count=0):
+    def to_dict(self, pseudonym=None, identicon_seed=None, liked=False):
         return {
             'id': self.id,
             'content': self.content,
@@ -502,12 +490,7 @@ class MarketplaceComment(db.Model):
             'pseudonym': pseudonym,
             'identicon_seed': identicon_seed,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'parent_id': self.parent_id,
-            'reply_to_id': self.reply_to_id,
-            'reply_to_name': reply_to_name,
             'liked': bool(liked),
-            'reply_count': reply_count,
-            'replies': replies if replies is not None else [],
         }
 
 

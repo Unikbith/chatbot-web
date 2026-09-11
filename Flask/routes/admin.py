@@ -441,23 +441,12 @@ def get_marketplace_card(pid):
     d['author_email'] = persona.author.email if persona.author else None
     d['author_gender'] = persona.author.gender if persona.author else None
 
-    # 顶层评论 + 子回复（与 marketplace.py 列表接口结构一致，但用真实用户名替代假名）
-    tops = MarketplaceComment.query.filter_by(persona_id=pid, parent_id=None).order_by(
+    # 评论（扁平结构，使用真实用户名）
+    rows = MarketplaceComment.query.filter_by(persona_id=pid).order_by(
         MarketplaceComment.created_at.desc()
     ).all()
-    children = []
-    if tops:
-        children = MarketplaceComment.query.filter(
-            MarketplaceComment.parent_id.in_([c.id for c in tops])
-        ).order_by(MarketplaceComment.created_at.asc()).all()
 
-    by_id = {c.id: c for c in tops + list(children)}
-
-    def _pack(c, with_replies=True):
-        target = by_id.get(c.reply_to_id) if c.reply_to_id else None
-        replies = []
-        if with_replies:
-            replies = [_pack(ch, with_replies=False) for ch in children if ch.parent_id == c.id]
+    def _pack(c):
         user = c.commenter
         return {
             'id': c.id,
@@ -466,14 +455,9 @@ def get_marketplace_card(pid):
             'username': user.username if user else None,
             'user_id': user.id if user else None,
             'created_at': c.created_at.isoformat() if c.created_at else None,
-            'parent_id': c.parent_id,
-            'reply_to_id': c.reply_to_id,
-            'reply_to_name': target.commenter.username if target and target.commenter else None,
-            'reply_count': len(replies),
-            'replies': replies,
         }
 
-    d['comments'] = [_pack(c) for c in tops]
+    d['comments'] = [_pack(c) for c in rows]
     return jsonify({'code': 200, 'data': d})
 
 

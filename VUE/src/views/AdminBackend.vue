@@ -262,7 +262,14 @@
             <el-table-column :label="t('性别', 'Gender')" width="80" align="center">
               <template #default="{ row }">{{ row.user?.gender || '-' }}</template>
             </el-table-column>
-            <el-table-column prop="content" :label="t('反馈内容', 'Content')" min-width="240" show-overflow-tooltip />
+            <el-table-column :label="t('反馈内容', 'Content')" min-width="260">
+              <template #default="{ row }">
+                <div class="feedback-content-cell" @click="openFeedbackDetail(row)" :title="t('点击查看完整内容', 'Click to view full content')">
+                  <span class="feedback-content-text">{{ row.content }}</span>
+                  <span class="feedback-content-more">{{ t('查看详情', 'View') }}</span>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column :label="t('允许邮件联系', 'Allow Email')" width="120" align="center">
               <template #default="{ row }">
                 <el-tag :type="row.allow_email_contact ? 'success' : 'info'" size="small" effect="plain">
@@ -528,9 +535,9 @@
               </el-tag>
             </div>
             <div class="mp-detail-stats">
-              <span>👍 {{ mpDetailData.likes || 0 }}</span>
-              <span>👎 {{ mpDetailData.dislikes || 0 }}</span>
-              <span>💬 {{ mpDetailData.comment_count || 0 }}</span>
+              <span class="mp-stat like"><ThumbIcon :size="14" /> {{ formatCount(mpDetailData.likes || 0) }}</span>
+              <span class="mp-stat dislike"><ThumbIcon :size="14" down /> {{ formatCount(mpDetailData.dislikes || 0) }}</span>
+              <span class="mp-stat comment"><el-icon><ChatLineRound /></el-icon> {{ formatCount(mpDetailData.comment_count || 0) }}</span>
             </div>
           </div>
         </div>
@@ -559,15 +566,51 @@
                 <span class="mp-comment-time">{{ formatTime(c.created_at) }}</span>
               </div>
               <p class="mp-comment-text">{{ c.content }}</p>
-              <div v-if="c.replies && c.replies.length" class="mp-replies">
-                <div v-for="r in c.replies" :key="r.id" class="mp-reply">
-                  <span class="mp-reply-user">{{ r.username || t('未知用户', 'Unknown') }}</span>
-                  <span v-if="r.reply_to_name" class="mp-reply-to">{{ t('回复', 'reply to') }} {{ r.reply_to_name }}</span>
-                  <p class="mp-comment-text">{{ r.content }}</p>
-                </div>
-              </div>
             </div>
           </div>
+        </div>
+      </div>
+    </el-dialog>
+    <!-- 反馈详情弹窗 -->
+    <el-dialog
+      v-model="feedbackDetailVisible"
+      :title="t('反馈详情', 'Feedback Detail')"
+      width="min(560px, 94vw)"
+      align-center
+      class="feedback-detail-dialog"
+    >
+      <div v-if="feedbackDetail" class="fb-detail">
+        <div class="fb-detail-user">
+          <el-avatar :size="42" :src="feedbackDetail.user?.avatar">
+            {{ feedbackDetail.user?.username?.charAt(0)?.toUpperCase() }}
+          </el-avatar>
+          <div class="fb-detail-user-meta">
+            <span class="fb-detail-username">{{ feedbackDetail.user?.username }}</span>
+            <span class="fb-detail-email">{{ feedbackDetail.user?.email }}</span>
+          </div>
+          <el-tag size="small" effect="plain">
+            {{ t('性别', 'Gender') }} {{ feedbackDetail.user?.gender || '-' }}
+          </el-tag>
+        </div>
+
+        <div class="fb-detail-row">
+          <span class="fb-detail-label">{{ t('提交时间', 'Submitted') }}</span>
+          <span>{{ formatTime(feedbackDetail.created_at) }}</span>
+        </div>
+        <div class="fb-detail-row">
+          <span class="fb-detail-label">{{ t('允许邮件联系', 'Allow Email') }}</span>
+          <el-tag :type="feedbackDetail.allow_email_contact ? 'success' : 'info'" size="small" effect="plain">
+            {{ feedbackDetail.allow_email_contact ? t('是', 'Yes') : t('否', 'No') }}
+          </el-tag>
+        </div>
+        <div class="fb-detail-row" v-if="feedbackDetail.allow_email_contact">
+          <span class="fb-detail-label">{{ t('联系邮箱', 'Contact Email') }}</span>
+          <span class="fb-detail-contact">{{ feedbackDetail.contact_email || '-' }}</span>
+        </div>
+
+        <div class="fb-detail-content">
+          <div class="fb-detail-label">{{ t('反馈内容', 'Content') }}</div>
+          <div class="fb-detail-text">{{ feedbackDetail.content }}</div>
         </div>
       </div>
     </el-dialog>
@@ -578,9 +621,10 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Back, SwitchButton, Monitor, View, Download, Delete } from '@element-plus/icons-vue'
+import { Refresh, Back, SwitchButton, Monitor, View, Download, Delete, ChatLineRound } from '@element-plus/icons-vue'
 import { adminApi, resAi } from '@/utils/resAi'
 import { t } from '../i18n'
+import ThumbIcon from '../components/ThumbIcon.vue'
 import brandIcon from '@/assets/icon/ChatBotIcon.png'
 
 const router = useRouter()
@@ -619,6 +663,13 @@ const feedbackLoading = ref(false)
 const feedbackPage = ref(1)
 const feedbackPageSize = ref(20)
 const feedbackTotal = ref(0)
+const feedbackDetailVisible = ref(false)
+const feedbackDetail = ref(null)
+
+function openFeedbackDetail(row) {
+  feedbackDetail.value = row
+  feedbackDetailVisible.value = true
+}
 
 // 管理员卡片详情弹窗状态（复用公共详情接口，无需额外后端）
 const mpDetailVisible = ref(false)
@@ -728,6 +779,18 @@ function formatTime(iso) {
   if (isNaN(d.getTime())) return iso
   const pad = (n) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+// 千位 k 计数：1000 -> 1k，1500 -> 1.5k，10000 -> 10k，百万及以上用 m
+function formatCount(n) {
+  const v = Number(n) || 0
+  if (v < 1000) return String(v)
+  if (v < 1000000) {
+    const k = v / 1000
+    return (k >= 100 ? Math.round(k) : Math.round(k * 10) / 10) + 'k'
+  }
+  const m = v / 1000000
+  return (m >= 100 ? Math.round(m) : Math.round(m * 10) / 10) + 'm'
 }
 
 async function loadStats() {
@@ -1293,6 +1356,17 @@ watch(activeTab, (val) => {
   font-size: 13px;
   color: var(--text-secondary);
 }
+.mp-detail-stats .mp-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.mp-detail-stats .mp-stat.like {
+  color: #e0603f;
+}
+.mp-detail-stats .mp-stat.dislike {
+  color: #4b8b6a;
+}
 .mp-detail-desc {
   margin: 0;
   font-size: 13px;
@@ -1375,32 +1449,6 @@ watch(activeTab, (val) => {
   line-height: 1.5;
   margin: 0;
   word-break: break-word;
-}
-
-.mp-replies {
-  margin-top: 8px;
-  padding-left: 12px;
-  border-left: 2px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.mp-reply {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.mp-reply-user {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.mp-reply-to {
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 .msg-count-link:hover {
@@ -1580,6 +1628,109 @@ watch(activeTab, (val) => {
 .feedback-email {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* 反馈内容：截断显示 + 点击看详情 */
+.feedback-content-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.feedback-content-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.feedback-content-more {
+  flex: none;
+  font-size: 12px;
+  color: var(--brand);
+  opacity: 0.85;
+}
+
+.feedback-content-cell:hover .feedback-content-more {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+/* 反馈详情弹窗 */
+.fb-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fb-detail-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.fb-detail-user-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.fb-detail-username {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.fb-detail-email {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.fb-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.fb-detail-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 76px;
+}
+
+.fb-detail-contact {
+  word-break: break-all;
+}
+
+.fb-detail-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fb-detail-text {
+  background: var(--surface-hover);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
 }
 
 /* 移动端 */

@@ -82,7 +82,44 @@
       <!-- 右列：配置表单 + 模型管理 -->
       <div class="right-col">
         <div class="config-card">
-          <div class="config-title">{{ editingId ? t('编辑配置', 'Edit Config') : t('新增配置', 'Add Config') }}</div>
+          <div class="config-title-row">
+            <div class="config-title">{{ editingId ? t('编辑配置', 'Edit Config') : t('新增配置', 'Add Config') }}</div>
+            <!-- 帮助引导：跳转到对应的厂商 API 文档 -->
+            <el-popover placement="bottom-end" :width="300" trigger="click" popper-class="provider-help-popover">
+              <template #reference>
+                <button type="button" class="config-help-btn">
+                  <el-icon><QuestionFilled /></el-icon>
+                  <span>{{ t('如何获取？', 'How to get it?') }}</span>
+                </button>
+              </template>
+              <div class="help-pop-title">
+                {{ t('查看厂商 API 文档', 'Vendor API Documentation') }}
+              </div>
+              <div class="help-pop-desc">
+                {{ t('配置 API Key 前，可先阅读对应厂商的官方文档。', 'Read the official docs before configuring your API key.') }}
+              </div>
+              <div class="help-pop-links">
+                <template v-if="helpLinks.length">
+                  <a
+                    v-for="l in helpLinks"
+                    :key="l.url + l.name"
+                    :href="l.url"
+                    target="_blank"
+                    rel="noopener"
+                    class="help-pop-link"
+                  >
+                    <span>{{ l.name }}</span>
+                    <el-icon><TopRight /></el-icon>
+                  </a>
+                </template>
+                <div v-else class="help-pop-empty">{{ t('暂无推荐文档', 'No docs available') }}</div>
+              </div>
+              <el-divider class="help-pop-divider" />
+              <a class="help-pop-all" @click="goSettingsHelp">
+                {{ t('前往「设置 - 帮助和反馈」查看全部文档', 'See all docs in Settings - Help & Feedback') }}
+              </a>
+            </el-popover>
+          </div>
 
           <div class="form-row">
             <label class="form-label">{{ t('配置 ID（名称）', 'ID / Name') }}</label>
@@ -234,18 +271,22 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, ChatDotRound, Microphone, Headset, Delete, Picture } from '@element-plus/icons-vue'
+import {
+  Plus, ChatDotRound, Microphone, Headset, Delete, Picture,
+  QuestionFilled, TopRight,
+} from '@element-plus/icons-vue'
 import { providersApi } from '@/utils/resAi'
 import { t } from '../i18n'
+import { helpGroupOf, helpLinkOfBrand } from '../utils/helpDocs'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   currentProviderId: { type: [Number, String], default: null },
 })
 
-const emit = defineEmits(['update:modelValue', 'select'])
+const emit = defineEmits(['update:modelValue', 'select', 'open-settings-help'])
 
 const tabs = [
   { key: 'chat', label: '对话模型', labelEn: 'Chat', icon: ChatDotRound },
@@ -269,6 +310,21 @@ const testResult = ref(null)
 const loading = ref(false)
 
 const isAudio = () => activeType.value === 'stt' || activeType.value === 'tts'
+
+// ── 帮助引导：当前 Tab 对应的厂商 API 文档 ─────────────────────
+// 优先按已选厂商品牌精确匹配；未选厂商时退回该分类的全部文档。
+const helpLinks = computed(() => {
+  const group = helpGroupOf(activeType.value)
+  if (!group) return []
+  const brand = vendors.value.find(v => v.brand === selectedVendorBrand.value)?.brand
+  const matched = helpLinkOfBrand(activeType.value, brand)
+  return matched ? [matched] : group.links
+})
+
+function goSettingsHelp() {
+  emit('open-settings-help', activeType.value)
+}
+
 function tLabel(field) {
   return field.label_en ? t(field.label, field.label_en) : field.label
 }
@@ -806,6 +862,85 @@ onMounted(() => {
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 14px;
+}
+/* 标题行 + 帮助引导按钮 */
+.config-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.config-title-row .config-title {
+  margin-bottom: 0;
+}
+.config-help-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  font-size: 12px;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand) 22%, transparent);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.config-help-btn:hover {
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+  border-color: color-mix(in srgb, var(--brand) 36%, transparent);
+}
+.help-pop-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.help-pop-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.help-pop-links {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.help-pop-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-decoration: none;
+  border-radius: 8px;
+  background: var(--surface-hover);
+  transition: background 0.15s, color 0.15s;
+}
+.help-pop-link:hover {
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+  color: var(--brand);
+}
+.help-pop-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.help-pop-divider {
+  margin: 10px 0 !important;
+}
+.help-pop-all {
+  display: block;
+  font-size: 12px;
+  color: var(--brand);
+  cursor: pointer;
+  line-height: 1.5;
+}
+.help-pop-all:hover {
+  text-decoration: underline;
 }
 .models-title-row {
   display: flex;

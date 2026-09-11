@@ -235,13 +235,9 @@
             </div>
 
             <div class="comment-input">
-              <div v-if="replyTarget" class="reply-hint">
-                <span>{{ t('回复', 'Replying to') }} <b>{{ replyTarget.label }}</b></span>
-                <el-button text size="small" @click="cancelReply">{{ t('取消', 'Cancel') }}</el-button>
-              </div>
               <el-input
                 v-model="newComment"
-                :placeholder="replyPlaceholder"
+                :placeholder="t('写下你对这张人物卡的评论...', 'Write a comment on this persona...')"
                 maxlength="500"
                 show-word-limit
                 type="textarea"
@@ -251,7 +247,7 @@
                 class="fixed-textarea"
               />
               <el-button type="primary" size="small" :disabled="!newComment.trim()" @click="submitComment" :loading="commentSubmitting">
-                {{ replyTarget ? t('回复', 'Reply') : t('发表', 'Post') }}
+                {{ t('发表', 'Post') }}
               </el-button>
             </div>
 
@@ -278,57 +274,6 @@
                   >
                     <el-icon><Sunny /></el-icon> {{ c.likes }}
                   </el-button>
-                  <el-button text size="small" @click="startReply(c, null)">
-                    {{ t('回复', 'Reply') }}
-                  </el-button>
-                </div>
-
-                <!-- 子回复：最多嵌套一层，默认只展示 3 条，其余折叠 -->
-                <div v-if="c.replies && c.replies.length" class="reply-list">
-                  <div v-for="r in visibleReplies(c)" :key="r.id" class="reply-item">
-                    <img
-                      :src="identiconDataUrl(r.identicon_seed, 22)"
-                      class="comment-identicon reply-identicon"
-                      alt=""
-                      loading="lazy"
-                      decoding="async"
-                    />
-                    <div class="reply-main">
-                      <div class="reply-head">
-                        <span class="comment-pseudonym">{{ r.pseudonym }}</span>
-                        <span class="reply-to">
-                          {{ t('回复', 'reply to') }}
-                          {{ r.reply_to_name || t('该评论', 'this comment') }}
-                        </span>
-                      </div>
-                      <p class="comment-text">{{ r.content }}</p>
-                      <div class="comment-footer">
-                        <span class="comment-time">{{ formatTime(r.created_at) }}</span>
-                        <el-button
-                          text
-                          size="small"
-                          :class="{ 'is-liked': r.liked }"
-                          @click="handleLikeComment(r)"
-                        >
-                          <el-icon><Sunny /></el-icon> {{ r.likes }}
-                        </el-button>
-                        <el-button text size="small" @click="startReply(c, r)">
-                          {{ t('回复', 'Reply') }}
-                        </el-button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    v-if="c.replies.length > REPLY_PREVIEW"
-                    type="button"
-                    class="reply-toggle"
-                    @click.stop="toggleReplies(c)"
-                  >
-                    {{ isExpanded(c.id)
-                      ? t('收起回复', 'Collapse replies')
-                      : `${t('展开其余', 'Show')} ${c.replies.length - REPLY_PREVIEW} ${t('条回复', 'more replies')}` }}
-                  </button>
                 </div>
               </div>
               <div v-if="!commentsLoading && comments.length === 0" class="no-comments">
@@ -522,47 +467,7 @@ const commentTotal = ref(0)
 const newComment = ref('')
 const commentSubmitting = ref(false)
 
-// 评论最多嵌套一层；顶层评论下的回复默认只展示 3 条，其余折叠可展开
-const REPLY_PREVIEW = 3
-const expandedReplyIds = ref([])
-const replyTarget = ref(null) // { topId, replyToId, label }
-
-const replyPlaceholder = computed(() => {
-  if (replyTarget.value) {
-    return `${t('回复', 'Reply to')} ${replyTarget.value.label}：${t('写下你的评论...', 'Write a comment...')}`
-  }
-  return t('写下你的评论...', 'Write a comment...')
-})
-
-function isExpanded(id) {
-  return expandedReplyIds.value.includes(id)
-}
-
-function toggleReplies(c) {
-  if (isExpanded(c.id)) {
-    expandedReplyIds.value = expandedReplyIds.value.filter(x => x !== c.id)
-  } else {
-    expandedReplyIds.value = [...expandedReplyIds.value, c.id]
-  }
-}
-
-function visibleReplies(c) {
-  if (!c.replies) return []
-  return isExpanded(c.id) ? c.replies : c.replies.slice(0, REPLY_PREVIEW)
-}
-
-// 回复顶层评论 -> 显示「回复该评论」；回复子评论 -> 显示「回复 <那个人>」
-function startReply(top, reply) {
-  replyTarget.value = {
-    topId: top.id,
-    replyToId: reply ? reply.id : top.id,
-    label: reply ? reply.pseudonym : t('该评论', 'this comment'),
-  }
-}
-
-function cancelReply() {
-  replyTarget.value = null
-}
+// 评论为扁平结构：只评论人物卡，不支持对评论的回复
 
 // 发布状态
 const showPublishDialog = ref(false)
@@ -721,23 +626,15 @@ async function loadComments() {
 
 async function submitComment() {
   if (!newComment.value.trim() || !detailData.value) return
-  const target = replyTarget.value
   commentSubmitting.value = true
   try {
     const res = await marketplaceApi.addComment(
       detailData.value.id,
-      newComment.value.trim(),
-      target ? target.topId : null,
-      target ? target.replyToId : null
+      newComment.value.trim()
     )
     if (res.code === 200) {
-      ElMessage.success(target ? t('回复已发表', 'Reply posted') : t('评论已发表', 'Comment posted'))
+      ElMessage.success(t('评论已发表', 'Comment posted'))
       newComment.value = ''
-      // 新回复发布后自动展开该条评论，避免回复被折叠看不到
-      if (target && !isExpanded(target.topId)) {
-        expandedReplyIds.value = [...expandedReplyIds.value, target.topId]
-      }
-      replyTarget.value = null
       loadComments()
     }
   } catch (e) {
@@ -1312,7 +1209,6 @@ function formatDate(ts) {
 }
 
 .comment-input {
-  position: relative;
   display: flex;
   gap: 8px;
   align-items: flex-start;
@@ -1390,72 +1286,6 @@ function formatDate(ts) {
 .comment-footer :deep(.el-button) {
   padding: 0;
   height: auto;
-}
-
-.reply-hint {
-  position: absolute;
-  top: -22px;
-  left: 0;
-  right: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-  color: var(--text-muted, #8a6a48);
-}
-
-.reply-list {
-  margin-top: 8px;
-  padding-left: 10px;
-  border-left: 2px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.reply-item {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-}
-
-.reply-identicon {
-  width: 20px;
-  height: 20px;
-  flex: none;
-  margin-top: 2px;
-}
-
-.reply-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.reply-head {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-bottom: 2px;
-}
-
-.reply-to {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.reply-toggle {
-  align-self: flex-start;
-  background: none;
-  border: none;
-  padding: 2px 0;
-  font-size: 12px;
-  color: var(--brand, #b06a2e);
-  cursor: pointer;
-}
-
-.reply-toggle:hover {
-  text-decoration: underline;
 }
 
 .no-comments {

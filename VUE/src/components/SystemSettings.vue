@@ -235,35 +235,10 @@
             <div class="section-title">{{ t('常用 API 文档', 'API Documentation') }}</div>
             <p class="section-desc">{{ t('配置模型厂商时，可参考以下官方 API 文档。', 'Refer to the official API docs when configuring providers.') }}</p>
             <div class="help-links">
-              <div class="help-group">
-                <div class="help-group-title">{{ t('对话模型', 'Chat Models') }}</div>
+              <div v-for="g in HELP_DOC_GROUPS" :key="g.key" class="help-group">
+                <div class="help-group-title">{{ t(g.title, g.titleEn) }}</div>
                 <div class="help-links-row">
-                  <a href="https://platform.deepseek.com/api_docs" target="_blank" rel="noopener">DeepSeek</a>
-                  <a href="https://platform.openai.com/docs" target="_blank" rel="noopener">OpenAI</a>
-                  <a href="https://open.bigmodel.cn/dev/api" target="_blank" rel="noopener">智谱 GLM</a>
-                  <a href="https://platform.moonshot.cn/docs" target="_blank" rel="noopener">Kimi</a>
-                  <a href="https://api.minimax.chat/" target="_blank" rel="noopener">MiniMax</a>
-                </div>
-              </div>
-              <div class="help-group">
-                <div class="help-group-title">{{ t('语音转文字', 'Speech-to-Text') }}</div>
-                <div class="help-links-row">
-                  <a href="https://platform.openai.com/docs/guides/speech-to-text" target="_blank" rel="noopener">OpenAI Whisper</a>
-                  <a href="https://help.aliyun.com/zh/dashscope/" target="_blank" rel="noopener">通义听悟</a>
-                </div>
-              </div>
-              <div class="help-group">
-                <div class="help-group-title">{{ t('文字转语音', 'Text-to-Speech') }}</div>
-                <div class="help-links-row">
-                  <a href="https://elevenlabs.io/docs" target="_blank" rel="noopener">ElevenLabs</a>
-                  <a href="https://platform.openai.com/docs/guides/text-to-speech" target="_blank" rel="noopener">OpenAI TTS</a>
-                </div>
-              </div>
-              <div class="help-group">
-                <div class="help-group-title">{{ t('图片生成', 'Image Generation') }}</div>
-                <div class="help-links-row">
-                  <a href="https://apihub.agnes-ai.cn/docs" target="_blank" rel="noopener">Agnes Image</a>
-                  <a href="https://platform.openai.com/docs/guides/images" target="_blank" rel="noopener">DALL·E</a>
+                  <a v-for="l in g.links" :key="l.url + l.name" :href="l.url" target="_blank" rel="noopener">{{ l.name }}</a>
                 </div>
               </div>
             </div>
@@ -376,10 +351,13 @@ import { settingsApi, uploadApi, authApi, marketplaceApi, feedbackApi } from '..
 import { setLocale } from '../i18n'
 import { t } from '../i18n'
 import { applyTheme } from '../utils/theme'
+import { HELP_DOC_GROUPS } from '../utils/helpDocs'
 
 const props = defineProps({
   modelValue: Boolean,
   user: Object,
+  // 打开时定位的标签页（如从模型配置帮助引导跳转到 feedback）
+  initialTab: { type: String, default: 'general' },
 })
 
 const emit = defineEmits(['update:modelValue', 'settings-updated', 'user-updated', 'logout'])
@@ -390,6 +368,15 @@ const visible = computed({
 })
 
 const activeTab = ref('general')
+
+// 外部指定 initialTab 时（如模型配置的帮助引导），打开面板自动切换过去
+watch(
+  () => [props.modelValue, props.initialTab],
+  ([open, tab]) => {
+    if (open && tab) activeTab.value = tab
+  },
+  { immediate: true }
+)
 const saving = ref(false)
 let _loadingSettings = false
 let _saveTimer = null

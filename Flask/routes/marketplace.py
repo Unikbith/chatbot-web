@@ -6,10 +6,10 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
 from models import (
     PersonaMarketplace, MarketplaceVote, MarketplaceComment,
-    CommentLike, DailyCheckIn, ImageUsage, User, Conversation,
+    CommentLike, DailyCheckIn, ImageUsage, User,
     MarketplaceAdopt, local_now,
 )
-from sqlalchemy import or_ as _or, func  # noqa: F401  (公开接口筛选使用)
+from sqlalchemy import func
 
 marketplace_bp = Blueprint('marketplace', __name__, url_prefix='/api/marketplace')
 
@@ -251,28 +251,15 @@ def list_comments_public(pid):
     if not persona:
         return jsonify({'code': 404, 'message': '人设不存在'}), 404
 
-    query = MarketplaceComment.query.filter_by(persona_id=pid, parent_id=None)
+    query = MarketplaceComment.query.filter_by(persona_id=pid)
     if sort == 'new':
         query = query.order_by(MarketplaceComment.created_at.desc())
     else:
         query = query.order_by(MarketplaceComment.likes.desc(), MarketplaceComment.created_at.desc())
 
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-    tops = list(pagination.items)
 
-    children = []
-    if tops:
-        children = MarketplaceComment.query.filter(
-            MarketplaceComment.parent_id.in_([c.id for c in tops])
-        ).order_by(MarketplaceComment.created_at.asc()).all()
-
-    by_id = {c.id: c for c in tops + list(children)}
-
-    def _pack(c, with_replies=True):
-        target = by_id.get(c.reply_to_id) if c.reply_to_id else None
-        replies = []
-        if with_replies:
-            replies = [_pack(ch, with_replies=False) for ch in children if ch.parent_id == c.id]
+    def _pack(c):
         return {
             'id': c.id,
             'content': c.content,
@@ -280,14 +267,9 @@ def list_comments_public(pid):
             'pseudonym': _pseudonym_for(c.user_id, pid),
             'identicon_seed': _identicon_seed_for(c.user_id, pid),
             'created_at': c.created_at.isoformat() if c.created_at else None,
-            'parent_id': c.parent_id,
-            'reply_to_id': c.reply_to_id,
-            'reply_to_name': _pseudonym_for(target.user_id, pid) if target else None,
-            'reply_count': len(replies),
-            'replies': replies,
         }
 
-    items = [_pack(c) for c in tops]
+    items = [_pack(c) for c in pagination.items]
     return jsonify({
         'code': 200,
         'data': {'items': items, 'total': pagination.total, 'page': page}
@@ -641,50 +623,33 @@ def list_comments(pid):
 
     user_id = int(get_jwt_identity())
 
-    # 只取顶层评论（parent_id 为空），子回复一次性批量取出后挂载，避免 N+1 查询
-    query = MarketplaceComment.query.filter_by(persona_id=pid, parent_id=None)
+    query = MarketplaceComment.query.filter_by(persona_id=pid)
     if sort == 'new':
         query = query.order_by(MarketplaceComment.created_at.desc())
     else:
         query = query.order_by(MarketplaceComment.likes.desc(), MarketplaceComment.created_at.desc())
 
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-    tops = list(pagination.items)
+    rows = list(pagination.items)
 
-    children = []
-    if tops:
-        children = MarketplaceComment.query.filter(
-            MarketplaceComment.parent_id.in_([c.id for c in tops])
-        ).order_by(MarketplaceComment.created_at.asc()).all()
-
-    by_id = {c.id: c for c in tops + list(children)}
-
-    # 当前用户已点赞的评论（顶层 + 子回复）
+    # 当前用户已点赞的评论
     liked_ids = set()
-    if by_id:
+    if rows:
         liked_ids = {
             r[0] for r in db.session.query(CommentLike.comment_id).filter(
                 CommentLike.user_id == user_id,
-                CommentLike.comment_id.in_(list(by_id.keys())),
+                CommentLike.comment_id.in_([c.id for c in rows]),
             ).all()
         }
 
-    def _pack(c, with_replies=True):
-        """打包评论；reply_to_name 为「被回复者」的化名（用于显示 回复 某某）"""
-        target = by_id.get(c.reply_to_id) if c.reply_to_id else None
-        replies = []
-        if with_replies:
-            replies = [_pack(ch, with_replies=False) for ch in children if ch.parent_id == c.id]
+    def _pack(c):
         return c.to_dict(
             pseudonym=_pseudonym_for(c.user_id, pid),
             identicon_seed=_identicon_seed_for(c.user_id, pid),
             liked=c.id in liked_ids,
-            reply_to_name=_pseudonym_for(target.user_id, pid) if target else None,
-            replies=replies,
-            reply_count=len(replies),
         )
 
-    items = [_pack(c) for c in tops]
+    items = [_pack(c) for c in rows]
     return jsonify({
         'code': 200,
         'data': {'items': items, 'total': pagination.total, 'page': page}
@@ -695,6 +660,7 @@ def list_comments(pid):
 @marketplace_bp.route('/<int:pid>/comments', methods=['POST'])
 @jwt_required()
 def add_comment(pid):
+    """对人物卡发表评论（扁平，不支持回复评论）。"""
     user_id = int(get_jwt_identity())
     persona = PersonaMarketplace.query.get(pid)
     if not persona:
@@ -707,33 +673,10 @@ def add_comment(pid):
     if len(content) > 500:
         return jsonify({'code': 400, 'message': '评论最多500字'}), 400
 
-    # 最多只嵌套一层：无论回复的是顶层评论还是其子回复，parent 一律挂到顶层评论上，
-    # reply_to 保留真正被回复的那条（用于展示「回复 某某」）
-    parent = None
-    raw_parent_id = data.get('parent_id')
-    if raw_parent_id:
-        parent = MarketplaceComment.query.get(int(raw_parent_id))
-        if not parent or parent.persona_id != pid:
-            return jsonify({'code': 400, 'message': '被回复的评论不存在'}), 400
-
-    top_id = (parent.parent_id or parent.id) if parent else None
-
-    target = None
-    raw_reply_to = data.get('reply_to_id')
-    if raw_reply_to:
-        t = MarketplaceComment.query.get(int(raw_reply_to))
-        # 目标评论必须和 parent 属于同一颗评论树
-        if t and (t.parent_id or t.id) == top_id:
-            target = t
-    if parent and target is None:
-        target = parent
-
     comment = MarketplaceComment(
         persona_id=pid,
         user_id=user_id,
         content=content,
-        parent_id=top_id,
-        reply_to_id=target.id if target and target.id != top_id else None,
     )
     db.session.add(comment)
     db.session.commit()
@@ -744,9 +687,6 @@ def add_comment(pid):
             pseudonym=_pseudonym_for(user_id, pid),
             identicon_seed=_identicon_seed_for(user_id, pid),
             liked=False,
-            # 与列表接口保持一致：只有真正指向某条子评论时才带「回复 某某」
-            reply_to_name=_pseudonym_for(target.user_id, pid)
-            if (comment.reply_to_id and target) else None,
         )
     })
 

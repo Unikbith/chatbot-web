@@ -227,14 +227,6 @@ def _ensure_schema_columns(app):
                     with db.engine.begin() as conn:
                         conn.execute(text('ALTER TABLE persona_marketplace ADD COLUMN gender VARCHAR(20)'))
                     print('[迁移] 已为 persona_marketplace 增加 gender 字段')
-            # marketplace_comments.parent_id / reply_to_id - 评论一层嵌套回复
-            if 'marketplace_comments' in inspector.get_table_names():
-                cols = {c['name'] for c in inspector.get_columns('marketplace_comments')}
-                for cname in ('parent_id', 'reply_to_id'):
-                    if cname not in cols:
-                        with db.engine.begin() as conn:
-                            conn.execute(text(f'ALTER TABLE marketplace_comments ADD COLUMN {cname} INTEGER'))
-                        print(f'[迁移] 已为 marketplace_comments 增加 {cname} 字段')
             # image_usage.is_remaining_semantics - 免费生图次数语义迁移标记
             if 'image_usage' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('image_usage')}
