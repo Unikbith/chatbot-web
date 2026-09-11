@@ -240,6 +240,60 @@ def get_marketplace_persona_public(pid):
     return jsonify({'code': 200, 'data': d})
 
 
+@marketplace_bp.route('/public/<int:pid>/comments', methods=['GET'])
+def list_comments_public(pid):
+    """未登录用户查看卡片评论：只读，不暴露点赞状态，使用假名。"""
+    sort = request.args.get('sort', 'hot')  # hot / new
+    page = int(request.args.get('page', 1))
+    per_page = min(int(request.args.get('per_page', 30)), 100)
+
+    persona = PersonaMarketplace.query.get(pid)
+    if not persona:
+        return jsonify({'code': 404, 'message': '人设不存在'}), 404
+
+    query = MarketplaceComment.query.filter_by(persona_id=pid, parent_id=None)
+    if sort == 'new':
+        query = query.order_by(MarketplaceComment.created_at.desc())
+    else:
+        query = query.order_by(MarketplaceComment.likes.desc(), MarketplaceComment.created_at.desc())
+
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    tops = list(pagination.items)
+
+    children = []
+    if tops:
+        children = MarketplaceComment.query.filter(
+            MarketplaceComment.parent_id.in_([c.id for c in tops])
+        ).order_by(MarketplaceComment.created_at.asc()).all()
+
+    by_id = {c.id: c for c in tops + list(children)}
+
+    def _pack(c, with_replies=True):
+        target = by_id.get(c.reply_to_id) if c.reply_to_id else None
+        replies = []
+        if with_replies:
+            replies = [_pack(ch, with_replies=False) for ch in children if ch.parent_id == c.id]
+        return {
+            'id': c.id,
+            'content': c.content,
+            'likes': c.likes,
+            'pseudonym': _pseudonym_for(c.user_id, pid),
+            'identicon_seed': _identicon_seed_for(c.user_id, pid),
+            'created_at': c.created_at.isoformat() if c.created_at else None,
+            'parent_id': c.parent_id,
+            'reply_to_id': c.reply_to_id,
+            'reply_to_name': _pseudonym_for(target.user_id, pid) if target else None,
+            'reply_count': len(replies),
+            'replies': replies,
+        }
+
+    items = [_pack(c) for c in tops]
+    return jsonify({
+        'code': 200,
+        'data': {'items': items, 'total': pagination.total, 'page': page}
+    })
+
+
 def _apply_marketplace_sort(query, sort):
     """按 sort 取值给 query 套 order_by。
 
@@ -511,11 +565,16 @@ def adopt_persona(pid):
     existing_adopt = MarketplaceAdopt.query.filter_by(persona_id=pid, user_id=user_id).first()
     if existing_adopt:
         # adopt 记录存在但对应人物卡已被删除 → 清理失效记录，允许重新添加
-        if PersonaTemplate.query.get(existing_adopt.template_id) is None:
+        existing_tp = PersonaTemplate.query.get(existing_adopt.template_id)
+        if existing_tp is None:
             db.session.delete(existing_adopt)
             db.session.commit()
         else:
-            return jsonify({'code': 200, 'message': '已添加过该卡片', 'data': {'already': True}})
+            return jsonify({
+                'code': 200,
+                'message': '已添加过该卡片',
+                'data': {'already': True, 'template_id': existing_tp.id}
+            })
 
     # 人物卡（AI 人设）数量上限
     ai_count = PersonaTemplate.query.filter_by(user_id=user_id, persona_type='ai').count()
@@ -727,11 +786,11 @@ def like_comment(cid):
 @marketplace_bp.route('/checkin', methods=['POST'])
 @jwt_required()
 def daily_checkin():
-    """每日签到：冷却 24h；签到后向 ImageUsage.free_count 累加 +5，
+    """每日签到：冷却 24h；签到后向 ImageUsage.free_count 增加 5 次剩余免费生图次数，
     但累加后不得超过 IMAGE_FREE_LIMIT（与图片生成共享同一免费额度上限）。
 
-    设计：签到奖励是「免费生图次数」的补充来源，必须与生成共享同一上限。
-    若用户在签到前 free_count 已等于上限：本次签到奖励 +5 会被回退，提示额度已满。
+    设计：签到奖励直接增加「剩余免费生图次数」。新用户首次签到前已拥有完整额度，
+    若剩余次数已达上限则本次签到不发放奖励（避免越权累计）。
     """
     from flask import current_app
 
@@ -746,29 +805,30 @@ def daily_checkin():
         return jsonify({'code': 400, 'message': f'签到冷却中，还需等待{hours}小时{minutes}分钟'}), 400
 
     # 与图片生成共享同一 IMAGE_FREE_LIMIT 上限
-    free_limit = int(current_app.config.get('IMAGE_FREE_LIMIT') or 10)
+    free_limit = int(current_app.config.get('IMAGE_FREE_LIMIT') or 5)
 
     usage = ImageUsage.query.filter_by(user_id=user_id).first()
     if not usage:
-        usage = ImageUsage(user_id=user_id, free_count=0)
+        # 新用户首次签到前已拥有完整免费额度
+        usage = ImageUsage(user_id=user_id, free_count=free_limit, is_remaining_semantics=True)
         db.session.add(usage)
 
-    bonus = 5
-    # 累加后不超过上限：超出部分按实际上限裁剪；若已无余额则本次签到不发放奖励
-    new_count = (usage.free_count or 0) + bonus
-    if usage.free_count >= free_limit:
-        # 已达上限：拒绝签到，避免越权累计导致无效额度
+    current_remaining = usage.free_count or 0
+    if current_remaining >= free_limit:
+        # 已达上限：不发放奖励
         return jsonify({
             'code': 400,
             'message': f'免费生图额度已达上限（{free_limit}），签到奖励无法累加',
             'data': {'bonus': 0, 'free_images': usage.free_count, 'free_limit': free_limit},
         }), 400
 
-    if new_count > free_limit:
-        bonus = free_limit - usage.free_count  # 仅发放剩余空间
-        new_count = free_limit
+    bonus = 5
+    new_remaining = current_remaining + bonus
+    if new_remaining > free_limit:
+        bonus = free_limit - current_remaining  # 仅发放剩余空间
+        new_remaining = free_limit
 
-    usage.free_count = new_count
+    usage.free_count = new_remaining
 
     checkin = DailyCheckIn(user_id=user_id, checkin_time=now, bonus_images=bonus)
     db.session.add(checkin)
@@ -790,7 +850,7 @@ def checkin_status():
     from flask import current_app
     user_id = int(get_jwt_identity())
     now = local_now()
-    free_limit = int(current_app.config.get('IMAGE_FREE_LIMIT') or 10)
+    free_limit = int(current_app.config.get('IMAGE_FREE_LIMIT') or 5)
 
     last = DailyCheckIn.query.filter_by(user_id=user_id).order_by(DailyCheckIn.checkin_time.desc()).first()
     can_checkin = True
@@ -802,12 +862,14 @@ def checkin_status():
             next_checkin = (last.checkin_time + timedelta(seconds=86400)).isoformat()
 
     usage = ImageUsage.query.filter_by(user_id=user_id).first()
+    # free_count 语义为「剩余次数」；未创建记录时视为拥有完整额度
+    free_images = usage.free_count if usage else free_limit
     return jsonify({
         'code': 200,
         'data': {
             'can_checkin': can_checkin,
             'next_checkin': next_checkin,
-            'free_images': usage.free_count if usage else 0,
+            'free_images': free_images,
             'free_limit': free_limit,
         }
     })

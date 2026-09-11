@@ -16,7 +16,7 @@ from models import User, ModelProvider, PersonaTemplate, UserSettings
 from routes import (
     auth_bp, chat_bp, audio_bp, provider_bp,
     conversation_bp, settings_bp, persona_bp, upload_bp,
-    admin_bp, image_bp, marketplace_bp,
+    admin_bp, image_bp, marketplace_bp, feedback_bp,
 )
 
 
@@ -58,6 +58,7 @@ def create_app(config_name=None):
     app.register_blueprint(admin_bp)
     app.register_blueprint(image_bp)
     app.register_blueprint(marketplace_bp)
+    app.register_blueprint(feedback_bp)
 
     # 健康检查
     @app.route('/api/health')
@@ -217,6 +218,8 @@ def _ensure_schema_columns(app):
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE daily_checkins ADD COLUMN checkin_time DATETIME"))
                     print('[迁移] 已为 daily_checkins 增加 checkin_time 字段')
+                # 历史遗留：checkin_date 字段仍存在但模型已不依赖；保留原列，
+                # 由模型 default 自动填充，避免破坏旧表结构。
             # persona_marketplace.gender - 人物卡性别（男/女/自定义，非男非女筛选归入非二元）
             if 'persona_marketplace' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('persona_marketplace')}
@@ -232,6 +235,13 @@ def _ensure_schema_columns(app):
                         with db.engine.begin() as conn:
                             conn.execute(text(f'ALTER TABLE marketplace_comments ADD COLUMN {cname} INTEGER'))
                         print(f'[迁移] 已为 marketplace_comments 增加 {cname} 字段')
+            # image_usage.is_remaining_semantics - 免费生图次数语义迁移标记
+            if 'image_usage' in inspector.get_table_names():
+                cols = {c['name'] for c in inspector.get_columns('image_usage')}
+                if 'is_remaining_semantics' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE image_usage ADD COLUMN is_remaining_semantics BOOLEAN DEFAULT 0"))
+                    print('[迁移] 已为 image_usage 增加 is_remaining_semantics 字段')
             # persona_templates.persona_type - AI/用户人设区分
             if 'persona_templates' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('persona_templates')}
@@ -250,6 +260,23 @@ def _ensure_schema_columns(app):
 
 def _init_default_data(app):
     """初始化默认数据"""
+    # 一次性迁移：image_usage.free_count 从「已用次数」转为「剩余次数」语义
+    try:
+        from models import ImageUsage
+        limit = int(app.config.get('IMAGE_FREE_LIMIT') or 5)
+        rows = ImageUsage.query.filter_by(is_remaining_semantics=False).all()
+        if rows:
+            converted = 0
+            for row in rows:
+                used = row.free_count or 0
+                row.free_count = max(0, min(limit - used, limit))
+                row.is_remaining_semantics = True
+                converted += 1
+            db.session.commit()
+            print(f'[迁移] 已转换 {converted} 条 image_usage 记录为剩余次数语义')
+    except Exception as e:
+        print(f'[迁移] image_usage 语义转换跳过: {e}')
+
     # 默认 admin 仅开发环境创建，且不打印明文密码
     is_dev = app.config.get('DEBUG') or os.getenv('FLASK_ENV', 'development') == 'development'
     if User.query.count() == 0 and is_dev:

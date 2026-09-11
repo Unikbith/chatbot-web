@@ -53,7 +53,7 @@ class _FreeImageProvider:
 
 
 def _free_limit():
-    return int(current_app.config.get('IMAGE_FREE_LIMIT') or 10)
+    return int(current_app.config.get('IMAGE_FREE_LIMIT') or 5)
 
 
 def _usage_row(user_id):
@@ -61,17 +61,26 @@ def _usage_row(user_id):
 
 
 def _free_remaining(user_id):
+    """返回剩余免费生图次数。free_count 为剩余次数语义。"""
     row = _usage_row(user_id)
-    return max(_free_limit() - (row.free_count if row else 0), 0)
+    return max(row.free_count if row else _free_limit(), 0)
+
+
+def _ensure_usage_row(user_id):
+    """获取或初始化 ImageUsage 行；新用户默认拥有完整免费额度。"""
+    row = _usage_row(user_id)
+    if not row:
+        row = ImageUsage(user_id=user_id, free_count=_free_limit(), is_remaining_semantics=True)
+        db.session.add(row)
+        db.session.commit()
+    return row
 
 
 def _increment_free_usage(user_id):
-    row = _usage_row(user_id)
-    if row:
-        row.free_count += 1
-        row.updated_at = local_now()
-    else:
-        db.session.add(ImageUsage(user_id=user_id, free_count=1))
+    """消耗一次免费额度：剩余次数 -1。"""
+    row = _ensure_usage_row(user_id)
+    row.free_count = max(0, (row.free_count or 0) - 1)
+    row.updated_at = local_now()
     db.session.commit()
 
 
@@ -98,16 +107,15 @@ def generate():
         else:
             return jsonify({'code': 400, 'message': '请先在「模型配置-图片生成」中添加图片生成配置'}), 400
 
-    # 免费额度校验：超限则拦截
+    # 免费额度校验：剩余次数为 0 则拦截
     if is_free:
         limit = _free_limit()
-        row = _usage_row(user_id)
-        used = row.free_count if row else 0
-        if used >= limit:
+        remaining = _free_remaining(user_id)
+        if remaining <= 0:
             return jsonify({
                 'code': 403,
-                'message': f'免费图片生成已达上限（{used}/{limit}），请前往「模型配置-图片生成」配置你自己的 API Key。',
-                'data': {'free': True, 'used': used, 'limit': limit, 'remaining': 0},
+                'message': f'免费图片生成已达上限（{limit}/{limit}），请前往「模型配置-图片生成」配置你自己的 API Key。',
+                'data': {'free': True, 'used': limit, 'limit': limit, 'remaining': 0},
             }), 403
 
     model = (data.get('model') or '').strip() or (provider.model if is_free else None)
@@ -138,10 +146,10 @@ def generate():
     if err:
         return jsonify({'code': 500, 'message': f'生成失败: {err}'}), 500
 
-    used, limit = None, None
+    remaining, limit = None, None
     if is_free:
         _increment_free_usage(user_id)
-        used = _usage_row(user_id).free_count
+        remaining = _free_remaining(user_id)
         limit = _free_limit()
 
     payload = {
@@ -152,8 +160,8 @@ def generate():
     }
     if is_free:
         payload['free'] = True
-        payload['used'] = used
+        payload['used'] = limit - remaining
         payload['limit'] = limit
-        payload['remaining'] = max(limit - used, 0)
+        payload['remaining'] = remaining
 
     return jsonify({'code': 200, 'message': '生成成功', 'data': payload})

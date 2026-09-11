@@ -228,6 +228,82 @@
             <p class="danger-tip">{{ t('注销后所有数据将被永久删除，无法恢复', 'All data will be permanently deleted.') }}</p>
           </div>
         </el-tab-pane>
+
+        <!-- 帮助和反馈 -->
+        <el-tab-pane :label="t('帮助和反馈', 'Help & Feedback')" name="feedback">
+          <div class="settings-section">
+            <div class="section-title">{{ t('常用 API 文档', 'API Documentation') }}</div>
+            <p class="section-desc">{{ t('配置模型厂商时，可参考以下官方 API 文档。', 'Refer to the official API docs when configuring providers.') }}</p>
+            <div class="help-links">
+              <div class="help-group">
+                <div class="help-group-title">{{ t('对话模型', 'Chat Models') }}</div>
+                <div class="help-links-row">
+                  <a href="https://platform.deepseek.com/api_docs" target="_blank" rel="noopener">DeepSeek</a>
+                  <a href="https://platform.openai.com/docs" target="_blank" rel="noopener">OpenAI</a>
+                  <a href="https://open.bigmodel.cn/dev/api" target="_blank" rel="noopener">智谱 GLM</a>
+                  <a href="https://platform.moonshot.cn/docs" target="_blank" rel="noopener">Kimi</a>
+                  <a href="https://api.minimax.chat/" target="_blank" rel="noopener">MiniMax</a>
+                </div>
+              </div>
+              <div class="help-group">
+                <div class="help-group-title">{{ t('语音转文字', 'Speech-to-Text') }}</div>
+                <div class="help-links-row">
+                  <a href="https://platform.openai.com/docs/guides/speech-to-text" target="_blank" rel="noopener">OpenAI Whisper</a>
+                  <a href="https://help.aliyun.com/zh/dashscope/" target="_blank" rel="noopener">通义听悟</a>
+                </div>
+              </div>
+              <div class="help-group">
+                <div class="help-group-title">{{ t('文字转语音', 'Text-to-Speech') }}</div>
+                <div class="help-links-row">
+                  <a href="https://elevenlabs.io/docs" target="_blank" rel="noopener">ElevenLabs</a>
+                  <a href="https://platform.openai.com/docs/guides/text-to-speech" target="_blank" rel="noopener">OpenAI TTS</a>
+                </div>
+              </div>
+              <div class="help-group">
+                <div class="help-group-title">{{ t('图片生成', 'Image Generation') }}</div>
+                <div class="help-links-row">
+                  <a href="https://apihub.agnes-ai.cn/docs" target="_blank" rel="noopener">Agnes Image</a>
+                  <a href="https://platform.openai.com/docs/guides/images" target="_blank" rel="noopener">DALL·E</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="section-title">{{ t('意见反馈', 'Feedback') }}</div>
+            <p class="section-desc">{{ t('遇到问题或有新想法？欢迎告诉我们。', 'Have an issue or idea? Let us know.') }}</p>
+            <el-form :model="feedbackForm" label-position="top" class="feedback-form">
+              <el-form-item :label="t('反馈内容', 'Your feedback')" required>
+                <el-input
+                  v-model="feedbackForm.content"
+                  type="textarea"
+                  :rows="4"
+                  :maxlength="2000"
+                  show-word-limit
+                  :placeholder="t('请简述具体内容…', 'Please describe the details…')"
+                  resize="none"
+                />
+              </el-form-item>
+              <el-form-item>
+                <el-checkbox v-model="feedbackForm.allow_email_contact">
+                  {{ t('我愿意以邮件形式接收回复', 'I agree to be contacted by email') }}
+                </el-checkbox>
+              </el-form-item>
+              <el-form-item v-if="feedbackForm.allow_email_contact" :label="t('联系邮箱', 'Contact email')">
+                <el-input
+                  v-model="feedbackForm.contact_email"
+                  :placeholder="t('请输入可联系的邮箱地址', 'Enter your contact email')"
+                  maxlength="120"
+                />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" :loading="feedbackSubmitting" @click="submitFeedback">
+                  {{ t('提交反馈', 'Submit Feedback') }}
+                </el-button>
+              </el-form-item>
+            </el-form>
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </div>
 
@@ -296,7 +372,7 @@
 import { ref, reactive, computed, watch, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { User, MagicStick, QuestionFilled, CircleCheck } from '@element-plus/icons-vue'
-import { settingsApi, uploadApi, authApi, marketplaceApi } from '../utils/resAi'
+import { settingsApi, uploadApi, authApi, marketplaceApi, feedbackApi } from '../utils/resAi'
 import { setLocale } from '../i18n'
 import { t } from '../i18n'
 import { applyTheme } from '../utils/theme'
@@ -370,6 +446,14 @@ const deleteForm = reactive({ password: '' })
 
 const localGender = ref(props.user?.gender || '神秘')
 
+// 反馈表单
+const feedbackForm = reactive({
+  content: '',
+  allow_email_contact: false,
+  contact_email: '',
+})
+const feedbackSubmitting = ref(false)
+
 watch(() => props.user, (u) => {
   if (u?.gender) localGender.value = u.gender
 })
@@ -408,10 +492,15 @@ async function handleCheckin() {
   try {
     const res = await marketplaceApi.checkin()
     if (res.code === 200) {
+      const bonus = res.data?.bonus ?? 5
       checkinStatus.can_checkin = false
       checkinStatus.next_checkin = res.data?.next_checkin || checkinStatus.next_checkin
       checkinStatus.free_images = res.data?.free_images ?? checkinStatus.free_images
-      ElMessage.success(t('签到成功！+5 免费生图次数', 'Checked in! +5 free image generations'))
+      ElMessage.success(
+        bonus === 5
+          ? t('签到成功！+5 免费生图次数', 'Checked in! +5 free image generations')
+          : t(`签到成功！+${bonus} 免费生图次数`, `Checked in! +${bonus} free image generations`)
+      )
     }
   } catch (e) {
     ElMessage.error(e.response?.data?.message || t('签到失败', 'Check-in failed'))
@@ -564,6 +653,37 @@ async function handleAiAvatarUpload(file) {
     ElMessage.error(t('上传失败', 'Upload failed'))
   }
   return false
+}
+
+async function submitFeedback() {
+  if (!feedbackForm.content.trim()) {
+    ElMessage.warning(t('请填写反馈内容', 'Please enter your feedback'))
+    return
+  }
+  if (feedbackForm.allow_email_contact && !feedbackForm.contact_email.trim()) {
+    ElMessage.warning(t('请填写联系邮箱', 'Please enter your contact email'))
+    return
+  }
+  feedbackSubmitting.value = true
+  try {
+    const res = await feedbackApi.submit({
+      content: feedbackForm.content.trim(),
+      allow_email_contact: feedbackForm.allow_email_contact,
+      contact_email: feedbackForm.allow_email_contact ? feedbackForm.contact_email.trim() : '',
+    })
+    if (res.code === 200) {
+      ElMessage.success(t('反馈已提交，感谢你的建议', 'Feedback submitted. Thank you!'))
+      feedbackForm.content = ''
+      feedbackForm.allow_email_contact = false
+      feedbackForm.contact_email = ''
+    } else {
+      ElMessage.error(res.message || t('提交失败', 'Submit failed'))
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || t('提交失败', 'Submit failed'))
+  } finally {
+    feedbackSubmitting.value = false
+  }
 }
 
 // 修改密码（需邮箱验证码）
@@ -876,5 +996,48 @@ async function confirmDelete() {
   min-height: 0;
   flex: 1;
   overflow: hidden;
+}
+
+/* 帮助与反馈 */
+.help-links {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.help-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.help-links-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.help-links-row a {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border-color);
+  color: var(--brand);
+  font-size: 13px;
+  text-decoration: none;
+  transition: all 0.15s;
+}
+
+.help-links-row a:hover {
+  background: var(--brand);
+  color: #fff;
+  border-color: var(--brand);
+}
+
+.feedback-form {
+  margin-top: 8px;
 }
 </style>

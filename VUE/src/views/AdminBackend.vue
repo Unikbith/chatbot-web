@@ -238,6 +238,57 @@
           </el-table>
         </el-tab-pane>
 
+        <!-- 用户反馈 Tab -->
+        <el-tab-pane :label="t('用户反馈', 'Feedback')" name="feedback">
+          <div class="admin-toolbar">
+            <span class="admin-title">{{ t('用户反馈', 'User Feedback') }}</span>
+            <el-button size="small" :icon="Refresh" @click="loadFeedback">{{ t('刷新', 'Refresh') }}</el-button>
+          </div>
+
+          <el-table :data="feedbackList" v-loading="feedbackLoading" class="admin-table">
+            <el-table-column :label="t('反馈人', 'User')" min-width="140">
+              <template #default="{ row }">
+                <div class="feedback-user">
+                  <el-avatar :size="28" :src="row.user?.avatar">
+                    {{ row.user?.username?.charAt(0)?.toUpperCase() }}
+                  </el-avatar>
+                  <div class="feedback-user-meta">
+                    <span class="feedback-username">{{ row.user?.username }}</span>
+                    <span class="feedback-email">{{ row.user?.email }}</span>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('性别', 'Gender')" width="80" align="center">
+              <template #default="{ row }">{{ row.user?.gender || '-' }}</template>
+            </el-table-column>
+            <el-table-column prop="content" :label="t('反馈内容', 'Content')" min-width="240" show-overflow-tooltip />
+            <el-table-column :label="t('允许邮件联系', 'Allow Email')" width="120" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.allow_email_contact ? 'success' : 'info'" size="small" effect="plain">
+                  {{ row.allow_email_contact ? t('是', 'Yes') : t('否', 'No') }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="contact_email" :label="t('联系邮箱', 'Contact Email')" min-width="160" show-overflow-tooltip />
+            <el-table-column :label="t('提交时间', 'Submitted')" width="150">
+              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+            </el-table-column>
+          </el-table>
+
+          <div v-if="feedbackTotal > feedbackPageSize" class="lp-pagination">
+            <el-pagination
+              v-model:current-page="feedbackPage"
+              :page-size="feedbackPageSize"
+              :total="feedbackTotal"
+              layout="prev, pager, next"
+              small
+              background
+              @current-change="loadFeedback"
+            />
+          </div>
+        </el-tab-pane>
+
         <!-- 卡片广场 Tab -->
         <el-tab-pane :label="t('卡片广场', 'Card Marketplace')" name="marketplace">
           <div class="admin-toolbar">
@@ -492,6 +543,32 @@
           <div class="mp-detail-label">{{ t('人设提示词', 'System Prompt') }}</div>
           <div class="mp-detail-box mp-detail-prompt">{{ mpDetailData.system_prompt }}</div>
         </div>
+
+        <!-- 评论区：管理员可见真实用户名 -->
+        <div class="mp-detail-section mp-comments-section">
+          <div class="mp-detail-label">
+            {{ t('评论', 'Comments') }} ({{ (mpDetailData.comments || []).length }})
+          </div>
+          <div v-if="(mpDetailData.comments || []).length === 0" class="mp-no-comments">
+            {{ t('暂无评论', 'No comments yet') }}
+          </div>
+          <div v-else class="mp-comments-list">
+            <div v-for="c in mpDetailData.comments" :key="c.id" class="mp-comment">
+              <div class="mp-comment-head">
+                <span class="mp-comment-user">{{ c.username || t('未知用户', 'Unknown') }}</span>
+                <span class="mp-comment-time">{{ formatTime(c.created_at) }}</span>
+              </div>
+              <p class="mp-comment-text">{{ c.content }}</p>
+              <div v-if="c.replies && c.replies.length" class="mp-replies">
+                <div v-for="r in c.replies" :key="r.id" class="mp-reply">
+                  <span class="mp-reply-user">{{ r.username || t('未知用户', 'Unknown') }}</span>
+                  <span v-if="r.reply_to_name" class="mp-reply-to">{{ t('回复', 'reply to') }} {{ r.reply_to_name }}</span>
+                  <p class="mp-comment-text">{{ r.content }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </el-dialog>
   </div>
@@ -535,6 +612,13 @@ const mpFilters = ref({
   genders: [], // 人物卡性别：男 / 女 / 非二元
   creatorGender: '', // 创建者（用户）性别：男 / 女 / 神秘
 })
+
+// 用户反馈
+const feedbackList = ref([])
+const feedbackLoading = ref(false)
+const feedbackPage = ref(1)
+const feedbackPageSize = ref(20)
+const feedbackTotal = ref(0)
 
 // 管理员卡片详情弹窗状态（复用公共详情接口，无需额外后端）
 const mpDetailVisible = ref(false)
@@ -755,6 +839,21 @@ async function deleteConversation(conv) {
   }
 }
 
+async function loadFeedback() {
+  feedbackLoading.value = true
+  try {
+    const res = await adminApi.feedbackList(feedbackPage.value, feedbackPageSize.value)
+    if (res.code === 200) {
+      feedbackList.value = res.data.items || []
+      feedbackTotal.value = res.data.total || 0
+    }
+  } catch (e) {
+    ElMessage.error(t('加载反馈失败', 'Failed to load feedback'))
+  } finally {
+    feedbackLoading.value = false
+  }
+}
+
 async function loadMarketplaceCards() {
   mpLoading.value = true
   try {
@@ -782,7 +881,7 @@ async function loadMarketplaceCards() {
   }
 }
 
-// 查看卡片详情：拉取完整数据（含 system_prompt / greeting）并打开弹窗
+// 查看卡片详情：拉取完整数据（含 system_prompt / greeting / 评论区真实用户名）并打开弹窗
 async function previewMpCard(card) {
   if (!card) return
   mpDetailVisible.value = true
@@ -790,7 +889,7 @@ async function previewMpCard(card) {
   // 先把基本信息塞进去，让弹窗立即有内容显示
   mpDetailData.value = card
   try {
-    const res = await resAi.get(`/api/marketplace/${card.id}`)
+    const res = await adminApi.marketplaceCardDetail(card.id)
     if (res.code === 200 && mpDetailData.value?.id === card.id) {
       // 合并后端最新数据（更权威的统计数字）
       mpDetailData.value = { ...card, ...res.data }
@@ -871,6 +970,9 @@ onMounted(async () => {
 watch(activeTab, (val) => {
   if (val === 'marketplace' && mpAllCards.value.length === 0 && !mpLoading.value) {
     loadMarketplaceCards()
+  }
+  if (val === 'feedback' && feedbackList.value.length === 0 && !feedbackLoading.value) {
+    loadFeedback()
   }
 })
 </script>
@@ -1224,6 +1326,83 @@ watch(activeTab, (val) => {
   border-left: 3px solid var(--brand);
 }
 
+.mp-comments-section {
+  border-top: 1px solid var(--border-color);
+  padding-top: 12px;
+}
+
+.mp-comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mp-no-comments {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 12px 0;
+}
+
+.mp-comment {
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.mp-comment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.mp-comment-user {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--brand);
+}
+
+.mp-comment-time {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.mp-comment-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+  word-break: break-word;
+}
+
+.mp-replies {
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mp-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mp-reply-user {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.mp-reply-to {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .msg-count-link:hover {
   opacity: 0.75;
 }
@@ -1376,6 +1555,31 @@ watch(activeTab, (val) => {
   word-break: break-word;
   max-height: 200px;
   overflow-y: auto;
+}
+
+/* 反馈列表：用户头像+信息 */
+.feedback-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.feedback-user-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.feedback-username {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.feedback-email {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 /* 移动端 */

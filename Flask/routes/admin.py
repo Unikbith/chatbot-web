@@ -426,6 +426,57 @@ def list_marketplace_cards():
     })
 
 
+@admin_bp.route('/marketplace/<int:pid>', methods=['GET'])
+@admin_required
+def get_marketplace_card(pid):
+    """管理员查看广场卡片完整详情（含 system_prompt、评论区真实用户名）。"""
+    from models import PersonaMarketplace, MarketplaceComment
+
+    persona = PersonaMarketplace.query.get(pid)
+    if not persona:
+        return jsonify({'code': 404, 'message': '卡片不存在'}), 404
+
+    d = persona.to_dict(include_prompt=True)
+    d['author_username'] = persona.author.username if persona.author else None
+    d['author_email'] = persona.author.email if persona.author else None
+    d['author_gender'] = persona.author.gender if persona.author else None
+
+    # 顶层评论 + 子回复（与 marketplace.py 列表接口结构一致，但用真实用户名替代假名）
+    tops = MarketplaceComment.query.filter_by(persona_id=pid, parent_id=None).order_by(
+        MarketplaceComment.created_at.desc()
+    ).all()
+    children = []
+    if tops:
+        children = MarketplaceComment.query.filter(
+            MarketplaceComment.parent_id.in_([c.id for c in tops])
+        ).order_by(MarketplaceComment.created_at.asc()).all()
+
+    by_id = {c.id: c for c in tops + list(children)}
+
+    def _pack(c, with_replies=True):
+        target = by_id.get(c.reply_to_id) if c.reply_to_id else None
+        replies = []
+        if with_replies:
+            replies = [_pack(ch, with_replies=False) for ch in children if ch.parent_id == c.id]
+        user = c.commenter
+        return {
+            'id': c.id,
+            'content': c.content,
+            'likes': c.likes,
+            'username': user.username if user else None,
+            'user_id': user.id if user else None,
+            'created_at': c.created_at.isoformat() if c.created_at else None,
+            'parent_id': c.parent_id,
+            'reply_to_id': c.reply_to_id,
+            'reply_to_name': target.commenter.username if target and target.commenter else None,
+            'reply_count': len(replies),
+            'replies': replies,
+        }
+
+    d['comments'] = [_pack(c) for c in tops]
+    return jsonify({'code': 200, 'data': d})
+
+
 @admin_bp.route('/marketplace/<int:pid>', methods=['DELETE'])
 @admin_required
 def delete_marketplace_card(pid):

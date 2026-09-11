@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from werkzeug.security import generate_password_hash, check_password_hash
 from extensions import db
 import json
@@ -354,12 +354,17 @@ class Conversation(db.Model):
 
 
 class ImageUsage(db.Model):
-    """免费图片生成用量（每账号共享 Key 免费次数）"""
+    """免费图片生成用量（每账号共享 Key 免费次数）。
+
+    free_count 语义：自 2026-09-11 起改为「剩余免费次数」。
+    历史数据通过 is_remaining_semantics 标记完成一次性迁移。
+    """
     __tablename__ = 'image_usage'
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True, index=True)
-    free_count = db.Column(db.Integer, default=0, nullable=False)  # 免费生成累计次数
+    free_count = db.Column(db.Integer, default=0, nullable=False)  # 剩余免费次数
+    is_remaining_semantics = db.Column(db.Boolean, default=True, nullable=False)  # True=剩余次数语义
     updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
 
     def to_dict(self):
@@ -541,5 +546,40 @@ class DailyCheckIn(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     checkin_time = db.Column(db.DateTime, default=local_now)
+    checkin_date = db.Column(db.Date, default=date.today)  # 兼容历史表：保留日期字段
     bonus_images = db.Column(db.Integer, default=5)
     created_at = db.Column(db.DateTime, default=local_now)
+
+
+class Feedback(db.Model):
+    """用户反馈（系统设置-帮助与反馈）"""
+    __tablename__ = 'feedbacks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    content = db.Column(db.Text, nullable=False)  # 反馈内容
+    allow_email_contact = db.Column(db.Boolean, default=False)  # 是否允许以邮件联系
+    contact_email = db.Column(db.String(120), nullable=True)  # 联系邮箱（允许邮件联系时填写）
+    created_at = db.Column(db.DateTime, default=local_now)
+    updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
+
+    user = db.relationship('User', backref='feedbacks')
+
+    def to_dict(self, include_user=False):
+        data = {
+            'id': self.id,
+            'user_id': self.user_id,
+            'content': self.content,
+            'allow_email_contact': self.allow_email_contact,
+            'contact_email': self.contact_email,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+        if include_user and self.user:
+            data['user'] = {
+                'id': self.user.id,
+                'username': self.user.username,
+                'email': self.user.email,
+                'avatar': self.user.avatar,
+                'gender': self.user.gender,
+            }
+        return data

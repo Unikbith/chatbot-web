@@ -443,6 +443,12 @@ const adminApi = {
   async deleteMarketplaceCard(pid) {
     return adminReq.delete(`/api/admin/marketplace/${pid}`);
   },
+  async marketplaceCardDetail(pid) {
+    return adminReq.get(`/api/admin/marketplace/${pid}`);
+  },
+  async feedbackList(page = 1, perPage = 20) {
+    return adminReq.get(`/api/feedback?page=${page}&per_page=${perPage}`);
+  },
   logout() {
     localStorage.removeItem("admin_token");
     localStorage.removeItem("admin_username");
@@ -492,6 +498,16 @@ const audioApi = {
   },
 };
 
+// ========== 反馈 API ==========
+const feedbackApi = {
+  async submit(data) {
+    return resAi.post('/api/feedback', data);
+  },
+  async list(page = 1, perPage = 20) {
+    return resAi.get(`/api/feedback?page=${page}&per_page=${perPage}`);
+  },
+};
+
 const marketplaceApi = {
   list(sort = 'hot', page = 1, keyword = '', gender = '') {
     let url = `/api/marketplace?sort=${sort}&page=${page}`;
@@ -508,6 +524,9 @@ const marketplaceApi = {
   },
   publicDetail(id) {
     return resAi.get(`/api/marketplace/public/${id}`);
+  },
+  publicComments(personaId, sort = 'hot', page = 1) {
+    return resAi.get(`/api/marketplace/public/${personaId}/comments?sort=${sort}&page=${page}`);
   },
   get(id) {
     return resAi.get(`/api/marketplace/${id}`);
@@ -565,5 +584,6 @@ export {
   imageApi,
   adminApi,
   marketplaceApi,
+  feedbackApi,
   baseURL
 };

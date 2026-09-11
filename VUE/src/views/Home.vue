@@ -3,7 +3,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Menu, Search, Sunny, Plus, ZoomIn, ChatLineRound } from '@element-plus/icons-vue'
 import {
-  authApi, providersApi, personaApi, settingsApi, conversationApi, chatApi
+  authApi, providersApi, personaApi, settingsApi, conversationApi, chatApi, marketplaceApi
 } from '../utils/resAi'
 import { applyTheme, bindSystemThemeListener } from '../utils/theme'
 import { t, setLocale } from '../i18n'
@@ -17,6 +17,7 @@ import PersonaPanel from '../components/PersonaPanel.vue'
 import ConversationSettings from '../components/ConversationSettings.vue'
 import PersonaMarketplace from '../components/PersonaMarketplace.vue'
 import ThumbIcon from '../components/ThumbIcon.vue'
+import { identiconDataUrl } from '../utils/identicon'
 
 import defaultUserAvatar from '../assets/images/avatar-user.jpg'
 import defaultAiAvatar from '../assets/images/avatar-megumi.jpg'
@@ -283,9 +284,16 @@ async function loadLandingCards() {
 }
 
 async function openLandingDetail(card) {
-  const detail = await fetchLandingDetailPublic(card.id)
+  const [detail, commentsRes] = await Promise.all([
+    fetchLandingDetailPublic(card.id),
+    marketplaceApi.publicComments(card.id, 'hot', 1).catch(() => null),
+  ])
   if (detail) {
-    landingDetail.value = detail
+    landingDetail.value = {
+      ...detail,
+      comments: commentsRes?.data?.items || [],
+      comment_total: commentsRes?.data?.total || 0,
+    }
     landingDetailVisible.value = true
   }
 }
@@ -318,6 +326,29 @@ const landingPromptExpanded = ref(false)
 watch(landingDetailVisible, (val) => {
   if (val) landingPromptExpanded.value = false
 })
+
+// 从入口页选择卡片后登录：记录待采用的卡片 ID，登录后用它创建默认对话
+const pendingLandingPersonaId = ref(null)
+const savedPendingId = localStorage.getItem('pending_landing_persona_id')
+if (savedPendingId) {
+  pendingLandingPersonaId.value = Number(savedPendingId)
+}
+
+function onLandingLoginClick() {
+  if (landingDetail.value?.id) {
+    pendingLandingPersonaId.value = landingDetail.value.id
+    localStorage.setItem('pending_landing_persona_id', String(landingDetail.value.id))
+  }
+  landingDetailVisible.value = false
+  authModalVisible.value = true
+}
+
+function formatTime(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return ts
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
 
 // ========== 初始化 ==========
 let unbindSystemTheme = null
@@ -496,41 +527,39 @@ async function handleNewChat() {
     personas.value[0] ||
     currentPersona.value
   )?.id || null
-  currentProviderId.value = pickEnabledChatProviderId()
-  try {
-    const res = await conversationApi.create({
-      title: t('新对话', 'New Chat'),
-      provider_id: currentProviderId.value,
-      persona_id: personaId,
-      system_prompt: systemPrompt.value,
-      temperature: userSettings.temperature,
-    })
+  await _doCreateConversation(personaId)
+}
 
-    if (res.code === 409) {
+async function createConversationWithPersona(personaId) {
+  if (!personaId) {
+    await ensureInitialConversation()
+    return
+  }
+  await _doCreateConversation(personaId)
+}
+
+async function _doCreateConversation(personaId, forceDelete = false) {
+  currentProviderId.value = pickEnabledChatProviderId()
+  const payload = {
+    title: t('新对话', 'New Chat'),
+    provider_id: currentProviderId.value,
+    persona_id: personaId,
+    system_prompt: systemPrompt.value,
+    temperature: userSettings.temperature,
+  }
+  if (forceDelete) payload.force_delete = true
+
+  try {
+    const res = await conversationApi.create(payload)
+
+    if (res.code === 409 && !forceDelete) {
       try {
         await ElMessageBox.confirm(
           res.message || t('已达对话保存上限（10 个），继续将删除最早创建的对话', 'Conversation limit reached (10). Continue to delete the oldest one.'),
           t('已达保存的上限', 'Conversation Limit'),
           { confirmButtonText: t('继续', 'Continue'), cancelButtonText: t('取消', 'Cancel'), type: 'warning' }
         )
-        const retry = await conversationApi.create({
-          title: t('新对话', 'New Chat'),
-          provider_id: currentProviderId.value,
-          persona_id: personaId,
-          system_prompt: systemPrompt.value,
-          temperature: userSettings.temperature,
-          force_delete: true,
-        })
-        if (retry.code === 200) {
-          currentConv.value = retry.data
-          currentConvId.value = retry.data.id
-          currentConvTitle.value = retry.data.title || '新对话'
-          currentPersona.value = personaOf(retry.data)
-          systemPrompt.value = retry.data.system_prompt || ''
-          currentProviderId.value = retry.data.provider_id || pickEnabledChatProviderId()
-          chatAreaRef.value?.resetMessages()
-          loadConversations()
-        }
+        await _doCreateConversation(personaId, true)
       } catch (e) { /* cancelled */ }
       return
     }
@@ -640,6 +669,28 @@ async function handleLoginSuccess(userData) {
   // 清空旧人设，让 loadPersonas 按新登录用户的性别重新挑默认人物卡
   currentPersona.value = null
   await loadAllData()
+
+  // 若用户从入口页选择某张卡片后登录，优先以该卡片作为默认对话对象
+  const pendingId = pendingLandingPersonaId.value
+  if (pendingId) {
+    pendingLandingPersonaId.value = null
+    localStorage.removeItem('pending_landing_persona_id')
+    try {
+      const res = await marketplaceApi.adopt(pendingId)
+      if (res.code === 200) {
+        const templateId = res.data?.template_id || res.data?.id
+        // 刷新人物卡列表，让新采用的人物卡出现在侧边栏
+        await loadPersonas()
+        if (templateId) {
+          await createConversationWithPersona(templateId)
+          return
+        }
+      }
+    } catch (e) {
+      console.warn('采用入口页卡片失败', e)
+    }
+  }
+
   await ensureInitialConversation()
 }
 
@@ -846,7 +897,7 @@ async function handleConvoSettingsSaved(payload) {
             <span>{{ t('心语 v1.0 · 多人设 AI 角色陪伴 · 多种对话风格 · 对话永久保存', 'Confide · many personas · endless conversations · saved forever') }}</span>
           </div>
           <h1 class="lp-title">{{ t('与心语，开始你的对话', 'Start a conversation with Confide') }}</h1>
-          <p class="lp-sub">{{ t('随机挑选 4 张人气人物卡，选择一张开启属于你的私人对话。', 'A random hand-pick of 4 popular personas. Start a private chat of your own.') }}</p>
+          <p class="lp-sub">{{ t('选择一张人物卡，开启属于你的私人对话。', 'Pick a persona card and start a private chat of your own.') }}</p>
         </section>
 
         <!-- 卡片广场：固定展示 4 张人气卡片 + 首位 CTA 登录卡 -->
@@ -932,7 +983,9 @@ async function handleConvoSettingsSaved(payload) {
           <div class="lp-detail-meta">
             <ThumbIcon :size="13" /> {{ formatCount(landingDetail.likes) }}
             ·
-            <el-icon><ChatLineRound /></el-icon> {{ formatCount(landingDetail.comment_count || 0) }}
+            <el-icon><ChatLineRound /></el-icon> {{ formatCount(landingDetail.comment_total || landingDetail.comment_count || 0) }}
+            ·
+            <span class="lp-detail-creator">{{ t('创作者', 'Creator') }}: {{ landingDetail.creator_pseudonym }}</span>
           </div>
           <p class="lp-detail-desc">{{ landingDetail.description }}</p>
           <div class="lp-detail-section" v-if="landingDetail.greeting">
@@ -960,8 +1013,32 @@ async function handleConvoSettingsSaved(payload) {
               {{ landingDetail.system_prompt }}
             </div>
           </div>
+
+          <!-- 评论区：未登录只读，展示假名 -->
+          <div class="lp-detail-section lp-comments-section">
+            <div class="lp-detail-label">{{ t('评论', 'Comments') }} ({{ landingDetail.comment_total || 0 }})</div>
+            <div v-if="!(landingDetail.comments || []).length" class="lp-no-comments">{{ t('暂无评论', 'No comments yet') }}</div>
+            <div v-else class="lp-comments-list">
+              <div v-for="c in landingDetail.comments" :key="c.id" class="lp-comment">
+                <div class="lp-comment-head">
+                  <img :src="identiconDataUrl(c.identicon_seed, 24)" class="lp-comment-avatar" alt="" />
+                  <span class="lp-comment-pseudonym">{{ c.pseudonym }}</span>
+                  <span class="lp-comment-time">{{ formatTime(c.created_at) }}</span>
+                </div>
+                <p class="lp-comment-text">{{ c.content }}</p>
+                <div v-if="c.replies && c.replies.length" class="lp-replies">
+                  <div v-for="r in c.replies" :key="r.id" class="lp-reply">
+                    <span class="lp-reply-pseudonym">{{ r.pseudonym }}</span>
+                    <span v-if="r.reply_to_name" class="lp-reply-to">{{ t('回复', 'reply to') }} {{ r.reply_to_name }}</span>
+                    <p class="lp-comment-text">{{ r.content }}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="lp-detail-bottom">
-            <el-button type="primary" size="large" round class="lp-detail-btn" @click="authModalVisible = true">
+            <el-button type="primary" size="large" round class="lp-detail-btn" @click="onLandingLoginClick">
               {{ t('登录后开始对话', 'Sign in to chat') }}
             </el-button>
           </div>
@@ -1639,6 +1716,97 @@ async function handleConvoSettingsSaved(payload) {
   width: 100%;
   background: linear-gradient(135deg, #5e7baf, #6e8fdf);
   border: none;
+}
+
+.lp-detail-creator {
+  margin-left: 4px;
+  color: #6e7fa3;
+}
+
+/* 入口页详情评论区 */
+.lp-comments-section {
+  border-top: 1px solid rgba(120, 145, 195, 0.22);
+  padding-top: 12px;
+}
+
+.lp-comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.lp-no-comments {
+  font-size: 13px;
+  color: #8aa0c4;
+  padding: 12px 0;
+}
+
+.lp-comment {
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(120, 145, 195, 0.18);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.lp-comment-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.lp-comment-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.lp-comment-pseudonym {
+  font-size: 13px;
+  font-weight: 600;
+  color: #2c3e6e;
+}
+
+.lp-comment-time {
+  font-size: 11px;
+  color: #8aa0c4;
+  margin-left: auto;
+}
+
+.lp-comment-text {
+  font-size: 13px;
+  color: #4f6393;
+  line-height: 1.5;
+  margin: 0;
+  word-break: break-word;
+}
+
+.lp-replies {
+  margin-top: 8px;
+  padding-left: 10px;
+  border-left: 2px solid rgba(120, 145, 195, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lp-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lp-reply-pseudonym {
+  font-size: 12px;
+  font-weight: 600;
+  color: #2c3e6e;
+}
+
+.lp-reply-to {
+  font-size: 11px;
+  color: #8aa0c4;
 }
 
 @media (max-width: 768px) {

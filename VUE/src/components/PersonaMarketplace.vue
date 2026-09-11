@@ -37,8 +37,7 @@
             - hot：热门（赞比例）
             - new：最新
             - most_likes：点赞数最多
-            - most_comments：评论数最多
-            - most_disliked：最不受欢迎（踩远多于赞） -->
+            - most_comments：评论数最多 -->
           <el-select
             v-model="sortMode"
             size="default"
@@ -49,7 +48,6 @@
             <el-option :label="t('最新', 'Newest')" value="new" />
             <el-option :label="t('点赞最多', 'Most likes')" value="most_likes" />
             <el-option :label="t('评论最多', 'Most comments')" value="most_comments" />
-            <el-option :label="t('最不受欢迎', 'Most disliked')" value="most_disliked" />
           </el-select>
           <el-button type="primary" size="small" @click="showPublishDialog = true">
             <el-icon><Plus /></el-icon> {{ t('发布卡片', 'Publish Card') }}
