@@ -121,16 +121,24 @@ class AIService:
             config['api_type'] == 'deepseek' or brand == 'deepseek'
             or 'deepseek' in model_lower
         )
+        # 中转网关自定义命名的混合思考模型（如 deepseek-flash）：官方只有
+        # deepseek-chat / deepseek-reasoner 两个名字，无法靠改名切换，改为在
+        # 请求参数层显式声明思考开关——两种主流约定同时携带（thinking.type 与
+        # enable_thinking，覆盖 vLLM/SGLang/NewAPI/GLM 式网关）；网关严格校验
+        # 不认这些字段而报 400/422 时，下方自动降级重试（去参重发）。
+        extra_thinking_params = None
         if is_deepseek:
-            is_ds_reasoner = any(v in model_lower for v in ('reasoner', 'r1', 'think'))
-            if not deep_think and is_ds_reasoner:
-                # 关闭深思：推理模型切回对话模型（核心修复）
+            if not deep_think and ('reasoner' in model_lower or 'r1' in model_lower):
+                # 关闭深思：推理模型（官方或中转常见命名）切回对话模型
                 model = 'deepseek-chat'
-            elif deep_think and not is_ds_reasoner and (
-                config['api_type'] == 'deepseek' or model_lower.startswith('deepseek')
-            ):
+            elif deep_think and model_lower == 'deepseek-chat':
                 # 开启深思：官方命名的对话模型切到推理模型
                 model = 'deepseek-reasoner'
+            elif model_lower not in ('deepseek-chat', 'deepseek-reasoner'):
+                extra_thinking_params = {
+                    'thinking': {'type': 'enabled' if deep_think else 'disabled'},
+                    'enable_thinking': bool(deep_think),
+                }
 
         payload = {
             'model': model,
@@ -160,6 +168,8 @@ class AIService:
             payload['thinking'] = {'type': 'enabled' if deep_think else 'disabled'}
         elif is_qwen_reasoning:
             payload['enable_thinking'] = bool(deep_think)
+        if extra_thinking_params:
+            payload.update(extra_thinking_params)
 
         if not deep_think:
             payload.update({
@@ -187,6 +197,24 @@ class AIService:
                 stream=stream,
                 timeout=120
             )
+            if resp.status_code in (400, 422) and extra_thinking_params:
+                # 网关严格校验、不认思考开关字段而拒绝请求：去掉这些字段
+                # 原样重试一次；此时无法参数级关思考，由流式过滤层兜底
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+                retry_payload = {
+                    k: v for k, v in payload.items()
+                    if k not in ('thinking', 'enable_thinking')
+                }
+                resp = requests.post(
+                    chat_url,
+                    headers=headers,
+                    json=retry_payload,
+                    stream=stream,
+                    timeout=120
+                )
             return resp, None
         except requests.RequestException as e:
             return None, str(e)
