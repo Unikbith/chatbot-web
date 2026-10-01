@@ -969,6 +969,7 @@ onUnmounted(() => {
               <button
                 class="gen-mode-btn"
                 :class="{ active: genMode === 'text2img' }"
+                :aria-label="t('生图', 'Generate image')"
                 @click="genMode = genMode === 'text2img' ? '' : 'text2img'"
               >
                 <el-icon><Picture /></el-icon>
@@ -977,6 +978,7 @@ onUnmounted(() => {
               <button
                 class="gen-mode-btn"
                 :class="{ active: genMode === 'img2img' }"
+                :aria-label="t('改图', 'Edit image')"
                 @click="genMode = genMode === 'img2img' ? '' : 'img2img'"
               >
                 <el-icon><Edit /></el-icon>
@@ -1066,12 +1068,15 @@ onUnmounted(() => {
 .header-left {
   display: flex;
   align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .chat-title {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 6px;
@@ -1086,6 +1091,11 @@ onUnmounted(() => {
   font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
+  /* 长标题截断，避免把右侧按钮挤出可视区 */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .edit-icon {
@@ -1101,6 +1111,7 @@ onUnmounted(() => {
 
 .title-input {
   width: 280px;
+  max-width: 100%;
 }
 
 .header-actions {
@@ -1591,6 +1602,16 @@ onUnmounted(() => {
   .chat-header .header-actions {
     gap: 2px;
   }
+
+  /* 触屏没有 hover：改标题的笔形图标常显（否则用户发现不了可改标题） */
+  .edit-icon {
+    opacity: 0.6;
+  }
+
+  .title-input {
+    width: 100%;
+    max-width: 200px;
+  }
   
   .message-container {
     padding: 16px 12px;
@@ -1625,9 +1646,116 @@ onUnmounted(() => {
     opacity: 1;
   }
 
-  /* 窄屏下压缩模型选择器宽度，避免挤占发送按钮 */
+  /* ===== 输入区移动端重排 =====
+     窄屏工具栏有 7 个控件（模型选择 / 识图 / 语音 / 深思 / 生图 / 改图 / 发送），
+     单行必然溢出被挤压。这里改成确定性的两行布局：
+       第一行：模型选择器整行独占（完整显示当前模型名，不会被挤成省略号）
+       第二行：图标组 + 深思开关 + 生图/改图，发送按钮右下角对齐
+     同时放开换行兜底，任何宽度下都不会撑破输入区。 */
+  .input-wrapper {
+    padding: 6px 8px 2px;
+    border-radius: 14px;
+  }
+
+  .input-actions {
+    align-items: flex-end;
+    gap: 8px;
+  }
+
+  .action-left {
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .action-right {
+    flex-shrink: 0;
+  }
+
   .model-select {
-    width: 112px;
+    flex: 1 1 100%;
+    width: auto;
+    max-width: 100%;
+    margin-right: 0;
+  }
+
+  .model-select :deep(.el-select__wrapper) {
+    min-height: 28px;
+  }
+
+  /* 超长模型名截断而非撑破 */
+  .model-select :deep(.el-select__selected-item),
+  .model-select :deep(.el-select__placeholder) {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 生图/改图：窄屏只留图标（文字语义已由 aria-label 保留） */
+  .gen-mode-group {
+    margin-left: 4px;
+  }
+
+  .gen-mode-btn {
+    padding: 0 7px;
+  }
+
+  .gen-mode-btn span {
+    display: none;
+  }
+
+  .deep-think-wrapper {
+    margin-left: 4px;
+  }
+
+  .deep-think-wrapper :deep(.el-switch__label) {
+    font-size: 11px;
+  }
+
+  /* iOS Safari 对 font-size < 16px 的输入框聚焦时会自动放大页面，
+     破坏 100dvh 全屏布局 —— 移动端统一提到 16px */
+  .chat-input :deep(.el-textarea__inner) {
+    font-size: 16px;
+    padding: 6px 10px;
+  }
+
+  /* 触控目标放大到 40px（原 36px 偏小） */
+  .send-btn {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* 超窄屏（iPhone SE 等）再收紧一档 */
+@media (max-width: 420px) {
+  .chat-header {
+    padding: 8px 12px 8px 54px;
+  }
+
+  .message-container {
+    padding: 12px 10px;
+    gap: 12px;
+  }
+
+  .avatar-circle {
+    width: 28px;
+    height: 28px;
+    font-size: 11px;
+  }
+
+  .message-content {
+    max-width: calc(100% - 36px);
+  }
+
+  .chat-footer {
+    padding: 6px 8px 10px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .input-wrapper {
+    border-radius: 12px;
   }
 }
 </style>
