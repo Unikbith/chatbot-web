@@ -1617,10 +1617,14 @@ async function handleConvoSettingsSaved(payload) {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* 备案号（工信部 + 公安）与版权、标语共 7 段，窄屏必须换行，否则溢出 */
+  flex-wrap: wrap;
+  row-gap: 4px;
   gap: 8px;
   padding: 18px 16px 28px;
   font-size: 12px;
   color: #8aa0c4;
+  text-align: center;
 }
 
 .lp-footer-sep {
@@ -1974,6 +1978,30 @@ async function handleConvoSettingsSaved(payload) {
   .lp-detail { flex-direction: column; }
   .lp-detail-left { width: 100%; height: auto; }
   .lp-detail-avatar-box { height: 220px; }
+
+  /* 英雄区收紧，把纵向空间让给卡片 */
+  .lp-hero { padding: 16px 14px 4px; }
+  .lp-sub { font-size: 14px; margin: 10px 0 16px; }
+
+  /* 搜索框整行，性别筛选换行居中（原 min-width:280px 在窄屏会挤） */
+  .lp-searchbar { gap: 8px; }
+  .lp-search-input { flex: 1 1 100%; min-width: 0; max-width: 100%; }
+  .lp-gender-select { width: 140px; }
+
+  /* 底部备案信息避开 Home Indicator 安全区 */
+  .lp-footer {
+    padding: 14px 12px 24px;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* 超窄屏（iPhone SE 一类）再收紧一档 */
+@media (max-width: 420px) {
+  .lp-title { font-size: 24px; }
+  .lp-tagline { font-size: 11px; padding: 5px 12px; margin-bottom: 16px; }
+  .lp-sub { font-size: 13px; }
+  .lp-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+  .lp-footer { font-size: 11px; }
 }
 
 .sidebar-wrap,

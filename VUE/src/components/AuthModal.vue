@@ -308,7 +308,7 @@ const handleSubmit = async () => {
   <el-dialog
     :model-value="modelValue"
     @update:model-value="(val) => emit('update:modelValue', val)"
-    width="420px"
+    width="min(420px, 94vw)"
     :close-on-click-modal="false"
     :show-close="false"
     class="auth-modal"
@@ -727,5 +727,35 @@ const handleSubmit = async () => {
   font-size: 14px;
   color: var(--text-secondary);
   white-space: nowrap;
+}
+
+/* ===== 移动端响应式 =====
+   弹窗原本固定 420px，在 375/393px 宽的手机上会超出视口，
+   宽度已改为 min(420px, 94vw)；这里再收紧内边距，把空间让给表单。 */
+@media (max-width: 768px) {
+  .auth-header {
+    padding: 16px 16px 0;
+  }
+
+  .auth-body {
+    padding: 12px 20px 24px;
+  }
+
+  .auth-tabs {
+    gap: 16px;
+  }
+
+  .auth-tab {
+    font-size: 18px;
+  }
+
+  .logo-text {
+    font-size: 16px;
+  }
+
+  /* 触屏无 hover：关闭按钮保持可见（原本透明的按钮在触屏上不易发现） */
+  .close-btn {
+    color: #6b7280;
+  }
 }
 </style>
