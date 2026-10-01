@@ -14,7 +14,7 @@
           :placeholder="t('搜索卡片名称或描述...', 'Search cards...')"
           clearable
           size="default"
-          style="width: 240px"
+          class="mp-search"
           @input="debouncedSearch"
           @clear="loadList"
         >
@@ -25,7 +25,7 @@
           :placeholder="t('性别', 'Gender')"
           clearable
           size="default"
-          style="width: 110px"
+          class="mp-gender"
           @change="applyGenderFilter"
         >
           <el-option :label="t('男', 'Male')" value="男" />
@@ -41,7 +41,7 @@
           <el-select
             v-model="sortMode"
             size="default"
-            style="width: 150px"
+            class="mp-sort"
             @change="loadList"
           >
             <el-option :label="t('热门', 'Hot')" value="hot" />
@@ -789,6 +789,11 @@ function formatDate(ts) {
   gap: 10px;
 }
 
+/* 工具栏控件宽度（原内联样式，改类名以便响应式覆盖） */
+.mp-search { width: 240px; }
+.mp-gender { width: 110px; }
+.mp-sort { width: 150px; }
+
 .mp-grid {
   display: grid;
   /* 更窄的最小列宽 + 更小间距 => 同屏展示更多卡片，以图片为主 */
@@ -1402,6 +1407,32 @@ function formatDate(ts) {
   }
   .dr-bottom {
     padding: 12px 16px 16px;
+  }
+
+  /* 顶部工具栏：搜索框整行独占，性别/排序弹性收缩，
+     避免三个固定宽度控件在窄屏挤成多行碎片 */
+  .mp-toolbar {
+    gap: 8px;
+  }
+  .mp-search {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+  .mp-gender,
+  .mp-sort {
+    width: auto;
+    flex: 1 1 96px;
+    min-width: 92px;
+  }
+  .toolbar-right {
+    flex: 1 1 auto;
+    gap: 8px;
+  }
+
+  /* 详情弹窗：内容过长时内部滚动，而不是撑出可视区 */
+  .detail-split {
+    max-height: 70vh;
+    overflow-y: auto;
   }
 }
 </style>

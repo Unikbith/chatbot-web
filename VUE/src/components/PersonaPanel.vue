@@ -530,4 +530,12 @@ function confirmDelete(id) {
     white-space: normal;
   }
 }
+
+/* 超窄屏（iPhone SE 一类）：取消操作按钮的头像缩进，把宽度让给按钮本身 */
+@media (max-width: 420px) {
+  .persona-actions,
+  .persona-card:hover .persona-actions {
+    margin-left: 0;
+  }
+}
 </style>

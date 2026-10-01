@@ -286,7 +286,7 @@
     <el-dialog
       v-model="showPwdDialog"
       :title="t('修改密码', 'Change Password')"
-      width="440px"
+      width="min(440px, 94vw)"
       class="pwd-dialog"
       align-center
     >
@@ -326,7 +326,7 @@
     </el-dialog>
 
     <!-- 注销账号对话框 -->
-    <el-dialog v-model="showDeleteDialog" :title="t('确认注销账号', 'Delete Account')" width="400px">
+    <el-dialog v-model="showDeleteDialog" :title="t('确认注销账号', 'Delete Account')" width="min(400px, 94vw)" class="delete-dialog">
       <p style="color: #f56c6c; margin-bottom: 16px;">
         {{ t('警告：注销账号后，您的所有数据将被永久删除，无法恢复！', 'Warning: all your data will be permanently deleted!') }}
       </p>
@@ -957,6 +957,28 @@ async function confirmDelete() {
   .bg-actions {
     flex-direction: row;
     flex-wrap: wrap;
+  }
+
+  /* 弹窗（修改密码/注销账号）在窄屏：固定 label 宽度太挤，
+     改为标签上排；提示文案的左缩进随之取消 */
+  .pwd-dialog :deep(.el-form-item),
+  .delete-dialog :deep(.el-form-item) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .pwd-dialog :deep(.el-form-item__label),
+  .delete-dialog :deep(.el-form-item__label) {
+    width: auto !important;
+    padding: 0 !important;
+    text-align: left !important;
+    line-height: 1.5;
+    font-size: 13px;
+  }
+
+  .pwd-tip {
+    margin-left: 0;
   }
 }
 
