@@ -143,8 +143,8 @@ class PersonaTemplate(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
-    name = db.Column(db.String(100), nullable=False)  # 角色名，如 "加藤惠"
-    description = db.Column(db.String(500), nullable=True)  # 简介
+    name = db.Column(db.String(1000), nullable=False)  # 角色名，如 "加藤惠"
+    description = db.Column(db.String(1000), nullable=True)  # 简介
     avatar = db.Column(db.String(500), nullable=True)  # 角色头像
     system_prompt = db.Column(db.Text, nullable=False)  # 系统提示词
     greeting = db.Column(db.Text, nullable=True)  # 开场问候语

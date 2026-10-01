@@ -101,10 +101,18 @@
 
         <div class="form-card">
           <el-form-item label="角色名称">
-            <el-input v-model="form.name" placeholder="如：加藤惠" maxlength="30" show-word-limit />
+            <el-input v-model="form.name" placeholder="如：加藤惠" maxlength="1000" />
           </el-form-item>
           <el-form-item label="角色简介">
-            <el-input v-model="form.description" placeholder="简短描述角色特点" maxlength="100" show-word-limit />
+            <el-input
+              v-model="form.description"
+              type="textarea"
+              :rows="2"
+              :autosize="false"
+              resize="none"
+              placeholder="简短描述角色特点"
+              maxlength="1000"
+            />
           </el-form-item>
         </div>
 
@@ -117,8 +125,7 @@
               :autosize="false"
               resize="none"
               placeholder="详细的角色设定，指导 AI 如何扮演这个角色..."
-              maxlength="2000"
-              show-word-limit
+              maxlength="10000"
             />
           </el-form-item>
           <el-form-item label="开场问候语">
@@ -129,8 +136,7 @@
               :autosize="false"
               resize="none"
               placeholder="角色第一次打招呼时说的话（可选）"
-              maxlength="200"
-              show-word-limit
+              maxlength="1000"
             />
           </el-form-item>
         </div>

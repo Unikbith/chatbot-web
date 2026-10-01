@@ -37,7 +37,9 @@ const authModalVisible = ref(false)
 const providerPanelVisible = ref(false)
 const settingsVisible = ref(false)
 // 系统设置打开时定位到的标签页（如从模型配置的帮助引导跳转到「帮助和反馈」）
-const settingsInitialTab = ref('profile')
+// 注意：必须是 SystemSettings 里真实存在的 tab（general/account/feedback），
+// 否则 el-tabs 匹配不到任何面板，打开后内容区空白
+const settingsInitialTab = ref('general')
 const personaPanelVisible = ref(false)
 const convoSettingsVisible = ref(false)
 const marketplaceVisible = ref(false)
@@ -47,6 +49,8 @@ const currentConv = ref(null)
 const currentConvId = ref(null)
 const currentConvTitle = ref('新对话')
 const currentProviderId = ref(null)
+// 当前对话选用的具体模型（配置内 model_id），随输入框模型选择器切换
+const currentModelId = ref('')
 const systemPrompt = ref('')
 const temperature = ref(0.8)
 
@@ -92,6 +96,9 @@ function dismissFreeApiBanner() {
 
 // 对话列表
 const conversations = ref([])
+// 对话列表是否已成功加载：用于「首次进入是否自动建会话」的判断，
+// 避免列表接口偶发失败时 conversations 为空而误建空白对话
+let conversationsLoaded = false
 const convGroups = ref({ pinned: [], today: [], yesterday: [], week: [], month: [], older: [] })
 
 // 侧边栏折叠
@@ -359,7 +366,11 @@ onMounted(async () => {
 
 // 打开/关闭模型配置面板后刷新对话配置列表，保证对话内模型选择为最新
 watch(providerPanelVisible, (val) => {
-  if (!val) loadDefaultProvider()
+  if (!val) {
+    loadDefaultProvider()
+    // 同步刷新输入框模型选择器的数据
+    chatAreaRef.value?.reloadProviders()
+  }
 })
 
 onUnmounted(() => {
@@ -415,6 +426,7 @@ async function loadConversations() {
     if (res.code === 200) {
       conversations.value = res.data.items || []
       convGroups.value = res.data.groups || convGroups.value
+      conversationsLoaded = true
     }
   } catch (e) {
     logger.warn('加载对话失败', e)
@@ -489,14 +501,20 @@ function personaOf(conv) {
 }
 
 // ========== 对话操作 ==========
-// 登录后确保存在一个可用对话：有对话则选中最近一条；无对话则自动新建首条，保证对话设置立即可用
+// 登录后确保存在一个可用对话：
+//  - 列表里已有对话 → 直接打开最上面（最近聊天）的那一条，绝不重复创建；
+//  - 列表为空且已成功加载 → 按原逻辑自动新建首条，保证对话设置立即可用；
+//  - 列表接口偶发失败（未成功加载） → 不盲目新建，避免凭空多出空白对话。
+// 后端列表顺序为 置顶优先 + updated_at 倒序，故 conversations[0] 即「最上面 / 最近」的那一条。
 async function ensureInitialConversation() {
   if (!chatAreaRef.value) return
   if (conversations.value.length > 0) {
     await handleSelectConversation(conversations.value[0].id)
     return
   }
-  await handleNewChat()
+  if (conversationsLoaded) {
+    await handleNewChat()
+  }
 }
 
 async function handleNewChat() {
@@ -521,6 +539,7 @@ async function createConversationWithPersona(personaId) {
 
 async function _doCreateConversation(personaId, forceDelete = false) {
   currentProviderId.value = pickEnabledChatProviderId()
+  currentModelId.value = ''
   const payload = {
     title: t('新对话', 'New Chat'),
     provider_id: currentProviderId.value,
@@ -552,6 +571,7 @@ async function _doCreateConversation(personaId, forceDelete = false) {
       currentPersona.value = personaOf(res.data)
       systemPrompt.value = res.data.system_prompt || ''
       currentProviderId.value = res.data.provider_id || pickEnabledChatProviderId()
+      currentModelId.value = res.data.model_id || ''
       chatAreaRef.value?.resetMessages()
       loadConversations()
     }
@@ -573,6 +593,7 @@ async function handleSelectConversation(convId) {
       currentPersona.value = personaOf(data)
       // 对话独立模型配置优先；未指定则回退到已启用的默认配置
       currentProviderId.value = data.provider_id || pickEnabledChatProviderId()
+      currentModelId.value = data.model_id || ''
 
       const msgList = data.messages || []
       chatAreaRef.value?.setMessages(msgList)
@@ -598,6 +619,7 @@ async function handleDeleteConversation(convId) {
       currentConv.value = null
       currentConvId.value = null
       currentConvTitle.value = '新对话'
+      currentModelId.value = ''
       currentPersona.value = personas.value.find(p => p.is_default) || personas.value[0] || null
       chatAreaRef.value?.resetMessages()
     }
@@ -632,6 +654,7 @@ function handleConversationCreated(conv) {
     currentPersona.value = personaOf(conv)
     systemPrompt.value = conv.system_prompt || ''
     currentProviderId.value = conv.provider_id || pickEnabledChatProviderId()
+    currentModelId.value = conv.model_id || ''
   }
   loadConversations()
 }
@@ -753,9 +776,28 @@ function handlePersonaDeleted(personaId) {
 function handleProviderSelect({ provider, type }) {
   if (type === 'chat') {
     currentProviderId.value = provider.id
+    currentModelId.value = ''
     providersApi.setCurrentId(provider.id, 'chat')
     ElMessage.success(t('已切换到', 'Switched to') + `「${provider.name}」`)
     loadChatStatus()
+  }
+}
+
+// 输入框模型选择器切换：更新当前对话的提供商 + 模型，
+// 对话已存在时同步落库，刷新/重进后仍记得这次选择
+function handleModelChange({ providerId, modelId }) {
+  currentProviderId.value = providerId
+  currentModelId.value = modelId || ''
+  if (providerId) providersApi.setCurrentId(providerId, 'chat')
+  const p = chatConfigs.value.find(x => x.id == providerId)
+  if (p) {
+    ElMessage.success(t('已切换到', 'Switched to') + `「${p.name}${modelId ? ' · ' + modelId : ''}」`)
+  }
+  if (currentConvId.value) {
+    conversationApi.update(currentConvId.value, {
+      provider_id: providerId,
+      model_id: modelId || null,
+    }).catch(() => {})
   }
 }
 
@@ -763,6 +805,12 @@ function handleProviderSelect({ provider, type }) {
 function openSettingsHelp() {
   settingsInitialTab.value = 'feedback'
   providerPanelVisible.value = false
+  settingsVisible.value = true
+}
+
+// 常规入口打开系统设置：重置回「通用设置」，避免残留上次的跳转标签页
+function openSettings() {
+  settingsInitialTab.value = 'general'
   settingsVisible.value = true
 }
 
@@ -800,6 +848,7 @@ async function handleConvoSettingsSaved(payload) {
       currentProviderId.value = payload.provider_id != null
         ? payload.provider_id
         : pickEnabledChatProviderId()
+      currentModelId.value = payload.model_id || ''
       if (payload.persona_id) {
         currentPersona.value = personas.value.find(p => p.id == payload.persona_id) || currentPersona.value
       }
@@ -848,7 +897,7 @@ async function handleConvoSettingsSaved(payload) {
       @delete="handleDeleteConversation"
       @toggle-collapse="toggleSidebar"
       @open-provider="requireLogin(() => providerPanelVisible = true)"
-      @open-settings="requireLogin(() => settingsVisible = true)"
+      @open-settings="requireLogin(openSettings)"
       @open-persona="requireLogin(() => personaPanelVisible = true)"
       @open-marketplace="requireLogin(() => marketplaceVisible = true)"
       @edit-persona="handleSidebarEditPersona"
@@ -942,6 +991,10 @@ async function handleConvoSettingsSaved(payload) {
       <!-- 底部声明 -->
       <footer class="lp-footer">
         <span>© {{ new Date().getFullYear() }} Confide · 心语</span>
+        <span class="lp-footer-sep">·</span>
+        <a class="lp-beian" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">黔ICP备2026017620号</a>
+        <span class="lp-footer-sep">·</span>
+        <a class="lp-beian" href="https://beian.mps.gov.cn/#/query/webSearch?code=52020302000084" target="_blank" rel="noopener">贵公网安备52020302000084号</a>
         <span class="lp-footer-sep">·</span>
         <span>{{ t('每一个人物卡，都是一颗等你的心', 'Every persona is a heart waiting for you') }}</span>
       </footer>
@@ -1078,6 +1131,7 @@ async function handleConvoSettingsSaved(payload) {
       :conversation-id="currentConvId"
       :conversation-title="currentConvTitle"
       :provider-id="currentProviderId"
+      :model-id="currentModelId"
       :system-prompt="systemPrompt"
       :temperature="userSettings.temperature"
       :settings="userSettings"
@@ -1091,9 +1145,10 @@ async function handleConvoSettingsSaved(payload) {
       :persona-greeting="currentPersona?.greeting || ''"
       :background-image="effectiveBackground"
       :background-cover="backgroundCover"
-      @open-settings="requireLogin(() => settingsVisible = true)"
+      @open-settings="requireLogin(openSettings)"
       @open-provider="requireLogin(() => providerPanelVisible = true)"
       @open-conversation-settings="openConversationSettings"
+      @model-change="handleModelChange"
       @require-login="requireLogin"
       @title-change="handleTitleChange"
       @new-chat="handleNewChat"
@@ -1570,6 +1625,18 @@ async function handleConvoSettingsSaved(payload) {
 
 .lp-footer-sep {
   opacity: 0.5;
+}
+
+/* 网站备案号：按工信部备案悬挂要求，置于入口页底部并链接至备案查询系统 */
+.lp-beian {
+  color: #8aa0c4;
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.lp-beian:hover {
+  color: #5e7baf;
+  text-decoration: underline;
 }
 
 /* 详情弹窗：左右分栏 */

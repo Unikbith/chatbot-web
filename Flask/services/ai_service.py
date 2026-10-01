@@ -117,20 +117,29 @@ class AIService:
             'stream': stream,
         }
 
-        # Qwen3 与 GLM-4.5/4.7 系列默认即进入推理模式，必须在请求里显式声明
-        # 关闭深度思考，否则「未启用深思」时模型仍会输出思考过程。
-        # 两家参数名不同：阿里 DashScope 用 enable_thinking（布尔），
-        # 智谱 GLM 用 thinking.type（enabled/disabled），且 GLM 接口不接受
+        # Qwen3、GLM-4.5/4.7、火山 doubao-seed 等系列默认即进入推理模式，必须在请求里
+        # 显式声明关闭深度思考，否则「未启用深思」时模型仍会输出思考过程。
+        # 各家参数名不同：阿里 DashScope 用 enable_thinking（布尔），
+        # 智谱 GLM 与火山方舟用 thinking.type（enabled/disabled），且 GLM 接口不接受
         # frequency_penalty / presence_penalty，混用会导致 HTTP 400。
+        # 识别规则：优先按模型名，其次按厂商 brand（覆盖自建网关/中转改名后的模型）。
         model_lower = (model or config['model'] or '').lower()
-        is_zhipu = 'glm' in model_lower
-        is_qwen_reasoning = ('qwen' in model_lower) or model_lower.startswith('qwq')
-        is_glm_reasoning = is_zhipu and any(
-            v in model_lower for v in ('4.5', '4.6', '4.7')
+        brand = (getattr(provider, 'brand', '') or '').lower()
+        is_zhipu = 'glm' in model_lower or brand == 'zhipu'
+        is_qwen_reasoning = (
+            ('qwen' in model_lower) or model_lower.startswith('qwq')
+            or brand == 'bailian'
         )
-        if is_glm_reasoning:
+        is_glm_reasoning = is_zhipu and any(
+            v in model_lower for v in ('4.5', '4.6', '4.7', 'air')
+        )
+        # 火山方舟 doubao-seed-1.6 等：thinking.type 控制，火山兼容 OpenAI 协议
+        is_volc_reasoning = (
+            'doubao' in model_lower or 'seed' in model_lower or brand == 'volcengine'
+        )
+        if is_glm_reasoning or is_volc_reasoning:
             payload['thinking'] = {'type': 'enabled' if deep_think else 'disabled'}
-        if is_qwen_reasoning:
+        elif is_qwen_reasoning:
             payload['enable_thinking'] = bool(deep_think)
 
         if not deep_think:

@@ -71,3 +71,8 @@ Clipboard_Screenshot*.png
 # 本地遗留的审查报告草稿
 全面检测与质量审查报告_*.md
 质量审查报告.md
+
+# 个人学习资料与文档（仅本地保留，不入仓库）
+/handmade-platform-study/
+/project-study/
+/简历优化方案.md

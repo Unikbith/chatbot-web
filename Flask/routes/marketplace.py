@@ -10,6 +10,7 @@ from models import (
     MarketplaceAdopt, local_now,
 )
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 
 marketplace_bp = Blueprint('marketplace', __name__, url_prefix='/api/marketplace')
 
@@ -89,10 +90,19 @@ def _adjust_persona_counters(pid, like_delta=0, dislike_delta=0):
 
 
 # ── 系统默认卡片：保证默认人设始终存在于卡片广场 ────────────────
+# 进程级一次性标记：系统卡补录是全局数据维护，每个请求都跑会白白多出
+# 多次 SELECT（甚至 UPDATE），列表接口首当其冲变慢。进程内跑过一次即可。
+_system_cards_ensured = False
+
+
 def ensure_system_cards():
     """幂等：把系统默认人设（加藤惠、陆驰、苏晚晴、沈砚）补录进卡片广场。
     作者挂到最早注册的管理员（或最早的注册用户）名下，仅创建缺失项。
     已存在的同名系统卡若仍是旧版提示词（缺少【与用户的关系】章节），一并升级。"""
+    global _system_cards_ensured
+    if _system_cards_ensured:
+        return
+
     from models import PersonaTemplate  # noqa: F401  (保持依赖显式)
     from routes.auth import _PERSONA_PROMPTS, _DEFAULT_AVATARS, _PRESET_GENDERS
 
@@ -132,6 +142,8 @@ def ensure_system_cards():
             dirty = True
     if dirty:
         db.session.commit()
+    # 成功跑完才置标记：首次执行失败（如数据库暂不可用）时下次请求仍可重试
+    _system_cards_ensured = True
 
 
 def ensure_system_adopts(user_id):
@@ -221,7 +233,8 @@ def list_marketplace_public():
     keyword = request.args.get('q', '').strip()
     gender_tag = request.args.get('gender', '').strip()
 
-    query = PersonaMarketplace.query
+    # joinedload author：to_dict 读 author.username，避免逐卡片懒加载（N+1）
+    query = PersonaMarketplace.query.options(joinedload(PersonaMarketplace.author))
     if keyword:
         query = query.filter(
             db.or_(
@@ -389,7 +402,9 @@ def list_marketplace():
     except Exception:
         db.session.rollback()
 
-    query = PersonaMarketplace.query
+    # joinedload author：to_dict 序列化会读 author.username，
+    # 不预取则每张卡片一次懒加载查询（N+1，一页 12 卡多出 12 次查询）
+    query = PersonaMarketplace.query.options(joinedload(PersonaMarketplace.author))
     if keyword:
         query = query.filter(
             db.or_(

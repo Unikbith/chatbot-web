@@ -28,6 +28,10 @@ const props = defineProps({
     type: [Number, String],
     default: null
   },
+  modelId: {
+    type: String,
+    default: ''
+  },
   systemPrompt: {
     type: String,
     default: ''
@@ -57,7 +61,8 @@ const emit = defineEmits([
   'newChat',
   'updateConversation',
   'conversationCreated',
-  'requireLogin'
+  'requireLogin',
+  'modelChange'
 ]);
 
 const opacityVal = computed(() => {
@@ -98,6 +103,73 @@ const loading = ref(false);
 const messageListRef = ref(null);
 const deepThink = ref(false);
 let abortController = null;
+
+// ========== 对话模型选择器（输入框左下角） ==========
+// 数据来源：当前用户全部已启用的对话模型配置（含配置内启用的模型），
+// 选择后以「配置ID::模型ID」组合值驱动，随消息请求带 provider_id + model_id。
+const chatProviders = ref([]);
+const modelSelectValue = ref(''); // `${providerId}::${modelId}`，模型为空时仅 providerId
+
+const modelOptions = computed(() => {
+  const groups = [];
+  for (const p of chatProviders.value) {
+    if (p.enabled === false) continue;
+    const models = (p.models || []).filter(m => m.enabled !== false);
+    if (models.length) {
+      groups.push({
+        provider: p,
+        options: models.map(m => ({
+          value: `${p.id}::${m.model_id}`,
+          label: m.name || m.model_id,
+        })),
+      });
+    } else if (p.model) {
+      // 配置未维护模型列表时，用配置自身的默认模型兜底
+      groups.push({
+        provider: p,
+        options: [{ value: `${p.id}::${p.model}`, label: p.model }],
+      });
+    }
+  }
+  return groups;
+});
+
+// 选择器当前显示值：与父组件传入的 providerId / modelId 保持同步
+const syncModelSelectValue = () => {
+  if (!props.providerId) { modelSelectValue.value = ''; return; }
+  modelSelectValue.value = props.modelId
+    ? `${props.providerId}::${props.modelId}`
+    : String(props.providerId);
+};
+watch(() => [props.providerId, props.modelId], syncModelSelectValue, { immediate: true });
+
+// 当前选中的展示文案（配置名 · 模型名）
+const currentModelLabel = computed(() => {
+  const p = chatProviders.value.find(x => x.id == props.providerId);
+  if (!p) return t('选择模型', 'Select model');
+  const m = (p.models || []).find(x => x.model_id === props.modelId);
+  return m ? `${p.name} · ${m.name || m.model_id}` : p.name;
+});
+
+const loadChatProviders = async () => {
+  try {
+    const res = await providersApi.list('chat');
+    if (res.code === 200) chatProviders.value = res.data || [];
+  } catch (e) {
+    logger.warn('加载模型配置失败', e);
+  }
+  // 模型配置面板关闭后会触发本函数：同时让「大模型原生生图」探测缓存失效，
+  // 避免改了图片配置 llm_tools 开关后仍沿用旧结果
+  llmToolsCache = null;
+};
+
+const handleModelSelect = (val) => {
+  if (!val) return;
+  const sep = val.indexOf('::');
+  const providerId = sep >= 0 ? Number(val.slice(0, sep)) : Number(val);
+  const modelId = sep >= 0 ? val.slice(sep + 2) : '';
+  emit('modelChange', { providerId, modelId });
+};
 
 // 图片上传
 const imageUploadRef = ref(null);
@@ -238,6 +310,7 @@ const handleSend = async () => {
       system_prompt: sysPrompt,
       temperature: props.temperature,
       provider_id: props.providerId,
+      model_id: props.modelId || undefined,
       conversation_id: convId,
     };
 
@@ -555,6 +628,7 @@ const regenerate = async (assistantIndex = null) => {
       system_prompt: props.systemPrompt,
       temperature: props.temperature,
       provider_id: props.providerId,
+      model_id: props.modelId || undefined,
       conversation_id: convId,
     };
 
@@ -639,11 +713,14 @@ defineExpose({
     scrollToBottom();
   },
   getMessages: () => messages.value,
-  scrollToBottom
+  scrollToBottom,
+  // 模型配置面板关闭后由父组件调用，刷新输入框模型选择器数据
+  reloadProviders: loadChatProviders
 });
 
 onMounted(() => {
   scrollToBottom();
+  loadChatProviders();
 });
 
 onUnmounted(() => {
@@ -821,7 +898,32 @@ onUnmounted(() => {
         
         <div class="input-actions">
           <div class="action-left">
-            <ImageUpload 
+            <!-- 当前对话使用的模型（多厂商配置时可在会话内随时切换） -->
+            <el-select
+              v-if="modelOptions.length"
+              v-model="modelSelectValue"
+              class="model-select"
+              size="small"
+              :title="t('选择当前对话使用的模型', 'Choose the model for this chat')"
+              @change="handleModelSelect"
+            >
+              <template #prefix>
+                <el-icon><MagicStick /></el-icon>
+              </template>
+              <el-option-group
+                v-for="group in modelOptions"
+                :key="group.provider.id"
+                :label="group.provider.name"
+              >
+                <el-option
+                  v-for="opt in group.options"
+                  :key="opt.value"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
+              </el-option-group>
+            </el-select>
+            <ImageUpload
               ref="imageUploadRef"
               @image-selected="handleImageSelected"
               @clear="handleImageCleared"
@@ -1372,6 +1474,24 @@ onUnmounted(() => {
   margin-left: 8px;
 }
 
+/* 输入框模型选择器：紧凑展示当前模型，完整配置名在下拉分组里 */
+.model-select {
+  width: 168px;
+  margin-right: 4px;
+}
+
+.model-select :deep(.el-select__wrapper) {
+  min-height: 26px;
+  border-radius: 999px;
+  box-shadow: none;
+  background: rgba(120, 130, 145, 0.08);
+}
+
+.model-select :deep(.el-select__wrapper:hover),
+.model-select :deep(.el-select__wrapper.is-focused) {
+  box-shadow: 0 0 0 1px var(--brand) inset;
+}
+
 .gen-mode-group {
   display: inline-flex;
   align-items: center;
@@ -1481,6 +1601,11 @@ onUnmounted(() => {
   
   .message-actions {
     opacity: 1;
+  }
+
+  /* 窄屏下压缩模型选择器宽度，避免挤占发送按钮 */
+  .model-select {
+    width: 112px;
   }
 }
 </style>

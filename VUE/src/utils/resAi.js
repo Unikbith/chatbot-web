@@ -388,9 +388,11 @@ const promptToolApi = {
 };
 
 // ========== 图片生成 API（Agnes 文生图 / 图生图） ==========
+// 生图/改图上游耗时较长（后端允许 120s），不能用实例默认的 30s 超时，
+// 否则图片还在生成就被前端以「超时」中断
 const imageApi = {
   async generate(data) {
-    return resAi.post('/api/image/generate', data);
+    return resAi.post('/api/image/generate', data, { timeout: 180000 });
   },
 };
 
