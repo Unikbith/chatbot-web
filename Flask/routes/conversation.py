@@ -72,6 +72,7 @@ def create_conversation():
     
     title = data.get('title', '新对话').strip() or '新对话'
     provider_id = data.get('provider_id')
+    model_id = data.get('model_id')
     persona_id = data.get('persona_id')
     system_prompt = data.get('system_prompt')
     temperature = data.get('temperature')
@@ -114,6 +115,7 @@ def create_conversation():
         user_id=user_id,
         title=title,
         provider_id=provider_id,
+        model_id=model_id,
         persona_id=persona_id,
         system_prompt=system_prompt,
         temperature=temperature

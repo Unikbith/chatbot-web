@@ -107,9 +107,30 @@ class AIService:
         if ssrf_err:
             return None, ssrf_err
 
-        # 深度思考模型（DeepSeek 特殊处理）
-        if deep_think and config['api_type'] == 'deepseek':
-            model = 'deepseek-reasoner'
+        # 厂商/模型识别（DeepSeek 切换与各家思考参数都依赖，统一提前计算）
+        model_lower = (model or config['model'] or '').lower()
+        brand = (getattr(provider, 'brand', '') or '').lower()
+
+        # DeepSeek：官方 API 没有「关闭思考」的参数，思考开关靠在
+        # deepseek-chat（对话）与 deepseek-reasoner（推理）两个模型间切换。
+        # 此前只处理了「开深思 → 切 reasoner」，若用户配置的就是 reasoner，
+        # 关掉深思依然是推理模型，导致"默认就在输出思考过程"。
+        # 识别规则：api_type=deepseek / brand=deepseek / 模型名含 deepseek，
+        # 覆盖中转网关自定义命名的场景。
+        is_deepseek = (
+            config['api_type'] == 'deepseek' or brand == 'deepseek'
+            or 'deepseek' in model_lower
+        )
+        if is_deepseek:
+            is_ds_reasoner = any(v in model_lower for v in ('reasoner', 'r1', 'think'))
+            if not deep_think and is_ds_reasoner:
+                # 关闭深思：推理模型切回对话模型（核心修复）
+                model = 'deepseek-chat'
+            elif deep_think and not is_ds_reasoner and (
+                config['api_type'] == 'deepseek' or model_lower.startswith('deepseek')
+            ):
+                # 开启深思：官方命名的对话模型切到推理模型
+                model = 'deepseek-reasoner'
 
         payload = {
             'model': model,
@@ -123,8 +144,6 @@ class AIService:
         # 智谱 GLM 与火山方舟用 thinking.type（enabled/disabled），且 GLM 接口不接受
         # frequency_penalty / presence_penalty，混用会导致 HTTP 400。
         # 识别规则：优先按模型名，其次按厂商 brand（覆盖自建网关/中转改名后的模型）。
-        model_lower = (model or config['model'] or '').lower()
-        brand = (getattr(provider, 'brand', '') or '').lower()
         is_zhipu = 'glm' in model_lower or brand == 'zhipu'
         is_qwen_reasoning = (
             ('qwen' in model_lower) or model_lower.startswith('qwq')

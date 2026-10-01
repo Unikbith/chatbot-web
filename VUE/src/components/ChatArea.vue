@@ -134,20 +134,41 @@ const modelOptions = computed(() => {
   return groups;
 });
 
+// 未显式选模型时，解析该配置实际会使用的默认模型：
+// 第一个启用的模型 → 配置默认模型（与后端解析顺序保持一致）。
+// 否则把裸 providerId（如 "1"）塞给 el-select，没有匹配项就会显示成 "1"。
+const resolveDefaultModelValue = () => {
+  const p = chatProviders.value.find(x => x.id == props.providerId);
+  if (!p) return '';
+  const models = (p.models || []).filter(m => m.enabled !== false);
+  if (models.length) return `${p.id}::${models[0].model_id}`;
+  if (p.model) return `${p.id}::${p.model}`;
+  return '';
+};
+
 // 选择器当前显示值：与父组件传入的 providerId / modelId 保持同步
 const syncModelSelectValue = () => {
   if (!props.providerId) { modelSelectValue.value = ''; return; }
-  modelSelectValue.value = props.modelId
-    ? `${props.providerId}::${props.modelId}`
-    : String(props.providerId);
+  if (props.modelId) {
+    modelSelectValue.value = `${props.providerId}::${props.modelId}`;
+    return;
+  }
+  modelSelectValue.value = resolveDefaultModelValue() || String(props.providerId);
 };
 watch(() => [props.providerId, props.modelId], syncModelSelectValue, { immediate: true });
+// 配置列表是异步加载/刷新的（模型配置面板关闭会 reload），默认模型解析依赖它，需重算
+watch(chatProviders, syncModelSelectValue);
 
 // 当前选中的展示文案（配置名 · 模型名）
 const currentModelLabel = computed(() => {
   const p = chatProviders.value.find(x => x.id == props.providerId);
   if (!p) return t('选择模型', 'Select model');
-  const m = (p.models || []).find(x => x.model_id === props.modelId);
+  let m = (p.models || []).find(x => x.model_id === props.modelId);
+  if (!m && !props.modelId) {
+    // 未显式选模型时展示实际会用的默认模型
+    const models = (p.models || []).filter(x => x.enabled !== false);
+    m = models[0] || (p.model ? { model_id: p.model, name: p.model } : null);
+  }
   return m ? `${p.name} · ${m.name || m.model_id}` : p.name;
 });
 
@@ -223,6 +244,7 @@ const ensureConversation = async () => {
     const res = await conversationApi.create({
       title: t('新对话', 'New Chat'),
       provider_id: props.providerId,
+      model_id: props.modelId || undefined,
       system_prompt: props.systemPrompt,
       temperature: props.temperature,
     });
