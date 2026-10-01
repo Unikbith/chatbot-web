@@ -17,8 +17,77 @@ from services.rate_limit import rate_limit
 chat_bp = Blueprint('chat', __name__, url_prefix='/api/chat')
 
 
-def iter_sse_content(response, full_content_holder, reasoning_holder, model_holder=None):
-    """遍历 API 流式响应，原文逐块透传（增量展示），思考过程单独下发。"""
+class _ThinkTagFilter:
+    """跨 chunk 安全剥离 <think>...</think> 段落的状态机。
+
+    部分中转网关会把 R1 类推理模型的思考过程混在正文（content）里以
+    <think>...</think> 输出，且标签可能被流式分块截断（如 "<th" + "ink>"），
+    需要带尾缓存的状态机处理。
+    """
+
+    _OPEN = "<think>"
+    _CLOSE = "</think>"
+
+    def __init__(self):
+        self.in_think = False
+        self.tail = ""
+
+    @classmethod
+    def _partial_len(cls, s, tag):
+        """s 末尾能构成 tag 前缀的最大长度（疑似被截断的标签）。"""
+        for k in range(min(len(s), len(tag) - 1), 0, -1):
+            if s.endswith(tag[:k]):
+                return k
+        return 0
+
+    def feed(self, text):
+        out = []
+        buf = self.tail + text
+        self.tail = ""
+        while buf:
+            if self.in_think:
+                idx = buf.find(self._CLOSE)
+                if idx >= 0:
+                    buf = buf[idx + len(self._CLOSE):]
+                    self.in_think = False
+                    if buf.startswith("\n"):
+                        buf = buf[1:]
+                    continue
+                keep = self._partial_len(buf, self._CLOSE)
+                self.tail = buf[len(buf) - keep:] if keep else ""
+                buf = ""
+            else:
+                idx = buf.find(self._OPEN)
+                if idx >= 0:
+                    out.append(buf[:idx])
+                    buf = buf[idx + len(self._OPEN):]
+                    self.in_think = True
+                    continue
+                keep = self._partial_len(buf, self._OPEN)
+                if keep:
+                    out.append(buf[:len(buf) - keep])
+                    self.tail = buf[len(buf) - keep:]
+                else:
+                    out.append(buf)
+                buf = ""
+        return "".join(out)
+
+    def flush(self):
+        """流结束：正文态的尾缓存是真实文本，吐出；思考态的尾缓存是思考内容，丢弃。"""
+        tail, self.tail = self.tail, ""
+        return "" if self.in_think else tail
+
+
+def iter_sse_content(response, full_content_holder, reasoning_holder, model_holder=None,
+                     deep_think=True):
+    """遍历 API 流式响应，原文逐块透传（增量展示），思考过程单独下发。
+
+    deep_think=False 时在服务端强制抑制思考输出（双保险，覆盖无法通过请求
+    参数关闭思考的中转网关，如自定义命名的 deepseek 系列模型）：
+    - reasoning_content 增量直接丢弃：不下发、不落库；
+    - content 中混入的 <think>...</think> 段落跨 chunk 剥离。
+    """
+    think_filter = None if deep_think else _ThinkTagFilter()
     new_content = ""
     finish_reason = None
 
@@ -44,11 +113,15 @@ def iter_sse_content(response, full_content_holder, reasoning_holder, model_hold
                     content = delta.get("content", "")
                     reasoning = delta.get("reasoning_content", "")
 
-                    if reasoning:
+                    if reasoning and not think_filter:
                         reasoning_holder[0] += reasoning
                         yield sse_reasoning(reasoning)
 
                     if content:
+                        if think_filter is not None:
+                            content = think_filter.feed(content)
+                            if not content:
+                                continue
                         new_content += content
                         full_content_holder[0] += content
                         # 输出原文增量而非整段 Markdown，真正实现逐 token 流式
@@ -58,6 +131,13 @@ def iter_sse_content(response, full_content_holder, reasoning_holder, model_hold
     except GeneratorExit:
         current_app.logger.info('客户端断开，停止生成')
         raise
+
+    if think_filter is not None:
+        tail = think_filter.flush()
+        if tail:
+            new_content += tail
+            full_content_holder[0] += tail
+            yield sse_content(tail)
 
     return new_content, finish_reason
 
@@ -435,7 +515,8 @@ def chat():
                 return
 
             new_content, finish_reason = yield from iter_sse_content(
-                response, full_content_holder, reasoning_holder, model_holder
+                response, full_content_holder, reasoning_holder, model_holder,
+                deep_think=deep_think,
             )
             full_content = full_content_holder[0]
 
