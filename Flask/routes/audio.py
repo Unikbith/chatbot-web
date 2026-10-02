@@ -9,6 +9,28 @@ from services.upload_guard import check_upload, MAX_AUDIO_SIZE
 audio_bp = Blueprint('audio', __name__, url_prefix='/api/audio')
 
 
+# 厂商英文错误对用户很难判断是「配置错了」还是「账号没权限」，
+# 这里把百炼常见错误映射成可行动的说明。
+_TTS_ERROR_HINTS = (
+    ('does not support http call', '当前 API Key 未开通该模型的 HTTP 调用权限（换用已开通的模型，或到百炼控制台开通）'),
+    ('AllocationQuota', '配额不足或免费额度已用完（百炼控制台查看该模型的额度与计费）'),
+    ('FreeTierOnly', '该模型仅免费额度可用且已耗尽（百炼控制台查看额度）'),
+    ('InvalidApiKey', 'API Key 无效或地域不匹配（语音合成需使用北京地域的 API Key）'),
+    ('Unsupported model', '模型 ID 不被支持（核对模型名，注意模型与音色必须配套）'),
+    ('TTS speak operation failed', '音色与模型不匹配（例如把 CosyVoice 音色用于 qwen-audio 会失败，请改配对音色）'),
+    ('Arrearage', '账号欠费，请充值后重试'),
+    ('Throttling', '请求过于频繁，请稍后重试'),
+)
+
+
+def _friendly_tts_error(error):
+    raw = str(error or '')
+    for key, hint in _TTS_ERROR_HINTS:
+        if key.lower() in raw.lower():
+            return f'{hint}（{raw[:120]}）'
+    return raw
+
+
 def _get_stt_provider(user_id, provider_id=None):
     """获取 STT 提供商（优先 stt 类型，没有则用 chat 类型）"""
     if provider_id:
@@ -112,7 +134,7 @@ def text_to_speech():
     try:
         audio_data, fmt, error = AIService.text_to_speech_with_format(provider, text, voice)
         if error:
-            return jsonify({'code': 500, 'message': f'合成失败: {error}'}), 500
+            return jsonify({'code': 500, 'message': f'合成失败: {_friendly_tts_error(error)}'}), 500
         if not audio_data:
             return jsonify({'code': 500, 'message': '合成失败: 未返回音频数据'}), 500
 

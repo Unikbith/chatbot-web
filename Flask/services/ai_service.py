@@ -434,19 +434,13 @@ class AIService:
         model = (provider.model or params.get('model') or '').strip()
         model_lower = model.lower()
 
-        # 域名选择（按官方文档）：
+        # 域名选择（实测 + 官方文档）：
         # - Qwen-Audio-TTS（qwen-audio-3.x）只在业务空间专属域名下可用，
-        #   公共域名 dashscope.aliyuncs.com 调不通；
-        # - CosyVoice / Qwen3-TTS 公共域名即可，用用户配置的地址。
-        # 优先级：显式 workspace_id > 内置业务空间（仅 qwen-audio）> 配置的 api_url
-        workspace_id = (params.get('workspace_id') or '').strip()
-        if workspace_id:
-            base = f'https://{workspace_id}.cn-beijing.maas.aliyuncs.com/api/v1'
-        elif 'qwen-audio' in model_lower:
-            base = AIService.DEFAULT_BAILIAN_MAAS_HOST + '/api/v1'
-        else:
-            base = (config['api_url'] or 'https://dashscope.aliyuncs.com/api/v1').rstrip('/')
-
+        #   公共域名 dashscope.aliyuncs.com 会报
+        #   "current user api does not support http call"；
+        # - 业务空间域名同样是 SpeechSynthesizer 端点，实测对 CosyVoice 也能用，
+        #   因此这里统一优先走业务空间域名，仅在拿不到时回退公共域名。
+        # 优先级：显式 workspace_id > 内置业务空间 > 配置的 api_url > 官方公共域名
         # 端点分流：SpeechSynthesizer 覆盖 CosyVoice 与 Qwen-Audio（含 3.x）
         is_speech_synth = (
             'cosyvoice' in model_lower
@@ -455,12 +449,27 @@ class AIService:
             or 'qwen-tts' in model_lower
         )
 
+        workspace_id = (params.get('workspace_id') or '').strip()
+        if workspace_id:
+            base = f'https://{workspace_id}.cn-beijing.maas.aliyuncs.com/api/v1'
+        elif is_speech_synth:
+            # 实测：公共域名上报 "current user api does not support http call"，
+            # 业务空间专属域名正常，故所有 SpeechSynthesizer 模型统一走它
+            base = AIService.DEFAULT_BAILIAN_MAAS_HOST + '/api/v1'
+        else:
+            base = (config['api_url'] or 'https://dashscope.aliyuncs.com/api/v1').rstrip('/')
+
         if is_speech_synth:
             tts_url = base + '/services/audio/tts/SpeechSynthesizer'
-            # 音色兜底：不同模型族的合法音色不同，按模型族给默认值，避免传空被拒
+            # 音色必须与模型族匹配：配置里存的 CosyVoice 音色（longxiaoxia 等）
+            # 拿去调 qwen-audio 会 400（"TTS speak operation failed"）。
+            # 这里做两件事：空值时按族兜底；有值但明显不属于该族时纠正。
             if not voice:
                 voice = ('longanhuan_v3.6' if 'qwen-audio' in model_lower
                          else 'longanyang')
+            elif 'qwen-audio' in model_lower and voice.startswith('long') and '_v3' not in voice:
+                # qwen-audio 系列只认 longanhuan_v3.6 / loongstella 这类音色
+                voice = 'longanhuan_v3.6'
             payload = {
                 'model': model,
                 'input': {
