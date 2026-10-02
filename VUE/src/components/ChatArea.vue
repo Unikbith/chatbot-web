@@ -4,7 +4,7 @@ import logger from '@/utils/logger';
 import { ElMessage, ElInput } from 'element-plus';
 import { 
   Setting, RefreshLeft, Lightning, 
-  Bell, CircleClose, Upload, Edit, MagicStick, Picture, Notebook
+  Bell, VideoPause, CircleClose, Upload, Edit, MagicStick, Picture, Notebook
 } from '@element-plus/icons-vue';
 import { readStream, chatApi, audioApi, imageApi, providersApi, conversationApi } from '@/utils/resAi';
 import auth from '@/utils/auth';
@@ -203,8 +203,41 @@ const genMode = ref('');
 
 // 语音播报
 const isSpeaking = ref(false);
+const isPaused = ref(false);     // 当前是否处于暂停（而非播放中）
 const speakingIndex = ref(null); // 正在播报的消息索引（用于显示「播报中」）
 let audioElement = null;
+
+// ===== TTS 结果缓存 =====
+// 同一段文本反复点「语音」会重复请求厂商（既慢又消耗额度），这里按
+// 「音色 + 文本」缓存 blob URL；命中缓存直接播放，不再发请求。
+const TTS_CACHE_MAX = 30; // 上限，超出按插入顺序淘汰最早的（简易 LRU）
+const ttsCache = new Map();
+
+function ttsCacheKey(voice, text) {
+  // 文本可能很长，用「长度 + 首尾片段」做指纹，避免超长 key
+  return `${voice || ''}|${text.length}|${text.slice(0, 40)}|${text.slice(-40)}`;
+}
+
+function ttsCacheGet(voice, text) {
+  const key = ttsCacheKey(voice, text);
+  if (!ttsCache.has(key)) return null;
+  // 命中后挪到末尾，维持插入顺序（最近使用的排在最后）
+  const url = ttsCache.get(key);
+  ttsCache.delete(key);
+  ttsCache.set(key, url);
+  return url;
+}
+
+function ttsCacheSet(voice, text, url) {
+  const key = ttsCacheKey(voice, text);
+  if (ttsCache.has(key)) URL.revokeObjectURL(ttsCache.get(key));
+  ttsCache.set(key, url);
+  while (ttsCache.size > TTS_CACHE_MAX) {
+    const oldest = ttsCache.keys().next().value;
+    URL.revokeObjectURL(ttsCache.get(oldest));
+    ttsCache.delete(oldest);
+  }
+}
 
 // 移动端（Android/iOS）浏览器要求：音频元素的首次 play() 必须发生在用户手势的
 // 「同步」上下文中。而合成语音要 await 几百毫秒~数秒，等拿到 blob 再 play()
@@ -597,12 +630,18 @@ const speakText = async (text, index) => {
 
   try {
     // 音色使用 TTS 模型配置中的音色（不传 voice，由后端按提供商配置决定）
-    const blob = await audioApi.textToSpeech(plainText, '');
-    // 合成期间已被更新的请求取代，丢弃本次结果
-    if (reqId !== speakReqSeq) return;
-
-    const url = URL.createObjectURL(blob);
-    currentAudioUrl = url;
+    const voice = '';
+    // 命中缓存直接复用音频，不再向厂商发请求
+    let url = ttsCacheGet(voice, plainText);
+    if (!url) {
+      const blob = await audioApi.textToSpeech(plainText, voice);
+      // 合成期间已被更新的请求取代，丢弃本次结果
+      if (reqId !== speakReqSeq) return;
+      url = URL.createObjectURL(blob);
+      ttsCacheSet(voice, plainText, url);
+    }
+    // 缓存中的 URL 由缓存自己管理生命周期，不随本次播放释放
+    currentAudioUrl = null;
 
     audioElement = new Audio(url);
     // 移动端：游离的 <audio> 在部分浏览器不播放，需挂到 DOM；
@@ -612,13 +651,15 @@ const speakText = async (text, index) => {
     audioElement.style.display = 'none';
     document.body.appendChild(audioElement);
 
+    // 注意：这里的 URL 来自缓存，由缓存负责释放，不能在此 revoke，
+    // 否则缓存里下一次命中会拿到已失效的 URL。
     const cleanup = () => {
       isSpeaking.value = false;
+      isPaused.value = false;
       speakingIndex.value = null;
       try { audioElement?.pause(); } catch { /* 忽略 */ }
       if (audioElement?.parentNode) audioElement.parentNode.removeChild(audioElement);
       audioElement = null;
-      releaseAudioUrl();
     };
 
     audioElement.onended = cleanup;
@@ -627,6 +668,7 @@ const speakText = async (text, index) => {
       cleanup();
     };
     isSpeaking.value = true;
+    isPaused.value = false;
     speakingIndex.value = index;
     // play() 在部分浏览器/移动端会因自动播放策略返回 rejected Promise，
     // 不 catch 会变成 unhandled rejection，用户只看到"没声音"却没有提示。
@@ -642,6 +684,26 @@ const speakText = async (text, index) => {
     ElMessage.warning(`语音播报失败：${e.message || '音频无法播放'}`);
   }
 };
+
+// 点击「语音」按钮的统一入口：同一条正在播放时暂停/继续，而不是重新合成。
+function toggleSpeak(text, index) {
+  const isCurrentTrack = speakingIndex.value === index && audioElement;
+  if (isCurrentTrack) {
+    if (audioElement.paused) {
+      audioElement.play().then(() => {
+        isPaused.value = false;
+      }).catch(() => {
+        ElMessage.warning('播放被浏览器阻止，请稍后重试');
+      });
+    } else {
+      audioElement.pause();
+      isPaused.value = true;
+    }
+    return;
+  }
+  // 另一条（或首次点击）：正常合成并播放
+  speakText(text, index);
+}
 
 // 释放当前音频对象 URL（幂等）
 const releaseAudioUrl = () => {
@@ -665,6 +727,7 @@ const stopSpeaking = () => {
   }
   releaseAudioUrl();
   isSpeaking.value = false;
+  isPaused.value = false;
   speakingIndex.value = null;
 };
 
@@ -957,11 +1020,14 @@ onUnmounted(() => {
                   v-if="(item.content || item.raw) && !item.imageUrl"
                   size="small" 
                   text 
-                  :icon="Bell" 
-                  @click="speakText(item.content || item.raw, index)"
+                  :icon="speakingIndex === index && !isPaused ? VideoPause : Bell"
+                  @click="toggleSpeak(item.content || item.raw, index)"
                   class="action-btn"
                 >
-                  {{ speakingIndex === index ? t('播放中', 'Playing') : t('语音', 'Voice') }}
+                  <template v-if="speakingIndex === index">
+                    {{ isPaused ? t('继续', 'Resume') : t('暂停', 'Pause') }}
+                  </template>
+                  <template v-else>{{ t('语音', 'Voice') }}</template>
                 </el-button>
                 <!-- token 消耗：厂商未返回 usage 时不展示 -->
                 <span v-if="item.tokens" class="token-usage" :title="t('本次回复消耗的 token 数', 'Tokens used by this reply')">
