@@ -206,6 +206,29 @@ const isSpeaking = ref(false);
 const speakingIndex = ref(null); // 正在播报的消息索引（用于显示「播报中」）
 let audioElement = null;
 
+// 移动端（Android/iOS）浏览器要求：音频元素的首次 play() 必须发生在用户手势的
+// 「同步」上下文中。而合成语音要 await 几百毫秒~数秒，等拿到 blob 再 play()
+// 手势上下文早已失效，浏览器会静默拒绝 -> 表现为「请求 200 但没声音」。
+// 因此在点击的同步阶段先用一个静音片段解锁，之后异步播放才被允许。
+let audioUnlocked = false;
+const MUTED_UNLOCK_WAV = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAD//w==';
+
+function unlockAudio() {
+  if (audioUnlocked) return;
+  try {
+    const el = new Audio(MUTED_UNLOCK_WAV);
+    el.muted = true;
+    const p = el.play();
+    if (p && typeof p.catch === 'function') {
+      p.then(() => { el.pause(); audioUnlocked = true; }).catch(() => {});
+    } else {
+      audioUnlocked = true;
+    }
+  } catch {
+    // 解锁失败不阻断，后续播放会走正常报错路径
+  }
+}
+
 // 编辑标题
 const editingTitle = ref(false);
 const editTitleInput = ref(null);
@@ -561,6 +584,8 @@ let currentAudioUrl = null;
 let speakReqSeq = 0;
 
 const speakText = async (text, index) => {
+  // 必须在 await 之前、仍处于用户手势同步上下文时解锁音频（移动端硬性要求）
+  unlockAudio();
   stopSpeaking();
   
   const plainText = text.replace(/<[^>]+>/g, '').trim();
@@ -580,16 +605,26 @@ const speakText = async (text, index) => {
     currentAudioUrl = url;
 
     audioElement = new Audio(url);
-    audioElement.onended = () => {
+    // 移动端：游离的 <audio> 在部分浏览器不播放，需挂到 DOM；
+    // playsinline 可避免 iOS 把音频交给全屏播放器接管。
+    audioElement.setAttribute('playsinline', '');
+    audioElement.preload = 'auto';
+    audioElement.style.display = 'none';
+    document.body.appendChild(audioElement);
+
+    const cleanup = () => {
       isSpeaking.value = false;
       speakingIndex.value = null;
+      try { audioElement?.pause(); } catch { /* 忽略 */ }
+      if (audioElement?.parentNode) audioElement.parentNode.removeChild(audioElement);
+      audioElement = null;
       releaseAudioUrl();
     };
+
+    audioElement.onended = cleanup;
     audioElement.onerror = (e) => {
-      isSpeaking.value = false;
-      speakingIndex.value = null;
-      releaseAudioUrl();
       logger.error('语音播放失败', e);
+      cleanup();
     };
     isSpeaking.value = true;
     speakingIndex.value = index;
@@ -598,11 +633,9 @@ const speakText = async (text, index) => {
     try {
       await audioElement.play();
     } catch (pe) {
-      isSpeaking.value = false;
-      speakingIndex.value = null;
-      releaseAudioUrl();
-      audioElement = null;
-      throw pe;
+      cleanup();
+      // 移动端最常见的失败原因：仍被自动播放策略拦截
+      throw new Error('浏览器阻止了自动播放，请再次点击语音按钮');
     }
   } catch (e) {
     logger.error('语音合成失败', e);
@@ -626,6 +659,8 @@ const stopSpeaking = () => {
     audioElement.onerror = null;
     audioElement.pause();
     audioElement.src = '';
+    // 播放时把元素挂到了 DOM 上（移动端需要），这里一并移除避免残留节点
+    if (audioElement.parentNode) audioElement.parentNode.removeChild(audioElement);
     audioElement = null;
   }
   releaseAudioUrl();
