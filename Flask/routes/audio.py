@@ -94,6 +94,13 @@ def text_to_speech():
     if not text:
         return jsonify({'code': 400, 'message': '文本不能为空'}), 400
 
+    # 长度保护：AI 的长回复可能上千字，而厂商对单次合成有字符上限
+    # （百炼 HTTP 非流式单次 20000 字符，按权重计数）。超限时截断，
+    # 否则会表现为「点了读语音没反应」。
+    max_chars = 18000
+    if len(text) > max_chars:
+        text = text[:max_chars]
+
     provider = _get_tts_provider(user_id, provider_id)
     if not provider:
         return jsonify({'code': 400, 'message': '请先配置语音合成模型提供商'}), 400

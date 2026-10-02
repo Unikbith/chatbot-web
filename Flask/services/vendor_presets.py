@@ -90,6 +90,7 @@ TTS_VENDORS = [
         # 模型族：CosyVoice（ cosyvoice-v1/v2/v3 ）、Qwen-TTS（qwen-tts / qwen3-tts /
         # qwen3-tts-vc ）、Qwen-Audio-TTS（qwen-audio-3.x-tts，需业务空间域名）
         'models': [
+            'cosyvoice-v1',
             'cosyvoice-v2',
             'cosyvoice-v3-flash',
             'cosyvoice-v3-plus',

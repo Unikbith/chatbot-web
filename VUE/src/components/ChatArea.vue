@@ -557,6 +557,8 @@ const handleVisionChat = async (text) => {
 // 语音播报
 // 保存当前播放的 object URL，便于在停止/卸载时释放，避免 blob 常驻内存
 let currentAudioUrl = null;
+// 语音合成请求令牌：合成是异步的，用于丢弃过期响应（见 speakText）
+let speakReqSeq = 0;
 
 const speakText = async (text, index) => {
   stopSpeaking();
@@ -564,9 +566,16 @@ const speakText = async (text, index) => {
   const plainText = text.replace(/<[^>]+>/g, '').trim();
   if (!plainText) return;
 
+  // 播放请求令牌：合成是异步的，期间用户可能又点了别的语音按钮。
+  // 没有令牌时后到的响应会覆盖当前播放对象、造成"点了没声音"。
+  const reqId = ++speakReqSeq;
+
   try {
     // 音色使用 TTS 模型配置中的音色（不传 voice，由后端按提供商配置决定）
     const blob = await audioApi.textToSpeech(plainText, '');
+    // 合成期间已被更新的请求取代，丢弃本次结果
+    if (reqId !== speakReqSeq) return;
+
     const url = URL.createObjectURL(blob);
     currentAudioUrl = url;
 
@@ -576,18 +585,28 @@ const speakText = async (text, index) => {
       speakingIndex.value = null;
       releaseAudioUrl();
     };
-    audioElement.onerror = () => {
+    audioElement.onerror = (e) => {
       isSpeaking.value = false;
       speakingIndex.value = null;
       releaseAudioUrl();
-      logger.error('语音播放失败');
+      logger.error('语音播放失败', e);
     };
     isSpeaking.value = true;
     speakingIndex.value = index;
-    audioElement.play();
+    // play() 在部分浏览器/移动端会因自动播放策略返回 rejected Promise，
+    // 不 catch 会变成 unhandled rejection，用户只看到"没声音"却没有提示。
+    try {
+      await audioElement.play();
+    } catch (pe) {
+      isSpeaking.value = false;
+      speakingIndex.value = null;
+      releaseAudioUrl();
+      audioElement = null;
+      throw pe;
+    }
   } catch (e) {
     logger.error('语音合成失败', e);
-    ElMessage.warning(`语音播报失败：${e.message || ''}`);
+    ElMessage.warning(`语音播报失败：${e.message || '音频无法播放'}`);
   }
 };
 
@@ -600,6 +619,8 @@ const releaseAudioUrl = () => {
 };
 
 const stopSpeaking = () => {
+  // 递增令牌：作废仍在合成途中的旧请求，避免其响应回来后覆盖当前播放
+  speakReqSeq++;
   if (audioElement) {
     audioElement.onended = null;
     audioElement.onerror = null;
