@@ -1190,7 +1190,6 @@ async function handleConvoSettingsSaved(payload) {
       v-model="convoSettingsVisible"
       :conversation="currentConv"
       :ai-personas="aiPersonas"
-      :configs="chatConfigs"
       :user-avatar="effectiveUserAvatar"
       :general-opacity="userSettings.message_opacity"
       :general-temperature="userSettings.temperature"

@@ -14,41 +14,6 @@
       </div>
 
       <template v-else>
-        <!-- 对话使用的模型（当前对话生效） -->
-        <div class="cv-section">
-          <div class="cv-title">{{ t('使用模型配置', 'Model Config') }}</div>
-          <div class="cv-row">
-            <el-select
-              v-model="form.provider_id"
-              clearable
-              :placeholder="t('选择模型配置', 'Select a config')"
-              style="width: 100%"
-              @change="onProviderChange"
-            >
-              <el-option
-                v-for="p in enabledConfigs"
-                :key="p.id"
-                :label="p.name"
-                :value="p.id"
-              />
-            </el-select>
-            <el-select
-              v-if="selectedProvider"
-              v-model="form.model_id"
-              clearable
-              :placeholder="t('选择该配置内的模型', 'Select a model in this config')"
-              style="width: 100%"
-            >
-              <el-option
-                v-for="m in providerModels(selectedProvider)"
-                :key="m.id"
-                :label="m.name || m.model_id"
-                :value="m.model_id"
-              />
-            </el-select>
-          </div>
-        </div>
-
         <!-- AI 人设 -->
         <div class="cv-section">
           <div class="cv-title">{{ t('人物设定', 'Persona') }}</div>
@@ -252,7 +217,6 @@ const props = defineProps({
   modelValue: { type: Boolean, default: false },
   conversation: { type: Object, default: null },
   aiPersonas: { type: Array, default: () => [] },
-  configs: { type: Array, default: () => [] },
   generalOpacity: { type: Number, default: 0.9 },
   userAvatar: { type: String, default: '' },
   generalTemperature: { type: Number, default: 0.8 },
@@ -264,20 +228,10 @@ const emit = defineEmits(['update:modelValue', 'save'])
 
 const saving = ref(false)
 // 仅列出已启用（enabled）的模型配置供当前对话选择
-const enabledConfigs = computed(() => (props.configs || []).filter(p => p.enabled !== false))
-const selectedProvider = computed(() =>
-  enabledConfigs.value.find(p => p.id == form.provider_id) || null
-)
-// 取某配置内已启用的模型
-function providerModels(p) {
-  return (p?.models || []).filter(m => m.enabled !== false)
-}
-const form = reactive({ provider_id: null, model_id: null, persona_id: null, ai_avatar: null, user_avatar: null, background_image: null, background_cover: 'contain', message_opacity: null, temperature: null, frequency_penalty: null, presence_penalty: null, auto_play_voice: false })
+const form = reactive({ persona_id: null, ai_avatar: null, user_avatar: null, background_image: null, background_cover: 'contain', message_opacity: null, temperature: null, frequency_penalty: null, presence_penalty: null, auto_play_voice: false })
 
 function resetForm() {
   const conv = props.conversation || {}
-  form.provider_id = conv.provider_id != null ? conv.provider_id : null
-  form.model_id = conv.model_id || null
   form.persona_id = conv.persona_id != null ? conv.persona_id : null
   form.ai_avatar = conv.ai_avatar || null
   form.user_avatar = conv.user_avatar || null
@@ -288,14 +242,6 @@ function resetForm() {
   form.frequency_penalty = (conv.frequency_penalty != null && conv.frequency_penalty !== '') ? conv.frequency_penalty : null
   form.presence_penalty = (conv.presence_penalty != null && conv.presence_penalty !== '') ? conv.presence_penalty : null
   form.auto_play_voice = !!conv.auto_play_voice
-}
-
-function onProviderChange() {
-  // 切换配置后，若原模型不属于新配置则清空
-  const models = providerModels(selectedProvider.value)
-  if (!models.some(m => m.model_id === form.model_id)) {
-    form.model_id = null
-  }
 }
 
 watch(() => props.modelValue, (val) => {
@@ -350,9 +296,10 @@ async function handleBgUpload(file) {
 
 function save() {
   saving.value = true
+  // 不再下发 provider_id / model_id：模型改由输入框左下角的模型选择器控制
+  //（每轮消息实时生效）。后端 `if 'provider_id' in data` 语义下传 null
+  // 会把对话的模型绑定清空，因此必须整项省略而不是置 null。
   emit('save', {
-    provider_id: form.provider_id != null ? form.provider_id : null,
-    model_id: form.model_id || null,
     persona_id: form.persona_id != null ? form.persona_id : null,
     ai_avatar: form.ai_avatar || null,
     user_avatar: form.user_avatar || null,
