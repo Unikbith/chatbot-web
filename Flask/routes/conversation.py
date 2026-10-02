@@ -3,6 +3,7 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
 from models import Conversation, Message, ModelProvider, PersonaTemplate, local_now
+from services.markdown_streamer import render_markdown
 from datetime import datetime, timedelta
 
 conversation_bp = Blueprint('conversation', __name__, url_prefix='/api/conversations')
@@ -145,11 +146,26 @@ def get_conversation(conv_id):
         Message.created_at.asc()
     ).all()
 
+    # 历史消息的 content 存的是纯文本（落库时 strip_html_to_text 剥掉了 HTML），
+    # 前端渲染走的是 v-html，直接塞纯文本会把所有段落压成一行——与刚生成完
+    # 走 sse_html(render_markdown()) 的效果不一致，表现为「切页面后文字折叠」。
+    # 这里额外给 assistant 消息补一个渲染好的 HTML 字段，前端优先用它。
+    payload = []
+    for m in messages:
+        d = m.to_dict()
+        if m.role == 'assistant' and m.content:
+            try:
+                d['content_html'] = render_markdown(m.content)
+            except Exception:
+                # 渲染失败不阻断历史消息加载
+                d['content_html'] = ''
+        payload.append(d)
+
     return jsonify({
         'code': 200,
         'data': {
             **conv.to_dict(),
-            'messages': [m.to_dict() for m in messages]
+            'messages': payload
         }
     })
 

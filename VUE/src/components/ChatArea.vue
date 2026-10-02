@@ -731,7 +731,9 @@ const handlePromptInsert = (text) => {
 defineExpose({
   setMessages: (msgList) => {
     messages.value = msgList.map(m => {
-      const item = createMessage(m.role, m.content, m.image_url || m.imageUrl);
+      // 优先用后端渲染好的 HTML（content_html），避免纯文本进 v-html 把段落压成一行；
+      // 老数据或渲染失败时回退原 content
+      const item = createMessage(m.role, m.content_html || m.content, m.image_url || m.imageUrl);
       // 回填思考过程与 token 用量（历史消息才能显示"深度思考"展开与消耗）
       if (m.reasoning_content) { item.reasoning = m.reasoning_content; item.showReasoning = true; }
       const total = m.total_tokens
