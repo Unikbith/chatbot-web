@@ -1591,27 +1591,175 @@ onUnmounted(() => {
   filter: brightness(1.08);
 }
 
-/* Markdown 样式补充 */
-.content-text :deep(img) { max-width: 100%; border-radius: 6px; }
+/* ===== Markdown 渲染排版 =====
+   模型输出以标准 Markdown 为主，这里把标题、列表、引用、表格等结构做成
+   统一的视觉层级：靠前的留白小、靠后的留白大，避免全篇都是同一种段落。 */
+.content-text :deep(h1),
+.content-text :deep(h2),
+.content-text :deep(h3),
+.content-text :deep(h4) {
+  margin: 1.4em 0 0.6em;
+  font-weight: 650;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+.content-text :deep(h1) { font-size: 1.4em; }
+.content-text :deep(h2) {
+  font-size: 1.25em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border-color, rgba(120, 130, 145, 0.18));
+}
+.content-text :deep(h3) { font-size: 1.1em; }
+.content-text :deep(h4) { font-size: 1em; color: var(--text-secondary); }
+/* 标题紧跟上一个元素时收紧上间距，避免出现大段空白 */
+.content-text :deep(h1:first-child),
+.content-text :deep(h2:first-child),
+.content-text :deep(h3:first-child),
+.content-text :deep(h4:first-child) { margin-top: 0; }
+
+/* 列表：去掉浏览器默认的实心圆点，换成更轻的品牌色标记 */
+.content-text :deep(ul),
+.content-text :deep(ol) {
+  margin: 0 0 1em;
+  padding-left: 1.5em;
+}
+.content-text :deep(li) { margin: 0.3em 0; }
+.content-text :deep(ul > li) { list-style: none; position: relative; }
+.content-text :deep(ul > li)::before {
+  content: '';
+  position: absolute;
+  left: -0.9em;
+  top: 0.72em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--brand);
+  opacity: 0.55;
+}
+.content-text :deep(ol > li)::marker { color: var(--brand); font-weight: 600; }
+/* 嵌套列表略微缩进，层级更清楚 */
+.content-text :deep(ul ul),
+.content-text :deep(ol ol),
+.content-text :deep(ul ol),
+.content-text :deep(ol ul) {
+  margin: 0.3em 0 0.2em;
+}
+
+/* 引用块：左侧竖线 + 浅底，用于强调原文 */
+.content-text :deep(blockquote) {
+  margin: 0 0 1em;
+  padding: 0.6em 1em;
+  border-left: 3px solid var(--brand);
+  background: rgba(120, 130, 145, 0.07);
+  border-radius: 0 8px 8px 0;
+  color: var(--text-secondary);
+}
+.content-text :deep(blockquote > :last-child) { margin-bottom: 0; }
+
+/* 分割线：细一点，两侧留出呼吸感 */
+.content-text :deep(hr) {
+  margin: 1.6em 0;
+  border: none;
+  border-top: 1px solid var(--border-color, rgba(120, 130, 145, 0.18));
+}
+
+/* 表格：横向可滚动，不撑破消息气泡 */
+.content-text :deep(table) {
+  width: 100%;
+  margin: 0 0 1em;
+  border-collapse: collapse;
+  font-size: 0.94em;
+  display: block;
+  overflow-x: auto;
+}
+.content-text :deep(th),
+.content-text :deep(td) {
+  padding: 8px 12px;
+  border: 1px solid var(--border-color, rgba(120, 130, 145, 0.2));
+  text-align: left;
+}
+.content-text :deep(th) {
+  background: rgba(120, 130, 145, 0.09);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.content-text :deep(tbody tr:nth-child(even)) {
+  background: rgba(120, 130, 145, 0.04);
+}
+
+/* 加粗与斜体的强调色，便于扫读 */
+.content-text :deep(strong) { font-weight: 650; color: var(--text-primary); }
+.content-text :deep(em) { font-style: italic; }
+
+.content-text :deep(img) {
+  max-width: 100%;
+  border-radius: 8px;
+  display: block;
+  margin: 0.4em 0;
+}
 .content-text :deep(pre) {
   background: #1f2937;
   padding: 12px 16px;
-  border-radius: 8px;
+  border-radius: 10px;
   overflow-x: auto;
-  margin: 12px 0;
+  margin: 0 0 1em;
+  line-height: 1.55;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 .content-text :deep(code) {
-  background: rgba(0, 0, 0, 0.06);
+  background: rgba(120, 130, 145, 0.12);
   padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 0.9em;
+  border-radius: 5px;
+  font-size: 0.88em;
   font-family: 'SF Mono', Consolas, monospace;
 }
-.content-text :deep(pre code) { background: none; padding: 0; color: #e5e7eb; }
-.content-text :deep(a) { color: var(--brand); }
+.content-text :deep(pre code) {
+  background: none;
+  padding: 0;
+  color: #e5e7eb;
+  font-size: 0.88em;
+}
+.content-text :deep(a) {
+  color: var(--brand);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(110, 143, 223, 0.4);
+  transition: border-color 0.15s ease;
+}
+.content-text :deep(a:hover) { border-bottom-color: var(--brand); }
 
-.message-user .content-text :deep(a) { color: #fff; text-decoration: underline; }
-.message-user .content-text :deep(code) { background: rgba(255,255,255,0.2); }
+/* 移动端：表格与代码块在窄屏更容易溢出，统一压一档字号 */
+@media (max-width: 768px) {
+  .content-text :deep(table) { font-size: 0.88em; }
+  .content-text :deep(th),
+  .content-text :deep(td) { padding: 6px 8px; }
+  .content-text :deep(pre) { padding: 10px 12px; }
+  .content-text :deep(blockquote) { padding: 0.5em 0.8em; }
+}
+
+/* 用户气泡是深色底，Markdown 元素需反色，否则标题/表格/引用会看不清 */
+.message-user .content-text :deep(a) { color: #fff; border-bottom-color: rgba(255, 255, 255, 0.5); }
+.message-user .content-text :deep(code) { background: rgba(255, 255, 255, 0.2); color: #fff; }
+.message-user .content-text :deep(strong) { color: #fff; }
+.message-user .content-text :deep(h1),
+.message-user .content-text :deep(h2),
+.message-user .content-text :deep(h3),
+.message-user .content-text :deep(h4) { color: #fff; }
+.message-user .content-text :deep(h2) { border-bottom-color: rgba(255, 255, 255, 0.3); }
+.message-user .content-text :deep(hr) { border-top-color: rgba(255, 255, 255, 0.3); }
+.message-user .content-text :deep(blockquote) {
+  background: rgba(255, 255, 255, 0.14);
+  border-left-color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 255, 255, 0.92);
+}
+.message-user .content-text :deep(th) {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+.message-user .content-text :deep(td),
+.message-user .content-text :deep(th) { border-color: rgba(255, 255, 255, 0.28); }
+.message-user .content-text :deep(tbody tr:nth-child(even)) { background: rgba(255, 255, 255, 0.08); }
+.message-user .content-text :deep(ul > li)::before { background: #fff; opacity: 0.85; }
+.message-user .content-text :deep(ol > li)::marker { color: #fff; }
 
 /* 响应式 */
 @media (max-width: 768px) {

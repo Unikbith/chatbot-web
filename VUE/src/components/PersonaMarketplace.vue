@@ -309,7 +309,7 @@
         <el-form-item :label="t('名称', 'Name')" required>
           <el-input v-model="publishForm.name" maxlength="1000" />
         </el-form-item>
-        <el-form-item :label="t('描述 (30-1000字)', 'Description (30-1000 chars)')" required>
+        <el-form-item :label="t('描述', 'Description')" required>
           <el-input v-model="publishForm.description" type="textarea" :rows="2" maxlength="1000" resize="none" />
         </el-form-item>
         <el-form-item :label="t('人物卡性别', 'Gender')" required>
@@ -329,10 +329,10 @@
             />
           </div>
         </el-form-item>
-        <el-form-item :label="t('人设提示词 (100-10000字，超出最多50000字)', 'Character Prompt (100-10000 chars, up to 50000)')" required>
+        <el-form-item :label="t('人设提示词', 'Character Prompt')" required>
           <el-input v-model="publishForm.system_prompt" type="textarea" :rows="5" maxlength="50000" resize="none" />
         </el-form-item>
-        <el-form-item :label="t('开场白 (最多1000字)', 'Greeting (max 1000 chars)')" required>
+        <el-form-item :label="t('开场白', 'Greeting')" required>
           <el-input v-model="publishForm.greeting" type="textarea" :rows="2" maxlength="1000" resize="none" />
         </el-form-item>
         <el-form-item :label="t('头像', 'Avatar')" required>

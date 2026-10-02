@@ -446,6 +446,9 @@ const adminApi = {
   async deleteConversation(convId) {
     return adminReq.delete(`/api/admin/conversations/${convId}`);
   },
+  async batchDeleteConversations(ids) {
+    return adminReq.post(`/api/admin/conversations/batch-delete`, { ids });
+  },
   async exportConversation(convId) {
     const token = localStorage.getItem("admin_token");
     const response = await fetch(`${baseURL}/api/admin/conversations/${convId}/export`, {

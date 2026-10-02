@@ -315,6 +315,49 @@ def delete_conversation(conv_id):
     })
 
 
+@admin_bp.route('/conversations/batch-delete', methods=['POST'])
+@admin_required
+def batch_delete_conversations():
+    """管理员批量彻底删除对话（连同消息）。
+
+    用于后台清理「已移除」（用户软删除、消息已不存在）的对话残留。
+    逐条真删并返回成功/跳过的明细，便于前端提示与刷新。
+    """
+    data = request.get_json() or {}
+    ids = data.get('ids') or []
+    if not isinstance(ids, list) or not ids:
+        return jsonify({'code': 400, 'message': '请选择要删除的对话'}), 400
+    # 上限保护：单次最多 200 条，避免超大请求拖垮数据库
+    if len(ids) > 200:
+        return jsonify({'code': 400, 'message': '单次最多删除 200 条'}), 400
+    try:
+        ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return jsonify({'code': 400, 'message': '参数不合法'}), 400
+
+    deleted = []
+    skipped = []
+    for conv_id in ids:
+        conv = Conversation.query.get(conv_id)
+        if not conv:
+            skipped.append({'id': conv_id, 'reason': '不存在'})
+            continue
+        Message.query.filter_by(conversation_id=conv_id).delete(synchronize_session=False)
+        db.session.delete(conv)
+        deleted.append({'id': conv_id, 'title': conv.title, 'user_id': conv.user_id})
+
+    if deleted:
+        db.session.commit()
+    else:
+        db.session.rollback()
+
+    return jsonify({
+        'code': 200,
+        'message': f'已删除 {len(deleted)} 条' + (f'，跳过 {len(skipped)} 条' if skipped else ''),
+        'data': {'deleted': deleted, 'skipped': skipped},
+    })
+
+
 @admin_bp.route('/conversations/<int:conv_id>/messages', methods=['GET'])
 @admin_required
 def conversation_messages(conv_id):

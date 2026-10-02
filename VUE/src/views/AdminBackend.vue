@@ -125,11 +125,14 @@
             <el-table-column type="expand">
               <template #default="{ row }">
                 <el-table
+                  ref="convTableRef"
                   :data="row._conversations || []"
                   class="inner-table"
                   row-key="id"
                   v-loading="row._loading"
+                  @selection-change="(sel) => onConvSelectChange(row, sel)"
                 >
+                  <el-table-column type="selection" width="42" :selectable="(conv) => canSelectConv(conv)" />
                   <el-table-column prop="title" :label="t('对话标题', 'Conversation')" min-width="150" show-overflow-tooltip />
                   <el-table-column prop="message_count" :label="t('消息数', 'Msgs')" width="80" align="center">
                     <template #default="{ row: conv }">
@@ -183,6 +186,33 @@
                     </template>
                   </el-table-column>
                 </el-table>
+                <!-- 批量清理：只允许勾选「已移除」的对话（消息已被用户删除，数据库里是残留） -->
+                <div v-if="removedConvsOf(row).length" class="batch-bar">
+                  <span class="batch-hint">
+                    {{ t('该用户有', 'This user has') }} {{ removedConvsOf(row).length }}
+                    {{ t('条已移除的对话', 'removed conversations') }}
+                  </span>
+                  <div class="batch-actions">
+                    <el-button size="small" plain @click="selectAllRemoved(row)">
+                      {{ t('全选已移除', 'Select all removed') }}
+                    </el-button>
+                    <el-button size="small" plain @click="clearConvSelection(row)">
+                      {{ t('取消选择', 'Clear') }}
+                    </el-button>
+                    <el-button
+                      size="small"
+                      type="danger"
+                      :disabled="!selectedConvIds[row.id]?.length || batchDeleting"
+                      :loading="batchDeleting"
+                      @click="batchDeleteRemoved(row)"
+                    >
+                      {{ t('批量删除', 'Delete selected') }}
+                      <template v-if="selectedConvIds[row.id]?.length">
+                        ({{ selectedConvIds[row.id].length }})
+                      </template>
+                    </el-button>
+                  </div>
+                </div>
                 <div v-if="!row._conversations || row._conversations.length === 0" class="col-empty-inner">{{ t('该用户暂无对话', 'No conversations') }}</div>
               </template>
             </el-table-column>
@@ -618,7 +648,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Back, SwitchButton, Monitor, View, Download, Delete, ChatLineRound } from '@element-plus/icons-vue'
@@ -638,6 +668,11 @@ const allUsers = ref([])
 const userTableRef = ref(null)
 // 当前展开的用户 id 集合：刷新列表后据此恢复展开状态，避免展开区白屏
 const expandedUserIds = ref(new Set())
+// 每个用户展开区里被勾选的对话 id（key = userId）：仅允许勾选「已移除」的对话
+const selectedConvIds = ref({})
+const batchDeleting = ref(false)
+// 内层对话表格 ref：批量勾选/取消时同步表格选中状态
+const convTableRef = ref(null)
 const activeTab = ref('users')
 
 // 混合筛选条件（每个条件都可单独使用，也可任意叠加）
@@ -808,7 +843,7 @@ async function loadStats() {
   }
 }
 
-async function loadUsers() {
+async function loadUsers(opts = {}) {
   usersLoading.value = true
   try {
     const res = await adminApi.users()
@@ -825,6 +860,10 @@ async function loadUsers() {
         const old = oldById.get(u.id)
         return old ? Object.assign(old, u) : { ...u, _conversations: null, _loading: false }
       })
+      if (!opts.keepSelection) {
+        // 普通刷新：清空已勾选的对话（行数据可能已变），下次展开重新勾选
+        selectedConvIds.value = {}
+      }
       applyFilters()
       await restoreExpandedRows()
     } else if (res.code === 403) {
@@ -876,6 +915,82 @@ function onUserExpand(row, expandedRows) {
     loadConversations(row)
   } else {
     expandedUserIds.value.delete(row.id)
+  }
+}
+
+// ---- 批量删除「已移除」的对话 ----
+// 用户的删除是软删除（deleted_at），数据库里仍残留对话行；后台可批量真删清理。
+// 只允许勾选 exists=false 的行，避免误删用户仍在使用的对话。
+function canSelectConv(conv) {
+  return conv && conv.exists === false
+}
+
+function removedConvsOf(row) {
+  return (row._conversations || []).filter(c => c.exists === false)
+}
+
+function onConvSelectChange(row, selection) {
+  const next = { ...selectedConvIds.value }
+  next[row.id] = (selection || []).filter(c => canSelectConv(c)).map(c => c.id)
+  selectedConvIds.value = next
+}
+
+function selectAllRemoved(row) {
+  const ids = removedConvsOf(row).map(c => c.id)
+  const next = { ...selectedConvIds.value }
+  next[row.id] = ids
+  selectedConvIds.value = next
+  // 同步表格勾选状态（逐行 toggleRowSelection，nextTick 等表格渲染完）
+  nextTick(() => {
+    const table = convTableRef.value
+    if (!table) return
+    for (const conv of row._conversations || []) {
+      table.toggleRowSelection(conv, ids.includes(conv.id))
+    }
+  })
+}
+
+function clearConvSelection(row) {
+  const next = { ...selectedConvIds.value }
+  next[row.id] = []
+  selectedConvIds.value = next
+  nextTick(() => {
+    const table = convTableRef.value
+    if (!table) return
+    for (const conv of row._conversations || []) {
+      table.toggleRowSelection(conv, false)
+    }
+  })
+}
+
+async function batchDeleteRemoved(row) {
+  const ids = selectedConvIds.value[row.id] || []
+  if (!ids.length) return
+  try {
+    await ElMessageBox.confirm(
+      t(`确定彻底删除选中的 ${ids.length} 条已移除对话及其全部消息吗？该操作不可恢复。`,
+        `Permanently delete ${ids.length} selected removed conversation(s) and all their messages? This cannot be undone.`),
+      t('确认删除', 'Confirm delete'),
+      { type: 'warning', confirmButtonText: t('删除', 'Delete'), cancelButtonText: t('取消', 'Cancel') }
+    )
+  } catch (e) {
+    return // 用户取消
+  }
+
+  batchDeleting.value = true
+  try {
+    const res = await adminApi.batchDeleteConversations(ids)
+    if (res.code === 200) {
+      ElMessage.success(res.message || t('删除成功', 'Deleted'))
+      clearConvSelection(row)
+      // 重新拉取该用户的对话列表 + 后台统计（对话数会变）
+      row._conversations = null
+      await Promise.all([loadConversations(row), loadStats(), loadUsers({ keepSelection: true })])
+    }
+  } catch (e) {
+    ElMessage.error(t('批量删除失败', 'Batch delete failed'))
+  } finally {
+    batchDeleting.value = false
   }
 }
 
@@ -1244,6 +1359,44 @@ watch(activeTab, (val) => {
   color: #a9815a;
   padding: 8px 0;
   text-align: center;
+}
+
+/* 批量清理条：仅在存在「已移除」对话时出现 */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(245, 247, 250, 0.9);
+  border: 1px solid var(--border-color, #e9e0d4);
+}
+
+.batch-hint {
+  font-size: 12px;
+  color: #909399;
+}
+
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 移动端：批量操作条纵向排布，按钮不挤压 */
+@media (max-width: 768px) {
+  .batch-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .batch-actions {
+    justify-content: flex-end;
+  }
 }
 
 .admin-tabs {
