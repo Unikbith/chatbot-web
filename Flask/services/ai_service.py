@@ -48,9 +48,16 @@ class AIService:
         return None
 
     @staticmethod
-    def _request_kwargs(provider_params, timeout, override_timeout=None):
-        """构造 requests 通用参数（超时、代理）"""
+    def _request_kwargs(provider_params, timeout, override_timeout=None, min_timeout=None):
+        """构造 requests 通用参数（超时、代理）
+
+        min_timeout：业务下限。厂商的 timeout 配置常常是按聊天接口设的默认值
+        （如 20 秒），但 TTS 合成音频（尤其长文本 + wav 编码）明显更慢，
+        直接沿用会导致必然超时，这里为该类调用兜一个下限。
+        """
         t = int(override_timeout or provider_params.get('timeout') or timeout)
+        if min_timeout and t < min_timeout:
+            t = min_timeout
         kwargs = {'timeout': t}
         proxy = provider_params.get('proxy')
         if proxy:
@@ -428,6 +435,27 @@ class AIService:
     }
 
     @staticmethod
+    def _post_with_retry(url, headers=None, json=None, params=None,
+                         default_timeout=90, min_timeout=None, retries=1):
+        """带重试的 POST：只对网络类错误重试，超时/连接/DNS 抖动很常见。
+
+        4xx 业务错误（如参数非法、无权限）不重试——重试不会改变结果，
+        只会让用户多等。
+        """
+        kwargs = AIService._request_kwargs(params or {}, default_timeout,
+                                           min_timeout=min_timeout)
+        last_err = None
+        for attempt in range(retries + 1):
+            try:
+                return requests.post(url, headers=headers, json=json, **kwargs)
+            except requests.RequestException as e:
+                last_err = e
+                if attempt >= retries:
+                    raise
+                time.sleep(1.2 * (attempt + 1))
+        raise last_err
+
+    @staticmethod
     def _dashscope_tts(provider, config, params, text, voice):
         """阿里云百炼 TTS 原生协议（OpenAI 兼容端点不支持 /audio/speech）。
 
@@ -532,9 +560,13 @@ class AIService:
             headers['X-DashScope-SSE'] = 'enable'
 
         try:
-            resp = requests.post(
+            # TTS 合成比聊天慢得多：长文本 + wav 编码常需 20~60 秒，
+            # 厂商 timeout 配置（默认 20）会直接导致必然超时，故给 60 秒下限。
+            # 网络抖动（超时 / DNS 临时失败 / 连接重置）重试一次，
+            # 但对 4xx 业务错误不重试——重试也不会变。
+            resp = AIService._post_with_retry(
                 tts_url, headers=headers, json=payload,
-                **AIService._request_kwargs(params, 90)
+                params=params, default_timeout=90, min_timeout=60,
             )
             if resp.status_code not in (200, 201):
                 return None, f"HTTP {resp.status_code}: {resp.text[:300]}"

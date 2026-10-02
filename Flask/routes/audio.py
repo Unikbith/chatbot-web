@@ -20,6 +20,12 @@ _TTS_ERROR_HINTS = (
     ('TTS speak operation failed', '音色与模型不匹配（例如把 CosyVoice 音色用于 qwen-audio 会失败，请改配对音色）'),
     ('Arrearage', '账号欠费，请充值后重试'),
     ('Throttling', '请求过于频繁，请稍后重试'),
+    # 网络类
+    ('getaddrinfo failed', '无法解析业务空间域名。请在模型配置里填写自己百炼控制台的「业务空间 ID」（形如 ws-xxxxxxxx）'),
+    ('Name or service not known', '无法解析业务空间域名。请在模型配置里填写自己百炼控制台的「业务空间 ID」'),
+    ('Connection refused', '连接被拒绝，请检查网络或代理设置'),
+    ('Read timed out', '合成超时（长文本合成较慢，可把 TTS 配置的超时时间调大，或先分段播报）'),
+    ('SSLError', 'SSL 证书校验失败，通常是代理或网络拦截所致'),
 )
 
 
