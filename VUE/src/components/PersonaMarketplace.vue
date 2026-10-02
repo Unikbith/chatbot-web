@@ -1660,24 +1660,71 @@ function formatDate(ts) {
     height: calc(100dvh - 148px);
     max-height: calc(100dvh - 148px);
   }
+  /* 移动端：左上角信息区改为「头像 + 右侧信息」横向紧凑排布。
+     原先是纵向堆叠且 flex-shrink:0 不参与滚动，140×180 的头像加上
+     赞踩/描述/创作者把首屏几乎占满，内容区只剩很小一条，
+     用户第一眼看不到人设提示词与开场白，交互感很差。
+     改成横向后纵向空间让给内容，头像也相应缩小。 */
   .detail-left {
     width: 100%;
-    flex-shrink: 0;   /* 左侧信息区固定高度，不参与内部滚动 */
+    flex-shrink: 0;
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    grid-template-areas:
+      'avatar votes'
+      'avatar desc'
+      'creator creator';
+    align-items: start;
+    column-gap: 14px;
+    row-gap: 10px;
     border-right: none;
     border-bottom: 1px solid var(--border-color);
-    padding: 16px;
+    padding: 14px 16px;
     overflow-y: visible;
   }
   .dl-avatar {
-    width: 140px;
-    height: 180px;
+    grid-area: avatar;
+    width: 96px;
+    height: 124px;
+  }
+  .dl-votes {
+    grid-area: votes;
+    align-self: center;
+    /* 桌面端三个按钮竖排（父容器 column），横向布局下改为横排更省高度 */
+    flex-direction: row;
+    gap: 8px;
+  }
+  .dl-desc {
+    grid-area: desc;
+    /* 桌面端为居中排版，横向布局下改左对齐更易读 */
+    text-align: left;
+    /* 限制行数：过长会把创作者行挤到折叠线以下 */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+  .dl-creator-info,
+  .dl-creator-actions { grid-area: creator; }
+  .dl-creator-info {
+    justify-content: flex-start;
+    margin-top: 0;   /* 桌面端靠 margin-top 拉开与描述的距离，网格已负责行距 */
   }
   .dr-scroll {
     padding: 16px;
+    /* 移动端适当加大行距与段间距：内容区宽度有限，行高太小会挤成一片，
+       读长提示词时体验差 */
+    line-height: 1.75;
   }
+  /* dr-section 自身是 flex + gap 布局，用 gap 拉开段间距而非 margin */
+  .dr-section { gap: 10px; }
   .dr-bottom {
     padding: 12px 16px 16px;
   }
+  /* 添加按钮在移动端加大点击区域（≥44px） */
+  .adopt-btn { min-height: 44px; }
 
   /* 顶部工具栏：搜索框整行独占，性别/排序弹性收缩，
      避免三个固定宽度控件在窄屏挤成多行碎片 */
