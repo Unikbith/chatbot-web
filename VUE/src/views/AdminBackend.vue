@@ -114,6 +114,7 @@
           </div>
 
           <el-table
+            ref="userTableRef"
             :data="users"
             v-loading="usersLoading"
             class="admin-table"
@@ -634,6 +635,9 @@ const users = ref([])
 const statsLoading = ref(false)
 const usersLoading = ref(false)
 const allUsers = ref([])
+const userTableRef = ref(null)
+// 当前展开的用户 id 集合：刷新列表后据此恢复展开状态，避免展开区白屏
+const expandedUserIds = ref(new Set())
 const activeTab = ref('users')
 
 // 混合筛选条件（每个条件都可单独使用，也可任意叠加）
@@ -812,8 +816,17 @@ async function loadUsers() {
       // 后端已支持分页：返回 { items, total, page, pages }；兼容旧版直接返回数组
       const payload = res.data
       const list = Array.isArray(payload) ? payload : (payload?.items || [])
-      allUsers.value = list.map(u => ({ ...u, _conversations: null, _loading: false }))
+      // 关键：不能整体替换行对象。el-table 以 row 对象身份维护展开状态
+      //（expandedRows.includes(row)），换成新对象会让所有展开行失效，
+      // 表现为「刷新后展开区白屏」。这里按 id 复用旧行对象，保留
+      // _conversations / _loading，从而保住展开状态与已加载的对话数据。
+      const oldById = new Map(allUsers.value.map(u => [u.id, u]))
+      allUsers.value = list.map(u => {
+        const old = oldById.get(u.id)
+        return old ? Object.assign(old, u) : { ...u, _conversations: null, _loading: false }
+      })
       applyFilters()
+      await restoreExpandedRows()
     } else if (res.code === 403) {
       ElMessage.warning(t('无管理员权限', 'No admin permission'))
     }
@@ -821,6 +834,21 @@ async function loadUsers() {
     ElMessage.error(t('加载用户失败', 'Failed to load users'))
   } finally {
     usersLoading.value = false
+  }
+}
+
+// 刷新用户列表后恢复此前的展开行，并按需补载尚未取过的对话数据
+async function restoreExpandedRows() {
+  const table = userTableRef.value
+  if (!table) return
+  const expanded = expandedUserIds.value
+  if (!expanded.size) return
+  for (const row of users.value) {
+    if (!expanded.has(row.id)) continue
+    table.toggleRowExpansion(row, true)
+    if (!row._conversations) {
+      loadConversations(row)
+    }
   }
 }
 
@@ -840,9 +868,14 @@ async function loadConversations(user) {
 }
 
 // 外层用户表展开时加载该用户对话（修复展开无数据 bug）
+// 同时记录展开状态，供列表刷新后恢复（见 restoreExpandedRows）
 function onUserExpand(row, expandedRows) {
-  if (expandedRows && expandedRows.includes(row)) {
+  const isExpanded = expandedRows && expandedRows.includes(row)
+  if (isExpanded) {
+    expandedUserIds.value.add(row.id)
     loadConversations(row)
+  } else {
+    expandedUserIds.value.delete(row.id)
   }
 }
 
