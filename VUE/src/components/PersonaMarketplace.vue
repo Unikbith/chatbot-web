@@ -30,6 +30,13 @@
         >
           <el-option :label="t('男', 'Male')" value="男" />
           <el-option :label="t('女', 'Female')" value="女" />
+          <!-- 自定义性别：来自实际发布数据，可直接筛出「双性」「无性别」等具体值 -->
+          <el-option
+            v-for="g in customGenders"
+            :key="`custom-${g}`"
+            :label="g"
+            :value="g"
+          />
           <el-option :label="t('非二元', 'Non-binary')" value="非二元" />
         </el-select>
         <div class="toolbar-right">
@@ -310,27 +317,35 @@
           <el-input v-model="publishForm.name" maxlength="1000" />
         </el-form-item>
         <el-form-item :label="t('描述', 'Description')" required>
-          <el-input v-model="publishForm.description" type="textarea" :rows="2" maxlength="1000" resize="none" />
+          <el-input v-model="publishForm.description" type="textarea" :rows="2" maxlength="1000" resize="none" show-word-limit />
+          <div class="form-hint">{{ t('至少 30 字', 'At least 30 characters') }}</div>
         </el-form-item>
         <el-form-item :label="t('人物卡性别', 'Gender')" required>
           <div class="gender-picker">
+            <!-- 预设：男 / 女 + 常见自定义项；再提供「其他」自由输入兜底。
+                 预设项直接写入 gender，其余统一归入非二元总览，
+                 但会作为具体值出现在筛选下拉里（见 /marketplace/genders）。 -->
             <el-radio-group v-model="publishForm.gender">
               <el-radio-button value="男">{{ t('男', 'Male') }}</el-radio-button>
               <el-radio-button value="女">{{ t('女', 'Female') }}</el-radio-button>
               <el-radio-button value="神秘">{{ t('神秘', 'Mystery') }}</el-radio-button>
-              <el-radio-button value="自定义">{{ t('自定义', 'Custom') }}</el-radio-button>
+              <el-radio-button value="双性">{{ t('双性', 'Intersex') }}</el-radio-button>
+              <el-radio-button value="无性别">{{ t('无性别', 'Genderless') }}</el-radio-button>
+              <el-radio-button value="其他">{{ t('其他', 'Other') }}</el-radio-button>
             </el-radio-group>
             <el-input
-              v-if="publishForm.gender === '自定义'"
+              v-if="publishForm.gender === '其他'"
               v-model="publishForm.genderCustom"
-              :placeholder="t('输入自定义性别（筛选时归入非二元）', 'Custom gender (grouped as non-binary)')"
+              :placeholder="t('输入自定义性别，最多 20 字', 'Custom gender, up to 20 characters')"
               maxlength="20"
+              show-word-limit
               class="gender-custom-input"
             />
           </div>
         </el-form-item>
         <el-form-item :label="t('人设提示词', 'Character Prompt')" required>
-          <el-input v-model="publishForm.system_prompt" type="textarea" :rows="5" maxlength="50000" resize="none" />
+          <el-input v-model="publishForm.system_prompt" type="textarea" :rows="5" maxlength="50000" resize="none" show-word-limit />
+          <div class="form-hint">{{ t('至少 100 字', 'At least 100 characters') }}</div>
         </el-form-item>
         <el-form-item :label="t('开场白', 'Greeting')" required>
           <el-input v-model="publishForm.greeting" type="textarea" :rows="2" maxlength="1000" resize="none" />
@@ -410,11 +425,15 @@ const loading = ref(false)
 const items = ref([])
 const sortMode = ref('hot')
 const searchKeyword = ref('')
-// 性别筛选：'' 全部 / 男 / 女 / 非二元（自定义及未设置统一归入非二元）
+// 性别筛选：'' 全部 / 男 / 女 / 具体自定义值 / 非二元（所有非男女的总览）
 const genderFilter = ref('')
+// 广场中实际存在的自定义性别（不含男/女/非二元总览项）
+const customGenders = ref([])
 const currentPage = ref(1)
 const pageSize = 12
 const total = ref(0)
+// 列表请求令牌：排序/筛选切换时作废在途请求，防止旧响应污染新列表
+let listReqSeq = 0
 const hasMore = computed(() => items.value.length < total.value)
 const gridRef = ref(null)
 
@@ -482,11 +501,18 @@ const publishForm = reactive({
 })
 
 // 实际提交的性别值：自定义模式下取文本（留空则由后端归入非二元）
-const effectiveGender = () =>
-  publishForm.gender === '自定义' ? publishForm.genderCustom.trim() : (publishForm.gender || '')
+// 提交给后端的性别值：选「其他」时取自由输入，其余取预设值。
+// 「其他」本身不是有效性别，必须替换为用户填的内容（空则回落到预设值）。
+const effectiveGender = () => {
+  if (publishForm.gender === '其他') return publishForm.genderCustom.trim() || '其他'
+  return publishForm.gender || ''
+}
 
 watch(() => props.modelValue, (val) => {
-  if (val) loadList()
+  if (val) {
+    loadList()
+    loadCustomGenders()
+  }
 })
 
 // 人物卡列表变化（如删除已添加的人物卡）后，实时刷新卡片的「已添加」状态
@@ -506,28 +532,47 @@ async function refreshDetailAdoptState() {
   } catch (e) { /* silent */ }
 }
 
+// 拉取广场中已存在的自定义性别，让筛选下拉能列出「双性」「无性别」等具体值
+async function loadCustomGenders() {
+  try {
+    const res = await marketplaceApi.genders()
+    if (res.code === 200) {
+      customGenders.value = (res.data?.genders || []).filter(
+        g => g && g !== '男' && g !== '女' && g !== '非二元'
+      )
+    }
+  } catch (e) { /* 静默失败：下拉退化为只有男/女/非二元 */ }
+}
+
 async function loadList(append = false) {
   if (!append) {
     currentPage.value = 1
     items.value = []
     total.value = 0
   }
+  // 排序/筛选切换时若有请求在途，递增令牌使其作废：
+  // 否则旧排序的响应回来后会 push 进已重置的列表，导致同一批卡片重复出现
+  const reqToken = ++listReqSeq
   loading.value = true
   try {
-    const res = await marketplaceApi.list(sortMode.value, currentPage.value, searchKeyword.value.trim(), genderFilter.value, pageSize)
+    const page = append ? currentPage.value : 1
+    const res = await marketplaceApi.list(sortMode.value, page, searchKeyword.value.trim(), genderFilter.value, pageSize)
+    if (reqToken !== listReqSeq) return   // 已被更新的请求取代
     if (res.code === 200) {
       const newItems = res.data.items || []
       total.value = res.data.total || 0
       if (append) {
-        items.value.push(...newItems)
+        // 按 id 去重：分页边界可能因排序变动而重叠
+        const seen = new Set(items.value.map(i => i.id))
+        items.value = items.value.concat(newItems.filter(i => !seen.has(i.id)))
       } else {
         items.value = newItems
       }
     }
   } catch (e) {
-    logger.error('加载卡片广场失败', e)
+    if (reqToken === listReqSeq) logger.error('加载卡片广场失败', e)
   } finally {
-    loading.value = false
+    if (reqToken === listReqSeq) loading.value = false
   }
 }
 
@@ -539,6 +584,18 @@ function onGridScroll() {
     loadList(true)
   }
 }
+
+// 排序 / 性别筛选变化：重置到第一页并重新加载。
+// 缺了这个监听，切换排序后列表不刷新且页码沿用旧值，
+// 继续滚动会把同一页重复追加（表现为卡片重复且越来越多）。
+watch(sortMode, () => {
+  currentPage.value = 1
+  loadList(false)
+})
+watch(genderFilter, () => {
+  currentPage.value = 1
+  loadList(false)
+})
 
 onMounted(() => {
   if (gridRef.value) gridRef.value.addEventListener('scroll', onGridScroll)
@@ -736,6 +793,12 @@ async function handlePublish() {
       showPublishDialog.value = false
       Object.assign(publishForm, { name: '', description: '', system_prompt: '', greeting: '', avatar: '', gender: '', genderCustom: '' })
       loadList()
+      // 新卡片可能带来新的自定义性别，刷新下拉选项
+      loadCustomGenders()
+    } else {
+      // 后端校验失败（如描述/提示词字数不足）会返回 200 + code 4xx，
+      // 原实现只处理 HTTP 异常，这里必须显式提示，否则表现为「点了没反应」
+      ElMessage.warning(res.message || t('发布失败，请检查填写内容', 'Publish failed, please check the fields'))
     }
   } catch (e) {
     ElMessage.error(e.response?.data?.message || t('发布失败', 'Publish failed'))

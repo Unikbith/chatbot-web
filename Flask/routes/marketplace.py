@@ -221,6 +221,54 @@ def ensure_system_adopts(user_id):
         db.session.commit()
 
 
+def _apply_gender_filter(query, gender_tag):
+    """按性别标签筛选人物卡。
+
+    - 「男」/「女」：精确匹配
+    - 「非二元」：所有非男/女的值（含未填写），用于总览
+    - 其他值：当作自定义性别精确匹配（如「神秘」「双性」「无性别」）
+
+    自定义性别单独可选后，用户能在广场里筛出自己填的具体值，
+    而不是只能看到一个笼统的「非二元」。
+    """
+    if not gender_tag:
+        return query
+    if gender_tag in ('男', '女'):
+        return query.filter(PersonaMarketplace.gender == gender_tag)
+    if gender_tag == '非二元':
+        return query.filter(
+            db.or_(
+                PersonaMarketplace.gender.is_(None),
+                PersonaMarketplace.gender.notin_(['男', '女']),
+            )
+        )
+    return query.filter(PersonaMarketplace.gender == gender_tag)
+
+
+@marketplace_bp.route('/genders', methods=['GET'])
+def list_marketplace_genders():
+    """返回广场中实际存在的性别值，供筛选下拉动态渲染。
+
+    用户发布时可填任意自定义性别（「双性」「无性别」「神秘」…），
+    若下拉只有固定的男/女/非二元，这些卡片就永远筛不出来。
+    此处返回去重后的真实取值集合（排除男/女与非二元总览项）。
+    """
+    try:
+        ensure_system_cards()
+    except Exception:
+        db.session.rollback()
+    rows = (
+        db.session.query(PersonaMarketplace.gender)
+        .filter(PersonaMarketplace.gender.isnot(None))
+        .filter(PersonaMarketplace.gender != '')
+        .distinct()
+        .order_by(PersonaMarketplace.gender.asc())
+        .all()
+    )
+    values = [r[0] for r in rows if r[0] and r[0] not in ('男', '女')]
+    return jsonify({'code': 200, 'data': {'genders': values}})
+
+
 # ── 公开卡片列表（用于未登录入口页） ──────────────────────────────
 @marketplace_bp.route('/public', methods=['GET'])
 def list_marketplace_public():
@@ -255,15 +303,7 @@ def list_marketplace_public():
                 PersonaMarketplace.description.ilike(f'%{keyword}%'),
             )
         )
-    if gender_tag in ('男', '女'):
-        query = query.filter(PersonaMarketplace.gender == gender_tag)
-    elif gender_tag == '非二元':
-        query = query.filter(
-            db.or_(
-                PersonaMarketplace.gender.is_(None),
-                PersonaMarketplace.gender.notin_(['男', '女']),
-            )
-        )
+    query = _apply_gender_filter(query, gender_tag)
 
     query = _apply_marketplace_sort(query, sort)
 
@@ -425,16 +465,7 @@ def list_marketplace():
                 PersonaMarketplace.description.ilike(f'%{keyword}%'),
             )
         )
-    if gender_tag in ('男', '女'):
-        query = query.filter(PersonaMarketplace.gender == gender_tag)
-    elif gender_tag == '非二元':
-        # 非「男/女」的自定义值（含未填写）都归入非二元
-        query = query.filter(
-            db.or_(
-                PersonaMarketplace.gender.is_(None),
-                PersonaMarketplace.gender.notin_(['男', '女']),
-            )
-        )
+    query = _apply_gender_filter(query, gender_tag)
 
     query = _apply_marketplace_sort(query, sort)
 

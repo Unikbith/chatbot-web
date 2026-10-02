@@ -556,6 +556,10 @@ const marketplaceApi = {
     if (gender) url += `&gender=${encodeURIComponent(gender)}`;
     return resAi.get(url);
   },
+  // 广场中实际存在的自定义性别值，用于筛选下拉动态渲染
+  genders() {
+    return resAi.get('/api/marketplace/genders');
+  },
   publicComments(personaId, sort = 'hot', page = 1, perPage = 5) {
     return resAi.get(`/api/marketplace/public/${personaId}/comments?sort=${sort}&page=${page}&per_page=${perPage}`);
   },
