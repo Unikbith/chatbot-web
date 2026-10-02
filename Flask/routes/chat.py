@@ -10,7 +10,7 @@ from services.markdown_streamer import (
     strip_html_to_text,
     render_markdown,
     render_stream_delta,
-    sse_content, sse_reasoning, sse_done, sse_html, sse_tokens
+    sse_content, sse_reasoning, sse_done, sse_html, sse_tokens, sse_style
 )
 from services.upload_guard import check_upload, detect_image_type, MAX_IMAGE_SIZE
 from services.rate_limit import rate_limit
@@ -26,7 +26,10 @@ OUTPUT_FORMAT_RULE = (
     "2. 使用标准 Markdown：段落之间空一行，列表用 - 或 1.，代码用 ``` 代码块，"
     "不要用连续空行堆砌排版；\n"
     "3. 不要输出 HTML 标签（如 <div>/<span>/<br>），排版由渲染层统一处理；\n"
-    "4. 需要分节时用二级或三级标题，需要强调时用 **加粗**，保持结构清晰。"
+    "4. 需要分节时用二级或三级标题，需要强调时用 **加粗**，保持结构清晰；\n"
+    "5. 若内容确实需要卡片、色块等更强的视觉表达，可在正文末尾额外输出一个 "
+    "```css 代码块（只允许视觉类属性与 class 选择器），渲染层会把它应用"
+    "在这条回复内；不需要时不要输出。"
 )
 
 
@@ -582,7 +585,11 @@ def chat():
             if prompt_tokens or completion_tokens:
                 yield sse_tokens((prompt_tokens or 0) + (completion_tokens or 0))
             # 流结束后一次性下发渲染好的（含白名单过滤）完整 HTML，前端替换流式原文
-            yield sse_html(render_markdown(full_content))
+            final_html, ai_css = render_markdown(full_content)
+            if ai_css:
+                # 模型自绘样式走独立通道：只含受控属性，前端以 CSSOM 注入到本条消息作用域
+                yield sse_style(ai_css)
+            yield sse_html(final_html)
             yield sse_done()
         except GeneratorExit:
             # 客户端断开：内容已收集完整时尽力落库，避免回复丢失
@@ -716,7 +723,10 @@ def vision_chat():
 
             if usage_holder[0] or usage_holder[1]:
                 yield sse_tokens((usage_holder[0] or 0) + (usage_holder[1] or 0))
-            yield sse_html(render_markdown(full_content_holder[0]))
+            final_html, ai_css = render_markdown(full_content_holder[0])
+            if ai_css:
+                yield sse_style(ai_css)
+            yield sse_html(final_html)
             yield sse_done()
         except GeneratorExit:
             # 客户端断开：内容已收集完整时尽力落库

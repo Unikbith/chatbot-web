@@ -97,7 +97,8 @@ const createMessage = (role, content = '', imageUrl = null) => ({
   // raw：Markdown 原文（落库/语音朗读用）；streamHtml：后端下发的已转义 HTML 片段
   // （生成中直接渲染，与成稿排版一致，避免回复结束后空行被抹掉造成跳变）
   // tokens：本次回复的 token 消耗（厂商未返回时为 null，不展示）
-  role, content, raw: '', streamHtml: '', streaming: false, reasoning: '', showReasoning: false, imageUrl, tokens: null
+  // hasAiStyle：本条回复是否带模型自绘样式（决定是否加作用域类）
+  role, content, raw: '', streamHtml: '', streaming: false, reasoning: '', showReasoning: false, imageUrl, tokens: null, hasAiStyle: false
 });
 
 const messages = ref([]);
@@ -106,6 +107,40 @@ const loading = ref(false);
 const messageListRef = ref(null);
 const deepThink = ref(false);
 let abortController = null;
+
+// ===== 模型自绘样式（AI 自助 CSS）=====
+// 后端已把模型写的 CSS 过滤到「视觉属性白名单 + 仅 class 选择器」，
+// 这里以 CSSOM 注入到消息容器的作用域内：既不经过 v-html（无 XSS 风险），
+// 也不会污染全局（选择器被限定在 .ai-style-scope 下）。
+const AI_SCOPE_CLASS = 'ai-style-scope';
+
+let aiStyleSheet = null;
+let aiStyleText = '';
+
+function ensureAiStyleSheet() {
+  if (aiStyleSheet) return aiStyleSheet;
+  if (typeof document === 'undefined') return null;
+  const style = document.createElement('style');
+  style.setAttribute('data-ai-style', '1');
+  style.textContent = '';
+  document.head.appendChild(style);
+  aiStyleSheet = style;
+  return aiStyleSheet;
+}
+
+function applyAiStyle(cssText) {
+  if (!cssText) return;
+  const sheet = ensureAiStyleSheet();
+  if (!sheet) return;
+  // 作用域前缀：把 .card 改写成 .ai-style-scope .card，
+  // 配合消息容器的 ai-style-scope 类实现「只在本条消息内生效」
+  const scoped = `.${AI_SCOPE_CLASS} {\n${cssText}\n}`;
+  // 累积而非覆盖：模型可能在多条消息里分别给样式
+  if (!aiStyleText.includes(scoped)) {
+    aiStyleText += scoped;
+    sheet.textContent = aiStyleText;
+  }
+}
 
 // ========== 对话模型选择器（输入框左下角） ==========
 // 数据来源：当前用户全部已启用的对话模型配置（含配置内启用的模型），
@@ -341,10 +376,11 @@ const handleSend = async () => {
 
     const response = await chatApi.stream(requestBody, { signal: abortController.signal });
     await readStream(response, (data) => {
-      const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
+      const { reasoning_content: reasoning = '', content = '', html = '', tokens = null, style: aiCss = '' } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml += content; aiMsg.streaming = true; }
       if (tokens) aiMsg.tokens = tokens;
+      if (aiCss) { applyAiStyle(aiCss); aiMsg.hasAiStyle = true; }
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 
@@ -528,10 +564,11 @@ const handleVisionChat = async (text) => {
 
     const response = await chatApi.vision(formData, { signal: abortController.signal });
     await readStream(response, (data) => {
-      const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
+      const { reasoning_content: reasoning = '', content = '', html = '', tokens = null, style: aiCss = '' } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml += content; aiMsg.streaming = true; }
       if (tokens) aiMsg.tokens = tokens;
+      if (aiCss) { applyAiStyle(aiCss); aiMsg.hasAiStyle = true; }
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 
@@ -661,10 +698,11 @@ const regenerate = async (assistantIndex = null) => {
 
     const response = await chatApi.stream(requestBody, { signal: abortController.signal });
     await readStream(response, (data) => {
-      const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
+      const { reasoning_content: reasoning = '', content = '', html = '', tokens = null, style: aiCss = '' } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml += content; aiMsg.streaming = true; }
       if (tokens) aiMsg.tokens = tokens;
+      if (aiCss) { applyAiStyle(aiCss); aiMsg.hasAiStyle = true; }
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
   } catch (error) {
@@ -871,9 +909,10 @@ onUnmounted(() => {
               </div>
               
               <!-- 消息内容：生成中渲染后端下发的 HTML 片段（已转义，与成稿一致），
-                   流结束后由 sse_html 的完整渲染结果替换 -->
-              <div v-if="item.streaming" class="content-text streaming-html" v-html="item.streamHtml"></div>
-              <div v-else-if="item.content" class="content-text" v-html="item.content"></div>
+                   流结束后由 sse_html 的完整渲染结果替换。
+                   hasAiStyle 的消息加上作用域类，让模型自绘的 CSS 只在本条内生效 -->
+              <div v-if="item.streaming" class="content-text streaming-html" :class="{ 'ai-style-scope': item.hasAiStyle }" v-html="item.streamHtml"></div>
+              <div v-else-if="item.content" class="content-text" :class="{ 'ai-style-scope': item.hasAiStyle }" v-html="item.content"></div>
               <div v-else-if="item.raw" class="content-text raw-streaming">{{ item.raw }}</div>
 
               <!-- 加载状态 -->

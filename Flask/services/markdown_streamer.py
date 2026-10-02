@@ -3,6 +3,7 @@ import markdown
 import re
 import html as html_lib
 from services.html_sanitize import sanitize_html
+from services.ai_style import extract_ai_css, SCOPE_CLASS  # noqa: F401
 
 
 class MarkdownStreamer:
@@ -94,14 +95,21 @@ def _highlight(text):
 
 
 def render_markdown(text):
-    """将一段 Markdown 渲染为经过白名单过滤的 HTML（流结束后一次性渲染）"""
+    """将一段 Markdown 渲染为经过白名单过滤的 HTML（流结束后一次性渲染）
+
+    同时提取模型自绘的 CSS（```css 代码块 / <style> 片段），交由调用方通过
+    独立通道下发（不进 v-html，避免 XSS），实现「模型按内容自定样式」。
+    返回 (html, ai_css)
+    """
     if not text:
-        return ''
+        return '', ''
+    # 先抽出模型自绘样式，其余内容照常走 Markdown 渲染
+    text, ai_css = extract_ai_css(text)
     try:
         md = markdown.Markdown(extensions=['extra', 'nl2br'])
     except Exception:
         md = markdown.Markdown(extensions=['extra'])
-    return sanitize_html(_highlight(md.convert(text)))
+    return sanitize_html(_highlight(md.convert(text))), ai_css
 
 
 def render_stream_delta(text):
@@ -168,6 +176,14 @@ def sse_html(html_text):
 def sse_tokens(total_tokens):
     """构造 token 用量的 SSE 消息（前端据此在消息下方显示消耗）"""
     return f"data: {json.dumps({'choices': [{'delta': {'tokens': total_tokens}}]}, ensure_ascii=False)}\n\n"
+
+
+def sse_style(css_text):
+    """构造模型自绘样式的 SSE 消息。
+
+    独立通道下发（不进 v-html），前端以 CSSOM 方式注入到消息容器作用域内。
+    """
+    return f"data: {json.dumps({'choices': [{'delta': {'style': css_text}}]}, ensure_ascii=False)}\n\n"
 
 
 import json
