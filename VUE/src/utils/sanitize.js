@@ -6,17 +6,21 @@ import DOMPurify from 'dompurify';
 
 // 允许的标签与后端白名单保持一致：仅保留安全的排版类标签
 const ALLOWED_TAGS = [
-  'p', 'br', 'hr', 'strong', 'b', 'em', 'i', 'u', 's', 'del', 'ins',
+  'p', 'br', 'hr', 'strong', 'b', 'em', 'i', 'u', 's', 'del', 'ins', 'mark',
   'blockquote', 'code', 'pre', 'span', 'div',
   'ul', 'ol', 'li',
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'table', 'thead', 'tbody', 'tr', 'th', 'td',
   'a', 'img',
+  // 折叠分组（RP 卡片的可折叠区块）
+  'details', 'summary',
 ];
 
 const ALLOWED_ATTR = [
   'href', 'title', 'target', 'rel',
   'src', 'alt', 'width', 'height', 'class',
+  // 表格跨行跨列 + 折叠默认展开
+  'colspan', 'rowspan', 'open',
 ];
 
 // 用于校验 URL 是否安全：仅允许 http/https/mailto 与站内相对路径

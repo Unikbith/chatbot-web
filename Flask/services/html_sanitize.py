@@ -17,15 +17,35 @@ ALLOWED_TAGS = {
     'a', 'img',
     'table', 'thead', 'tbody', 'tr', 'td', 'th',
     'span', 'div',
+    # 折叠分组（对应 RP 卡片的可折叠区块）
+    'details', 'summary',
 }
 
 # 仅保留的必要属性；href/src 额外做协议校验
+# 说明：rp-* 是应用内置的 RP 卡片组件类（见 ChatArea.vue 的组件库），
+# 模型只需引用类名，样式由前端提供，因此这里对容器类标签放行 class。
 ALLOWED_ATTRS = {
     'a': {'href', 'title'},
     'img': {'src', 'alt', 'title'},
     'code': {'class'},
     'span': {'class'},
     'div': {'class'},
+    'p': {'class'},
+    'details': {'class', 'open'},
+    'summary': {'class'},
+    'table': {'class'},
+    'thead': {'class'},
+    'tbody': {'class'},
+    'tr': {'class'},
+    # 表格常用属性：跨行跨列
+    'td': {'class', 'colspan', 'rowspan'},
+    'th': {'class', 'colspan', 'rowspan'},
+    'ul': {'class'},
+    'ol': {'class'},
+    'li': {'class'},
+    'blockquote': {'class'},
+    'h1': {'class'}, 'h2': {'class'}, 'h3': {'class'},
+    'h4': {'class'}, 'h5': {'class'}, 'h6': {'class'},
 }
 
 _SAFE_SCHEMES = {'http', 'https', 'mailto', 'ftp', 'file'}

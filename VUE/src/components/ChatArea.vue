@@ -1854,6 +1854,204 @@ onUnmounted(() => {
   text-align: center;
 }
 
+/* ============================================================
+   RP 卡片组件库
+   模型输出的 HTML 只能使用这里定义的类名来表达结构与视觉，
+   由本组件库提供样式（亮/暗双主题），无需模型现写 CSS。
+   命名约定：rp- 前缀 = roleplay card
+   ============================================================ */
+
+/* 主卡片：圆角 + 描边 + 柔和投影，内层留白舒适 */
+:deep(.rp-card) {
+  margin: 0.6em 0 1em;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-soft);
+}
+:deep(.rp-card) > :first-child { margin-top: 0; }
+:deep(.rp-card) > :last-child { margin-bottom: 0; }
+
+/* 卡片标题：居中大标题 + 可选副标题（对应截图的「🏡 庄园家教日记」） */
+:deep(.rp-title) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 1.24em;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+  text-align: center;
+}
+:deep(.rp-sub) {
+  margin: 0 0 14px;
+  text-align: center;
+  font-size: 0.86em;
+  color: var(--text-secondary);
+}
+
+/* 区块：左侧竖线 + 浅色底，对应截图的「📜 背景」 */
+:deep(.rp-section) {
+  margin: 0.8em 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--brand);
+  border-radius: 0 10px 10px 0;
+  background: var(--brand-soft);
+}
+:deep(.rp-section) > :first-child { margin-top: 0; }
+:deep(.rp-section) > :last-child { margin-bottom: 0; }
+:deep(.rp-section-title) {
+  display: block;
+  margin: 0 0 6px;
+  font-weight: 650;
+  color: var(--brand-dark);
+}
+
+/* 徽章 / 标签：用于属性、状态等短标记 */
+:deep(.rp-badge) {
+  display: inline-block;
+  margin: 0.2em 0.4em 0.2em 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.8em;
+  font-weight: 600;
+  color: var(--brand-dark);
+  background: var(--brand-soft);
+  border: 1px solid transparent;
+}
+:deep(.rp-badge-alt) {
+  color: #4a6fa5;
+  background: rgba(110, 143, 223, 0.14);
+}
+
+/* 信息网格：卡片式键值对，比裸表格更适合展示属性 */
+:deep(.rp-grid) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 0.8em 0;
+}
+:deep(.rp-cell) {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface-hover);
+  font-size: 0.9em;
+}
+:deep(.rp-cell-label) {
+  display: block;
+  font-size: 0.82em;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+/* 表格：表头带品牌色底 + 斑马纹，横向可滚动 */
+:deep(.rp-table-wrap) {
+  margin: 0.8em 0;
+  overflow-x: auto;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+}
+:deep(.rp-table) {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+:deep(.rp-table) th {
+  padding: 8px 10px;
+  background: var(--brand);
+  color: #fff;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+:deep(.rp-table) td {
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-color);
+  vertical-align: top;
+}
+:deep(.rp-table) tbody tr:nth-child(even) { background: rgba(120, 130, 145, 0.05); }
+
+/* 折叠分组：对应截图的「▸ 周围其他角色」 */
+:deep(.rp-collapse) {
+  margin: 0.6em 0;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+:deep(.rp-collapse) > summary {
+  padding: 9px 13px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.94em;
+  color: var(--text-primary);
+  background: var(--surface-hover);
+  list-style: none;
+  user-select: none;
+}
+:deep(.rp-collapse) > summary::-webkit-details-marker { display: none; }
+:deep(.rp-collapse) > summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 7px;
+  color: var(--brand);
+  transition: transform 0.18s ease;
+}
+:deep(.rp-collapse)[open] > summary::before { transform: rotate(90deg); }
+:deep(.rp-collapse-body) {
+  padding: 11px 13px;
+  border-top: 1px solid var(--border-color);
+}
+:deep(.rp-collapse-body) > :first-child { margin-top: 0; }
+:deep(.rp-collapse-body) > :last-child { margin-bottom: 0; }
+
+/* 引用台词：左侧双竖线 + 斜体，用于角色说话 */
+:deep(.rp-quote) {
+  margin: 0.7em 0;
+  padding: 8px 12px;
+  border-left: 3px double var(--brand);
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* 分隔标题：带文字的横向分割线 */
+:deep(.rp-divider) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 1.3em 0 0.7em;
+  color: var(--text-secondary);
+  font-size: 0.88em;
+  font-weight: 600;
+}
+:deep(.rp-divider)::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}
+
+/* 暗色主题下微调：卡片描边与表头更柔和 */
+:global(html.dark) .rp-card,
+:global(html.dark) .rp-collapse {
+  background: rgba(255, 255, 255, 0.04);
+}
+:global(html.dark) .rp-collapse > summary { background: rgba(255, 255, 255, 0.06); }
+:global(html.dark) .rp-table th { background: var(--brand-dark); }
+
+/* 移动端：卡片内边距收紧，网格降为单列 */
+@media (max-width: 768px) {
+  :deep(.rp-card) { padding: 13px 14px; border-radius: 14px; }
+  :deep(.rp-title) { font-size: 1.12em; }
+  :deep(.rp-grid) { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  :deep(.rp-table) { font-size: 0.85em; }
+  :deep(.rp-table) th,
+  :deep(.rp-table) td { padding: 6px 8px; }
+}
+
 /* 移动端：表格与代码块在窄屏更容易溢出，统一压一档字号 */
 @media (max-width: 768px) {
   .content-text :deep(table) { font-size: 0.88em; }
