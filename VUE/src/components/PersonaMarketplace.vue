@@ -315,11 +315,21 @@
     >
       <el-form :model="publishForm" label-position="top">
         <el-form-item :label="t('名称', 'Name')" required>
-          <el-input v-model="publishForm.name" maxlength="100" />
+          <el-input
+            v-model="publishForm.name"
+            maxlength="100"
+            :placeholder="t('给这位角色起个名字', 'Name this character')"
+          />
         </el-form-item>
         <el-form-item :label="t('描述', 'Description')" required>
-          <el-input v-model="publishForm.description" type="textarea" :rows="2" maxlength="100" resize="none" />
-          <div class="form-hint">{{ t('至少 30 字，最多 100 字', '30-100 characters') }}</div>
+          <el-input
+            v-model="publishForm.description"
+            type="textarea"
+            :rows="2"
+            maxlength="100"
+            resize="none"
+            :placeholder="t('至少 30 字，介绍一下这位角色', 'At least 30 characters — describe this character')"
+          />
         </el-form-item>
         <el-form-item :label="t('人物卡性别', 'Gender')" required>
           <div class="gender-picker">
@@ -337,7 +347,7 @@
             <el-input
               v-if="publishForm.gender === '其他'"
               v-model="publishForm.genderCustom"
-              :placeholder="t('输入自定义性别，最多 20 字', 'Custom gender, up to 20 characters')"
+              :placeholder="t('输入自定义性别', 'Enter a custom gender')"
               maxlength="20"
               show-word-limit
               class="gender-custom-input"
@@ -345,11 +355,24 @@
           </div>
         </el-form-item>
         <el-form-item :label="t('人设提示词', 'Character Prompt')" required>
-          <el-input v-model="publishForm.system_prompt" type="textarea" :rows="5" maxlength="50000" resize="none" />
-          <div class="form-hint">{{ t('至少 100 字', 'At least 100 characters') }}</div>
+          <el-input
+            v-model="publishForm.system_prompt"
+            type="textarea"
+            :rows="5"
+            maxlength="50000"
+            resize="none"
+            :placeholder="t('至少 100 字，描述性格、说话方式、背景设定等', 'At least 100 characters — personality, speech style, background…')"
+          />
         </el-form-item>
         <el-form-item :label="t('开场白', 'Greeting')" required>
-          <el-input v-model="publishForm.greeting" type="textarea" :rows="2" maxlength="100" resize="none" />
+          <el-input
+            v-model="publishForm.greeting"
+            type="textarea"
+            :rows="2"
+            maxlength="100"
+            resize="none"
+            :placeholder="t('角色见到你时的第一句话', 'The character’s first line on meeting you')"
+          />
         </el-form-item>
         <el-form-item :label="t('头像', 'Avatar')" required>
           <el-upload
