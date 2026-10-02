@@ -247,26 +247,39 @@ def _apply_gender_filter(query, gender_tag):
 
 @marketplace_bp.route('/genders', methods=['GET'])
 def list_marketplace_genders():
-    """返回广场中实际存在的性别值，供筛选下拉动态渲染。
+    """返回广场中各性别标签的卡片数量，供筛选下拉只渲染有数据的选项。
 
-    用户发布时可填任意自定义性别（「双性」「无性别」「神秘」…），
-    若下拉只有固定的男/女/非二元，这些卡片就永远筛不出来。
-    此处返回去重后的真实取值集合（排除男/女与非二元总览项）。
+    为什么不固定返回男/女/非二元：
+    - 用户可发布任意自定义性别（「双性」「无性别」「神秘」…），只给固定三项
+      这些卡片永远筛不出来；
+    - 反过来，没有对应卡片的性别也不该出现在下拉里（点了就是空列表）。
+
+    返回 {标签: 数量}，含「男」「女」与自定义值；「非二元」为总览项
+    （所有非男/女的卡片，含未填写），数量为 0 时前端不渲染。
     """
     try:
         ensure_system_cards()
     except Exception:
         db.session.rollback()
     rows = (
-        db.session.query(PersonaMarketplace.gender)
-        .filter(PersonaMarketplace.gender.isnot(None))
-        .filter(PersonaMarketplace.gender != '')
-        .distinct()
-        .order_by(PersonaMarketplace.gender.asc())
+        db.session.query(PersonaMarketplace.gender, func.count())
+        .group_by(PersonaMarketplace.gender)
         .all()
     )
-    values = [r[0] for r in rows if r[0] and r[0] not in ('男', '女')]
-    return jsonify({'code': 200, 'data': {'genders': values}})
+    counts = {}
+    non_binary = 0
+    for gender, cnt in rows:
+        g = (gender or '').strip()
+        if g in ('男', '女'):
+            counts[g] = counts.get(g, 0) + cnt
+        else:
+            # 非男/女（含未填写）计入非二元总览；若填了具体值也单独记一份，
+            # 这样「双性」既能单独筛选，也能出现在非二元总览里
+            non_binary += cnt
+            if g:
+                counts[g] = counts.get(g, 0) + cnt
+    counts['非二元'] = non_binary
+    return jsonify({'code': 200, 'data': {'genders': counts}})
 
 
 # ── 公开卡片列表（用于未登录入口页） ──────────────────────────────

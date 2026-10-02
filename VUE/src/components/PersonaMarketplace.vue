@@ -28,16 +28,17 @@
           class="mp-gender"
           @change="applyGenderFilter"
         >
-          <el-option :label="t('男', 'Male')" value="男" />
-          <el-option :label="t('女', 'Female')" value="女" />
-          <!-- 自定义性别：来自实际发布数据，可直接筛出「双性」「无性别」等具体值 -->
+          <!-- 只渲染实际存在卡片的性别：没有对应卡片的选项不显示，
+               避免用户点了得到空列表。顺序：男 → 女 → 自定义值 → 非二元总览 -->
           <el-option
-            v-for="g in customGenders"
-            :key="`custom-${g}`"
-            :label="g"
-            :value="g"
-          />
-          <el-option :label="t('非二元', 'Non-binary')" value="非二元" />
+            v-for="opt in genderOptions"
+            :key="opt.value"
+            :label="opt.label"
+            :value="opt.value"
+          >
+            <span class="gender-opt-label">{{ opt.label }}</span>
+            <span class="gender-opt-count">{{ opt.count }}</span>
+          </el-option>
         </el-select>
         <div class="toolbar-right">
           <!-- 排序方式（下拉框）：
@@ -425,10 +426,27 @@ const loading = ref(false)
 const items = ref([])
 const sortMode = ref('hot')
 const searchKeyword = ref('')
-// 性别筛选：'' 全部 / 男 / 女 / 具体自定义值 / 非二元（所有非男女的总览）
+// 性别筛选：'' 全部 / 具体标签（男/女/自定义值/非二元总览）
 const genderFilter = ref('')
-// 广场中实际存在的自定义性别（不含男/女/非二元总览项）
-const customGenders = ref([])
+// 广场中各性别标签 -> 卡片数量（仅数量 > 0 的才会出现在下拉里）
+const genderCounts = ref({})
+
+// 筛选下拉选项：只保留有卡片的性别，顺序为 男 → 女 → 其他具体值 → 非二元总览
+const genderOptions = computed(() => {
+  const counts = genderCounts.value || {}
+  const preset = ['男', '女']
+  const extras = Object.keys(counts).filter(
+    g => !preset.includes(g) && g !== '非二元'
+  )
+  const ordered = [
+    ...preset.filter(g => counts[g] > 0).map(g => ({ value: g, label: g, count: counts[g] })),
+    ...extras.filter(g => counts[g] > 0).map(g => ({ value: g, label: g, count: counts[g] })),
+  ]
+  if (counts['非二元'] > 0) {
+    ordered.push({ value: '非二元', label: t('非二元', 'Non-binary'), count: counts['非二元'] })
+  }
+  return ordered
+})
 const currentPage = ref(1)
 const pageSize = 12
 const total = ref(0)
@@ -447,6 +465,11 @@ function debouncedSearch() {
 }
 
 function applyGenderFilter() {
+  // 当前选中的性别若已没有对应卡片（例如删了最后一张），选项会消失，
+  // 此时清空筛选回到「全部」，避免停留在一个无效条件上
+  if (genderFilter.value && !genderOptions.value.some(o => o.value === genderFilter.value)) {
+    genderFilter.value = ''
+  }
   currentPage.value = 1
   loadList()
 }
@@ -532,16 +555,14 @@ async function refreshDetailAdoptState() {
   } catch (e) { /* silent */ }
 }
 
-// 拉取广场中已存在的自定义性别，让筛选下拉能列出「双性」「无性别」等具体值
+// 拉取广场中各性别的卡片数量；没有对应卡片的性别不显示在下拉里
 async function loadCustomGenders() {
   try {
     const res = await marketplaceApi.genders()
     if (res.code === 200) {
-      customGenders.value = (res.data?.genders || []).filter(
-        g => g && g !== '男' && g !== '女' && g !== '非二元'
-      )
+      genderCounts.value = res.data?.genders || {}
     }
-  } catch (e) { /* 静默失败：下拉退化为只有男/女/非二元 */ }
+  } catch (e) { /* 静默失败：下拉退化为空，用户仍可用「全部」 */ }
 }
 
 async function loadList(append = false) {
@@ -924,6 +945,15 @@ function formatDate(ts) {
 
 .card-gender-tag.nb {
   background: rgba(154, 106, 187, 0.85);
+}
+
+/* 性别下拉选项：左侧名称、右侧数量（等宽数字） */
+.gender-opt-label { flex: 1; }
+.gender-opt-count {
+  margin-left: 14px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
 }
 
 .gender-picker {
