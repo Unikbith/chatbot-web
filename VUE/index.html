@@ -6,8 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- 内容安全策略兜底：限制脚本源，禁止内联脚本执行，缓解 XSS。
          前端主题预设使用外部 JS 文件，故无需 'unsafe-inline'。 -->
+    <!-- media-src 必须显式声明：语音播报用 blob: 承载合成的音频，
+         未声明时会回退到 default-src 'self' 而被拦截（表现为"请求 200 却没声音"）。
+         data: 用于移动端的静音解锁片段。 -->
     <meta http-equiv="Content-Security-Policy"
-          content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'" />
+          content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; media-src 'self' blob: data:; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'" />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta name="theme-color" content="#faf7f4" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#191613" media="(prefers-color-scheme: dark)" />

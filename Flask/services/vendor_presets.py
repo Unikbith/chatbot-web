@@ -263,11 +263,18 @@ def _volcengine_tts_schema():
 def _bailian_tts_schema():
     """百炼 TTS 额外字段。
 
-    ID / 启用 / API Key / Base URL 是公共字段，这里只补模型与音色。
-    业务空间域名、音频格式、采样率等都有可用默认值（见 ai_service
-    的 _dashscope_tts），不额外暴露给用户，保持配置页简洁。
+    ID / 启用 / API Key / Base URL 是公共字段，这里补模型、音色与业务空间。
+    音频格式、采样率等有可用默认值（见 ai_service 的 _dashscope_tts），
+    不额外暴露；但「业务空间 ID」必须可配——不同百炼账号的业务空间不同，
+    能否调用某个模型（尤其 CosyVoice）取决于该业务空间是否开通。
+    留空时使用内置默认值，CosyVoice 报「不支持 HTTP 调用」时填自己的即可。
     """
     return [
+        _text('workspace_id', '业务空间 ID', 'Workspace ID', default='',
+              placeholder='ws-xxxxxxxx',
+              help='百炼业务空间 ID（华北2·北京）。留空用内置默认值；'
+                   '若 CosyVoice 提示不支持 HTTP 调用，请填你自己的业务空间 ID',
+              help_en='Bailian workspace ID; leave empty to use built-in default'),
         _text('model', '模型 ID', 'Model ID', default='',
               placeholder='qwen-audio-3.0-tts-flash',
               required=True,

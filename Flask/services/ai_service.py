@@ -9,6 +9,12 @@ from flask import current_app
 from services.ssrf import block_ssrf
 
 
+def _is_qwen_audio_voice(voice):
+    """判断音色是否属于 Qwen-Audio-TTS 专属族（不能与 CosyVoice 音色混用）。"""
+    v = (voice or '').strip()
+    return v in AIService.QWEN_AUDIO_VOICES or '_v3' in v.lower()
+
+
 class AIService:
     """AI 服务统一接口"""
 
@@ -414,6 +420,13 @@ class AIService:
     # 域名下可用；作为默认值写死，用户无需在配置页填写。
     DEFAULT_BAILIAN_MAAS_HOST = 'https://ws-h8xcrx30tosjpex8.cn-beijing.maas.aliyuncs.com'
 
+    # Qwen-Audio-TTS 专属音色，与 CosyVoice 的 long* 系统音色不同族，
+    # 混用会 400「TTS speak operation failed」。参考实现默认 longanhuan_v3.6。
+    QWEN_AUDIO_VOICES = {
+        'longanhuan_v3.6', 'loongstella', 'longanlingxi',
+        'longanyuanfei', 'longanyang_v3',
+    }
+
     @staticmethod
     def _dashscope_tts(provider, config, params, text, voice):
         """阿里云百炼 TTS 原生协议（OpenAI 兼容端点不支持 /audio/speech）。
@@ -464,20 +477,24 @@ class AIService:
             # 音色必须与模型族匹配：配置里存的 CosyVoice 音色（longxiaoxia 等）
             # 拿去调 qwen-audio 会 400（"TTS speak operation failed"）。
             # 这里做两件事：空值时按族兜底；有值但明显不属于该族时纠正。
+            # 音色必须与模型族匹配：CosyVoice 音色（longxiaoxia/longanyang 等）
+            # 拿去调 qwen-audio 会 400「TTS speak operation failed」；反之亦然。
+            # qwen-audio 只认带版本号的 _v3.x 音色或 loongstella 这类专属名。
             if not voice:
-                voice = ('longanhuan_v3.6' if 'qwen-audio' in model_lower
-                         else 'longanyang')
-            elif 'qwen-audio' in model_lower and voice.startswith('long') and '_v3' not in voice:
-                # qwen-audio 系列只认 longanhuan_v3.6 / loongstella 这类音色
                 voice = 'longanhuan_v3.6'
+            elif 'qwen-audio' in model_lower and not _is_qwen_audio_voice(voice):
+                voice = 'longanhuan_v3.6'
+            elif 'cosyvoice' in model_lower and _is_qwen_audio_voice(voice):
+                voice = 'longxiaoxia'
             payload = {
                 'model': model,
                 'input': {
                     'text': text,
                     'voice': voice,
-                    # 官方默认：format=mp3、sample_rate=22050（代表当前音色最佳采样率）
-                    'format': params.get('output_format') or 'mp3',
-                    'sample_rate': int(params.get('sample_rate') or 22050),
+                    # 与参考实现（astrbot dashscope_tts）保持一致：wav + 24000。
+                    # 该组合在 qwen-audio / cosyvoice 各版本上实测均可发声。
+                    'format': params.get('output_format') or 'wav',
+                    'sample_rate': int(params.get('sample_rate') or 24000),
                 },
             }
             # 语速 / 音量 / 音高：官方支持但非必填，仅在配置了才传
@@ -596,8 +613,9 @@ class AIService:
         brand = (provider.brand or '').lower()
         params = AIService._provider_params(provider)
         if brand == 'bailian':
-            # 与 _dashscope_tts 的默认值保持一致：官方默认 format=mp3
-            fmt = str(params.get('output_format') or 'mp3').lower()
+            # 必须与 _dashscope_tts 实际发出的 format 一致，否则容器类型与
+            # mimetype 不匹配会导致浏览器拒播（实测过这个坑）。
+            fmt = str(params.get('output_format') or 'wav').lower()
         elif brand == 'volcengine':
             fmt = str(params.get('output_format') or format or 'mp3').lower()
         else:
