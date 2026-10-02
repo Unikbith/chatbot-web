@@ -31,40 +31,40 @@ def _friendly_tts_error(error):
     return raw
 
 
-def _get_stt_provider(user_id, provider_id=None):
-    """获取 STT 提供商（优先 stt 类型，没有则用 chat 类型）"""
+def _resolve_provider(user_id, provider_type, provider_id=None):
+    """按类型解析音频（STT/TTS）提供商。
+
+    解析顺序：显式 provider_id → 该类型的默认配置 → 该类型的任意一条
+    → chat 类型默认配置 → chat 类型任意一条。
+
+    倒数第二步很重要：用户往往只配了一个 TTS/STT 却没勾「设为默认」，
+    只认 is_default 会导致 provider_id 为空时直接 400，表现为
+    「点语音没反应」。有且仅有一条配置时应当直接用它。
+    """
     if provider_id:
         p = ModelProvider.query.filter_by(id=provider_id, user_id=user_id).first()
-        # 只接受 STT 类型提供商；前端误传聊天提供商 id 时忽略，回落到默认配置
-        if p and p.provider_type == 'stt':
+        # 只接受该类型的提供商；前端误传聊天提供商 id 时忽略，回落到默认配置
+        if p and p.provider_type == provider_type:
             return p
-    stt = ModelProvider.query.filter_by(
-        user_id=user_id, provider_type='stt', is_default=True
-    ).first()
-    if stt:
-        return stt
-    # 回退到 chat 类型默认配置
-    return ModelProvider.query.filter_by(
-        user_id=user_id, provider_type='chat', is_default=True
-    ).first()
+
+    q = ModelProvider.query.filter_by(user_id=user_id, provider_type=provider_type)
+    return (q.filter_by(is_default=True).first()
+            or q.order_by(ModelProvider.id.asc()).first()
+            or ModelProvider.query.filter_by(
+                user_id=user_id, provider_type='chat', is_default=True).first()
+            or ModelProvider.query.filter_by(
+                user_id=user_id, provider_type='chat').order_by(
+                ModelProvider.id.asc()).first())
+
+
+def _get_stt_provider(user_id, provider_id=None):
+    """获取 STT 提供商"""
+    return _resolve_provider(user_id, 'stt', provider_id)
 
 
 def _get_tts_provider(user_id, provider_id=None):
-    """获取 TTS 提供商（优先 tts 类型，没有则用 chat 类型）"""
-    if provider_id:
-        p = ModelProvider.query.filter_by(id=provider_id, user_id=user_id).first()
-        # 只接受 TTS 类型提供商；前端误传聊天提供商 id 时忽略，回落到默认配置
-        if p and p.provider_type == 'tts':
-            return p
-    tts = ModelProvider.query.filter_by(
-        user_id=user_id, provider_type='tts', is_default=True
-    ).first()
-    if tts:
-        return tts
-    # 回退到 chat 类型默认配置
-    return ModelProvider.query.filter_by(
-        user_id=user_id, provider_type='chat', is_default=True
-    ).first()
+    """获取 TTS 提供商"""
+    return _resolve_provider(user_id, 'tts', provider_id)
 
 
 @audio_bp.route('/transcriptions', methods=['POST'])
