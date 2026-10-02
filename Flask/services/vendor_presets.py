@@ -91,19 +91,22 @@ TTS_VENDORS = [
         # qwen3-tts-vc ）、Qwen-Audio-TTS（qwen-audio-3.x-tts，需业务空间域名）
         'models': [
             'cosyvoice-v2',
-            'cosyvoice-v3',
+            'cosyvoice-v3-flash',
+            'cosyvoice-v3-plus',
+            'cosyvoice-v3.5-flash',
+            'cosyvoice-v3.5-plus',
             'qwen3-tts-flash',
-            'qwen3-tts-vc',
-            'qwen-tts-latest',
+            'qwen3-tts-instruct-flash',
             'qwen-audio-3.0-tts-flash',
         ],
         'voices': [
-            # CosyVoice
-            'longxiaochun', 'longhua', 'longlz', 'longshuo', 'longxiaoxia',
-            # Qwen-TTS / Qwen3-TTS 常用音色
+            # CosyVoice v2/v3 系统音色
+            'longanyang', 'longxiaochun', 'longhua', 'longlz', 'longshuo',
+            'longxiaoxia', 'longwan', 'longcheng',
+            # CosyVoice v3.5 / Qwen-Audio 系列音色（v3.5 无系统音色，需声音设计/复刻）
+            'longanyuanfei', 'longanhuan_v3.6', 'loongstella', 'longanlingxi',
+            # Qwen-TTS 系列音色
             'Cherry', 'Serena', 'Ethan', 'Chelsie',
-            # Qwen-Audio-TTS 音色
-            'loongstella', 'longanhuan_v3.6',
         ],
     },
     {

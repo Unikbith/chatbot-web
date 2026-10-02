@@ -434,12 +434,15 @@ class AIService:
         model = (provider.model or params.get('model') or '').strip()
         model_lower = model.lower()
 
-        # 业务空间专属域名优先；未配置时按模型族决定用工作空间域名还是公共域名
+        # 域名选择（按官方文档）：
+        # - Qwen-Audio-TTS（qwen-audio-3.x）只在业务空间专属域名下可用，
+        #   公共域名 dashscope.aliyuncs.com 调不通；
+        # - CosyVoice / Qwen3-TTS 公共域名即可，用用户配置的地址。
+        # 优先级：显式 workspace_id > 内置业务空间（仅 qwen-audio）> 配置的 api_url
         workspace_id = (params.get('workspace_id') or '').strip()
         if workspace_id:
             base = f'https://{workspace_id}.cn-beijing.maas.aliyuncs.com/api/v1'
         elif 'qwen-audio' in model_lower:
-            # qwen-audio-3.x 系列在公共域名上不可用，默认走内置业务空间
             base = AIService.DEFAULT_BAILIAN_MAAS_HOST + '/api/v1'
         else:
             base = (config['api_url'] or 'https://dashscope.aliyuncs.com/api/v1').rstrip('/')
@@ -454,16 +457,28 @@ class AIService:
 
         if is_speech_synth:
             tts_url = base + '/services/audio/tts/SpeechSynthesizer'
+            # 音色兜底：不同模型族的合法音色不同，按模型族给默认值，避免传空被拒
+            if not voice:
+                voice = ('longanhuan_v3.6' if 'qwen-audio' in model_lower
+                         else 'longanyang')
             payload = {
                 'model': model,
                 'input': {
                     'text': text,
-                    # 音色兜底：用户没填时用百炼通用音色，避免空 voice 被拒
-                    'voice': voice or 'longanyuanfei',
-                    'format': params.get('output_format') or 'wav',
-                    'sample_rate': int(params.get('sample_rate') or 24000),
+                    'voice': voice,
+                    # 官方默认：format=mp3、sample_rate=22050（代表当前音色最佳采样率）
+                    'format': params.get('output_format') or 'mp3',
+                    'sample_rate': int(params.get('sample_rate') or 22050),
                 },
             }
+            # 语速 / 音量 / 音高：官方支持但非必填，仅在配置了才传
+            for key, cast in (('rate', float), ('volume', int), ('pitch', float)):
+                val = params.get(key)
+                if val is not None and val != '':
+                    try:
+                        payload['input'][key] = cast(val)
+                    except (TypeError, ValueError):
+                        pass
         else:
             tts_url = base + '/services/aigc/multimodal-generation/generation'
             payload = {
@@ -555,25 +570,30 @@ class AIService:
         供路由层设置正确的 mimetype——百炼 Qwen-Audio/CosyVoice 默认输出 wav，
         若按 mp3 标注会导致浏览器拒播，所以格式必须由本层如实给出。
         """
+    @staticmethod
+    def text_to_speech_with_format(provider, text, voice=None, format='mp3'):
+        """文字转语音，并返回实际使用的音频格式。
+
+        返回 (audio_bytes, fmt, error)。fmt 是厂商真实输出的格式，
+        供路由层设置正确的 mimetype——百炼默认返回 mp3，若按 wav 标注会
+        导致浏览器拒播，所以格式必须由本层如实给出（不靠猜 params）。
+        """
+        # 百炼 TTS 在内部已确定实际使用的格式，这里按同一规则回传，
+        # 避免二次推断与真实输出不一致
         audio, err = AIService.text_to_speech(provider, text, voice, format)
         if err or not audio:
             return None, None, err
 
-        fmt = ''
         brand = (provider.brand or '').lower()
         params = AIService._provider_params(provider)
-        if brand == 'volcengine':
-            fmt = str(params.get('output_format') or format or 'mp3')
-        elif brand == 'bailian':
-            model_lower = (provider.model or params.get('model') or '').lower()
-            if 'qwen-tts' in model_lower and 'qwen-audio' not in model_lower:
-                # 多模态 qwen-tts 不传 format 时由服务端决定，按 wav 标注更安全
-                fmt = str(params.get('output_format') or 'wav')
-            else:
-                fmt = str(params.get('output_format') or 'wav')
+        if brand == 'bailian':
+            # 与 _dashscope_tts 的默认值保持一致：官方默认 format=mp3
+            fmt = str(params.get('output_format') or 'mp3').lower()
+        elif brand == 'volcengine':
+            fmt = str(params.get('output_format') or format or 'mp3').lower()
         else:
-            fmt = str(params.get('output_format') or format or 'mp3')
-        return audio, fmt.lower(), None
+            fmt = str(params.get('output_format') or format or 'mp3').lower()
+        return audio, fmt, None
 
     @staticmethod
     def _collect_dashscope_stream(resp, params):
