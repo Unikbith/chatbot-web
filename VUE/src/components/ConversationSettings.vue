@@ -14,39 +14,47 @@
       </div>
 
       <template v-else>
-        <!-- AI 人设 -->
-        <div class="cv-section">
-          <div class="cv-title">{{ t('人物设定', 'Persona') }}</div>
-          <div class="cv-row">
-            <el-select
-              v-model="form.persona_id"
-              clearable
-              :placeholder="t('使用默认AI人设', 'Use default AI persona')"
-              style="width: 100%"
+        <!-- 人物设定 -->
+        <section class="cv-panel">
+          <header class="cv-panel__head">
+            <span class="cv-tick" aria-hidden="true"></span>
+            <h3 class="cv-panel__title">{{ t('人物设定', 'Persona') }}</h3>
+          </header>
+          <p class="cv-panel__hint">{{ t('决定 AI 在本对话中的性格与口吻', 'Shapes how the AI behaves in this chat') }}</p>
+          <el-select
+            v-model="form.persona_id"
+            clearable
+            class="cv-field"
+            :placeholder="t('使用默认AI人设', 'Use default AI persona')"
+          >
+            <el-option
+              v-for="p in aiPersonas"
+              :key="p.id"
+              :label="p.is_default ? t('默认') + ' · ' + p.name : p.name"
+              :value="p.id"
             >
-              <el-option
-                v-for="p in aiPersonas"
-                :key="p.id"
-                :label="p.is_default ? t('默认') + ' · ' + p.name : p.name"
-                :value="p.id"
-              >
-                <div class="persona-opt">
-                  <el-avatar :size="24" :src="p.avatar" class="opt-avatar">
-                    <el-icon><MagicStick /></el-icon>
-                  </el-avatar>
-                  <span>{{ p.name }}</span>
-                </div>
-              </el-option>
-            </el-select>
-          </div>
-        </div>
+              <div class="persona-opt">
+                <el-avatar :size="24" :src="p.avatar" class="opt-avatar">
+                  <el-icon><MagicStick /></el-icon>
+                </el-avatar>
+                <span>{{ p.name }}</span>
+              </div>
+            </el-option>
+          </el-select>
+        </section>
 
         <!-- 头像：AI / 用户可分别设置，仅当前对话生效 -->
-        <div class="cv-section">
-          <div class="cv-title">{{ t('头像', 'Avatars') }}</div>
+        <section class="cv-panel">
+          <header class="cv-panel__head">
+            <span class="cv-tick" aria-hidden="true"></span>
+            <h3 class="cv-panel__title">{{ t('头像', 'Avatars') }}</h3>
+          </header>
           <div class="cv-avatar-grid">
-            <div class="cv-avatar-block">
-              <span class="cv-avatar-label">{{ t('AI 头像', 'AI Avatar') }}</span>
+            <div class="cv-avatar-block cv-avatar-block--ai">
+              <span class="cv-avatar-label">
+                <el-icon><MagicStick /></el-icon>
+                {{ t('AI 头像', 'AI Avatar') }}
+              </span>
               <el-avatar :size="52" :src="form.ai_avatar || ''" class="cv-avatar">
                 <el-icon><MagicStick /></el-icon>
               </el-avatar>
@@ -64,7 +72,10 @@
               </div>
             </div>
             <div class="cv-avatar-block">
-              <span class="cv-avatar-label">{{ t('用户头像', 'User Avatar') }}</span>
+              <span class="cv-avatar-label">
+                <el-icon><User /></el-icon>
+                {{ t('用户头像', 'User Avatar') }}
+              </span>
               <el-avatar :size="52" :src="form.user_avatar || props.userAvatar || ''" class="cv-avatar">
                 <el-icon><User /></el-icon>
               </el-avatar>
@@ -82,11 +93,15 @@
               </div>
             </div>
           </div>
-        </div>
+        </section>
 
-        <!-- 背景图片 -->
-        <div class="cv-section">
-          <div class="cv-title">{{ t('背景图片', 'Background') }}</div>
+        <!-- 外观：背景图 + 消息框透明度 -->
+        <section class="cv-panel">
+          <header class="cv-panel__head">
+            <span class="cv-tick" aria-hidden="true"></span>
+            <h3 class="cv-panel__title">{{ t('外观', 'Appearance') }}</h3>
+          </header>
+
           <div class="cv-image-row">
             <div class="bg-preview" :style="bgPreviewStyle">
               <span v-if="!form.background_image" class="bg-placeholder">{{ t('无', 'None') }}</span>
@@ -97,103 +112,98 @@
                 :before-upload="handleBgUpload"
                 accept="image/*"
               >
-                <el-button size="small">{{ t('上传', 'Upload') }}</el-button>
+                <el-button size="small">{{ t('背景图', 'Background') }}</el-button>
               </el-upload>
               <el-button size="small" plain :disabled="!form.background_image" @click="form.background_image = null">
                 {{ t('清除', 'Clear') }}
               </el-button>
             </div>
           </div>
-          <el-radio-group v-model="form.background_cover" style="margin-top: 6px">
-            <el-radio-button value="contain">{{ t('完整可见', 'Show Entire Image') }}</el-radio-button>
-            <el-radio-button value="cover">{{ t('覆盖背景', 'Cover Background') }}</el-radio-button>
+
+          <el-radio-group v-model="form.background_cover" class="cv-cover-group">
+            <el-radio-button value="contain">{{ t('完整可见', 'Show Entire') }}</el-radio-button>
+            <el-radio-button value="cover">{{ t('覆盖', 'Cover') }}</el-radio-button>
           </el-radio-group>
-        </div>
 
-        <!-- AI 参数（当前对话模型单独设置） -->
-        <div class="cv-section">
-          <div class="cv-title">{{ t('参数微调', 'Parameters') }}</div>
-
-          <div class="param-row">
-            <div class="slider-label">{{ t('温度', 'Temperature') }}</div>
-            <div class="slider-control">
-              <el-slider
-                :model-value="form.temperature == null ? generalTemperature : form.temperature"
-                :min="0" :max="2" :step="0.1"
-                @update:model-value="(v) => form.temperature = v"
-                style="flex: 1; margin-right: 16px"
-              />
-              <span class="slider-value">{{ form.temperature == null ? t('系统默认', 'System default') : form.temperature.toFixed(1) }}</span>
+          <div class="cv-meter">
+            <div class="cv-meter__head">
+              <span class="cv-meter__label">{{ t('消息框透明度', 'Message opacity') }}</span>
+              <span class="cv-meter__value">
+                {{ form.message_opacity == null ? t('系统默认', 'System default') : Math.round(form.message_opacity * 100) + '%' }}
+              </span>
             </div>
-            <el-button v-if="form.temperature != null" size="small" text plain @click="form.temperature = null">
-              {{ t('恢复系统默认', 'Use system default') }}
-            </el-button>
-          </div>
-
-          <div class="param-row">
-            <div class="slider-label">{{ t('频率惩罚', 'Frequency Penalty') }}</div>
-            <div class="slider-control">
-              <el-slider
-                :model-value="form.frequency_penalty == null ? generalFrequencyPenalty : form.frequency_penalty"
-                :min="-2" :max="2" :step="0.1"
-                @update:model-value="(v) => form.frequency_penalty = v"
-                style="flex: 1; margin-right: 16px"
-              />
-              <span class="slider-value">{{ form.frequency_penalty == null ? t('系统默认', 'System default') : form.frequency_penalty.toFixed(1) }}</span>
-            </div>
-            <el-button v-if="form.frequency_penalty != null" size="small" text plain @click="form.frequency_penalty = null">
-              {{ t('恢复系统默认', 'Use system default') }}
-            </el-button>
-          </div>
-
-          <div class="param-row">
-            <div class="slider-label">{{ t('存在惩罚', 'Presence Penalty') }}</div>
-            <div class="slider-control">
-              <el-slider
-                :model-value="form.presence_penalty == null ? generalPresencePenalty : form.presence_penalty"
-                :min="-2" :max="2" :step="0.1"
-                @update:model-value="(v) => form.presence_penalty = v"
-                style="flex: 1; margin-right: 16px"
-              />
-              <span class="slider-value">{{ form.presence_penalty == null ? t('系统默认', 'System default') : form.presence_penalty.toFixed(1) }}</span>
-            </div>
-            <el-button v-if="form.presence_penalty != null" size="small" text plain @click="form.presence_penalty = null">
-              {{ t('恢复系统默认', 'Use system default') }}
-            </el-button>
-          </div>
-        </div>
-
-        <!-- 语音播报 -->
-        <div class="cv-section">
-          <div class="cv-title">{{ t('语音播报', 'Voice') }}</div>
-          <div class="cv-row voice-row">
-            <div class="voice-item">
-              <span class="slider-label">{{ t('自动语音回复', 'Auto voice replies') }}</span>
-              <el-switch v-model="form.auto_play_voice" />
-            </div>
-          </div>
-        </div>
-
-        <!-- 消息框透明度 -->
-        <div class="cv-section">
-          <div class="cv-title">{{ t('消息框透明度', 'Transparency') }}</div>
-          <div class="slider-control">
             <el-slider
               :model-value="form.message_opacity == null ? generalOpacity : form.message_opacity"
               :min="0.1"
               :max="1"
               :step="0.05"
+              class="cv-slider"
               @update:model-value="(v) => form.message_opacity = v"
-              style="flex: 1; margin-right: 16px"
             />
-            <span class="slider-value">
-              {{ form.message_opacity == null ? t('系统默认', 'System default') : Math.round(form.message_opacity * 100) + '%' }}
-            </span>
+            <el-button
+              v-if="form.message_opacity != null"
+              size="small"
+              text
+              class="cv-reset"
+              @click="form.message_opacity = null"
+            >
+              {{ t('恢复系统默认', 'Use system default') }}
+            </el-button>
           </div>
-          <el-button v-if="form.message_opacity != null" size="small" plain @click="form.message_opacity = null" style="margin-top: 8px">
-            {{ t('恢复系统默认', 'Use system default') }}
-          </el-button>
-        </div>
+        </section>
+
+        <!-- 参数微调 -->
+        <section class="cv-panel">
+          <header class="cv-panel__head">
+            <span class="cv-tick" aria-hidden="true"></span>
+            <h3 class="cv-panel__title">{{ t('参数微调', 'Parameters') }}</h3>
+            <span class="cv-panel__badge">{{ t('仅本对话', 'This chat only') }}</span>
+          </header>
+
+          <div v-for="p in paramDefs" :key="p.key" class="cv-meter">
+            <div class="cv-meter__head">
+              <span class="cv-meter__label">{{ p.label }}</span>
+              <span class="cv-meter__value">
+                {{ form[p.key] == null ? t('系统默认', 'System default') : Number(form[p.key]).toFixed(1) }}
+              </span>
+            </div>
+            <div class="cv-meter__body">
+              <el-slider
+                :model-value="form[p.key] == null ? p.general : form[p.key]"
+                :min="p.min"
+                :max="p.max"
+                :step="p.step"
+                class="cv-slider"
+                @update:model-value="(v) => form[p.key] = v"
+              />
+              <el-button
+                size="small"
+                text
+                class="cv-reset"
+                :disabled="form[p.key] == null"
+                :aria-label="t('恢复系统默认', 'Use system default')"
+                @click="form[p.key] = null"
+              >
+                {{ t('默认', 'Default') }}
+              </el-button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 语音播报 -->
+        <section class="cv-panel">
+          <header class="cv-panel__head">
+            <span class="cv-tick" aria-hidden="true"></span>
+            <h3 class="cv-panel__title">{{ t('语音播报', 'Voice') }}</h3>
+          </header>
+          <div class="cv-toggle">
+            <div class="cv-toggle__text">
+              <span class="cv-toggle__label">{{ t('自动语音回复', 'Auto voice replies') }}</span>
+              <span class="cv-toggle__hint">{{ t('AI 回复完成后自动朗读', 'Read AI replies aloud when they finish') }}</span>
+            </div>
+            <el-switch v-model="form.auto_play_voice" />
+          </div>
+        </section>
       </template>
     </div>
 
@@ -229,6 +239,13 @@ const emit = defineEmits(['update:modelValue', 'save'])
 const saving = ref(false)
 // 仅列出已启用（enabled）的模型配置供当前对话选择
 const form = reactive({ persona_id: null, ai_avatar: null, user_avatar: null, background_image: null, background_cover: 'contain', message_opacity: null, temperature: null, frequency_penalty: null, presence_penalty: null, auto_play_voice: false })
+
+// 参数微调的量表定义：模板用 v-for 渲染，避免三段结构重复
+const paramDefs = computed(() => ([
+  { key: 'temperature', label: t('温度', 'Temperature'), min: 0, max: 2, step: 0.1, general: props.generalTemperature },
+  { key: 'frequency_penalty', label: t('频率惩罚', 'Frequency Penalty'), min: -2, max: 2, step: 0.1, general: props.generalFrequencyPenalty },
+  { key: 'presence_penalty', label: t('存在惩罚', 'Presence Penalty'), min: -2, max: 2, step: 0.1, general: props.generalPresencePenalty },
+]))
 
 function resetForm() {
   const conv = props.conversation || {}
@@ -314,99 +331,285 @@ function save() {
   setTimeout(() => { saving.value = false }, 500)
 }
 </script>
-
 <style scoped>
-.conv-settings { padding: 4px 0; }
-.drawer-desc { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; }
+/* ============================================================
+   对话设置 —— 工业实用（Industrial）调性
+   分区用发丝边框的「面板」承载，每个面板左侧一道品牌色刻度作为锚点；
+   数值区用等宽数字，读起来像仪表读数而不是表单。
+   全部依赖项目既有主题变量，亮/暗自动适配。
+   ============================================================ */
+
+.conv-settings {
+  --cv-hairline: var(--border-color);
+  --cv-accent: var(--brand);
+  padding: 0 0 4px;
+}
+
+/* 顶部说明：把「仅本对话生效」做成带竖线的注解，而非灰字 */
+.drawer-desc {
+  position: relative;
+  margin: 0 0 20px;
+  padding-left: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.drawer-desc::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 3px; bottom: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--cv-accent);
+  opacity: 0.55;
+}
+
 .empty-tip { margin-top: 40px; }
 
-.cv-section { margin-bottom: 24px; }
-.cv-title {
-  font-size: 13px; font-weight: 600; color: var(--text-primary);
-  margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color);
+/* ---------- 分区面板：发丝边框 + 极轻内阴影 ---------- */
+.cv-panel {
+  position: relative;
+  margin-bottom: 14px;
+  padding: 16px 16px 18px;
+  border: 1px solid var(--cv-hairline);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.015);
+  /* 顶部一道极细高光，制造面板的「金属边」而非纸片感 */
+  overflow: hidden;
 }
-.cv-row { display: flex; flex-direction: column; gap: 6px; }
+.cv-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--cv-accent) 22%, transparent),
+    transparent
+  );
+}
 
-.persona-opt { display: flex; align-items: center; gap: 8px; }
+/* 面板标题：刻度 + 标题 +（可选）作用域徽标 */
+.cv-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.cv-tick {
+  width: 3px;
+  height: 13px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: var(--cv-accent);
+}
+.cv-panel__title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+.cv-panel__badge {
+  margin-left: auto;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--cv-hairline);
+  background: var(--surface-hover);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.cv-panel__hint {
+  margin: 0 0 12px 11px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.cv-field { width: 100%; }
+
+.persona-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .opt-avatar { flex-shrink: 0; }
 
-.cv-image-row { display: flex; align-items: center; gap: 14px; }
-.cv-avatar { flex-shrink: 0; border: 2px solid var(--border-color); }
-.cv-image-actions { display: flex; flex-direction: column; gap: 8px; }
-
-/* 头像区：AI / 用户并排 */
+/* ---------- 头像区 ---------- */
 .cv-avatar-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 10px;
 }
 .cv-avatar-block {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 10px;
-  padding: 14px;
-  border: 1px solid var(--border-color);
+  padding: 13px;
+  border: 1px solid var(--cv-hairline);
   border-radius: 10px;
-  background: var(--surface);
+  /* 内层用极淡的暖色渐变，让卡片不是死白 */
+  background:
+    linear-gradient(160deg,
+      color-mix(in srgb, var(--cv-accent) 5%, transparent),
+      transparent 60%),
+    var(--surface);
+}
+/* AI 侧用品牌色描边区分，用户侧保持中性 —— 不用图标以外的额外图示 */
+.cv-avatar-block--ai {
+  border-color: color-mix(in srgb, var(--cv-accent) 34%, var(--cv-hairline));
 }
 .cv-avatar-label {
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
   font-weight: 600;
+  color: var(--text-secondary);
+}
+.cv-avatar {
+  flex-shrink: 0;
+  border: 1.5px solid var(--cv-hairline);
+  box-shadow: 0 2px 8px -4px rgba(0, 0, 0, 0.25);
+}
+
+.cv-image-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.bg-preview {
+  width: 74px;
+  height: 56px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--cv-hairline);
+  border-radius: 8px;
+  background-color: var(--surface-hover);
+  background-repeat: no-repeat;
+  background-position: center;
+  overflow: hidden;
+}
+.bg-placeholder {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.cv-image-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cv-cover-group { margin-top: 12px; }
+
+/* ---------- 数值仪表：标签—数值—滑块 读作一条轴线 ---------- */
+.cv-meter {
+  padding: 11px 0 0;
+  margin-top: 10px;
+  border-top: 1px dashed var(--cv-hairline);
+}
+.cv-panel > .cv-meter:first-of-type {
+  border-top: 0;
+  margin-top: 0;
+}
+.cv-meter__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+.cv-meter__label {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+/* 等宽数字：数值变化时不跳动，读数也更像仪表 */
+.cv-meter__value {
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
   color: var(--text-primary);
 }
-
-/* AI 参数行：标签 + 滑块 + 恢复通用 */
-.param-row {
-  display: grid;
-  grid-template-columns: 88px 1fr auto;
+.cv-meter__body {
+  display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-.slider-label {
-  font-size: 13px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
-.voice-row {
   gap: 10px;
 }
-.voice-item {
+.cv-slider { flex: 1; min-width: 0; margin-right: 2px; }
+.cv-reset {
+  flex-shrink: 0;
+  min-width: 44px;
+  padding: 0 4px;
+  font-size: 11.5px;
+}
+/* 滑块贴底时数值轴与轨道视觉对齐 */
+.cv-slider :deep(.el-slider__runway) {
+  margin: 8px 0;
+  height: 3px;
+  background-color: var(--surface-hover);
+}
+.cv-slider :deep(.el-slider__bar),
+.cv-slider :deep(.el-slider__button) {
+  background-color: var(--cv-accent);
+  border-color: var(--cv-accent);
+}
+.cv-slider :deep(.el-slider__button) {
+  width: 13px;
+  height: 13px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* ---------- 开关行 ---------- */
+.cv-toggle {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 14px;
+  padding: 2px 0;
+}
+.cv-toggle__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cv-toggle__label { font-size: 12.5px; color: var(--text-secondary); }
+.cv-toggle__hint { font-size: 11px; color: var(--text-secondary); }
+
+/* ---------- 入场序列：面板错峰淡入上浮（仅动 opacity/transform） ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  .cv-panel {
+    opacity: 0;
+    transform: translateY(10px);
+    animation: cv-rise 360ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  .cv-panel:nth-child(1) { animation-delay: 0ms; }
+  .cv-panel:nth-child(2) { animation-delay: 70ms; }
+  .cv-panel:nth-child(3) { animation-delay: 140ms; }
+  .cv-panel:nth-child(4) { animation-delay: 210ms; }
+  .cv-panel:nth-child(5) { animation-delay: 280ms; }
+}
+@keyframes cv-rise {
+  to { opacity: 1; transform: none; }
 }
 
+/* 焦点可见：键盘操作时给出明确描边 */
+.conv-settings :focus-visible {
+  outline: 2px solid var(--cv-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ---------- 移动端：单列堆叠，触摸目标放大到 44px ---------- */
 @media (max-width: 520px) {
-  .cv-avatar-grid {
-    grid-template-columns: 1fr;
-  }
-  .param-row {
-    grid-template-columns: 1fr;
-    gap: 8px;
-    padding-bottom: 10px;
-    border-bottom: 1px dashed var(--border-color);
-  }
-}
-
-.bg-preview {
-  width: 88px; height: 60px; border-radius: 8px;
-  border: 1px solid var(--border-color);
-  display: flex; align-items: center; justify-content: center;
-  background: var(--surface-hover);
-  background-size: cover; background-position: center;
-  flex-shrink: 0;
-}
-.bg-placeholder { font-size: 12px; color: var(--text-muted); }
-.cv-hint { font-size: 11px; color: var(--text-muted); }
-.cv-hint-text { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
-
-.slider-control { display: flex; align-items: center; }
-.slider-value {
-  min-width: 60px; text-align: right; font-size: 13px;
-  color: var(--text-muted); font-variant-numeric: tabular-nums;
+  .cv-avatar-grid { grid-template-columns: 1fr; }
+  .cv-panel { padding: 14px 13px 16px; }
+  .cv-meter__body { gap: 6px; }
+  .cv-reset { min-width: 52px; min-height: 44px; }
+  .cv-cover-group { display: flex; width: 100%; }
+  .cv-cover-group :deep(.el-radio-button) { flex: 1; }
+  .cv-cover-group :deep(.el-radio-button__inner) { width: 100%; min-height: 34px; }
 }
 </style>
