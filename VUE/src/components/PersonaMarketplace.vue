@@ -22,14 +22,14 @@
         </el-input>
         <el-select
           v-model="genderFilter"
-          :placeholder="t('性别', 'Gender')"
+          :placeholder="t('类型', 'Type')"
           clearable
           size="default"
           class="mp-gender"
           @change="applyGenderFilter"
         >
           <!-- 只渲染实际存在卡片的性别：没有对应卡片的选项不显示，
-               避免用户点了得到空列表。顺序：男 → 女 → 自定义值 → 非二元总览 -->
+               避免用户点了得到空列表。顺序：男 → 女 → 其他具体类型 -->
           <el-option
             v-for="opt in genderOptions"
             :key="opt.value"
@@ -331,11 +331,11 @@
             :placeholder="t('至少 30 字，介绍一下这位角色', 'At least 30 characters — describe this character')"
           />
         </el-form-item>
-        <el-form-item :label="t('人物卡性别', 'Gender')" required>
+        <el-form-item :label="t('类型', 'Type')" required>
           <div class="gender-picker">
-            <!-- 预设：男 / 女 + 常见自定义项；再提供「其他」自由输入兜底。
-                 预设项直接写入 gender，其余统一归入非二元总览，
-                 但会作为具体值出现在筛选下拉里（见 /marketplace/genders）。 -->
+            <!-- 预设具体类型：男 / 女 / 神秘 / 双性 / 无性别；再提供「其他」自由输入兜底。
+                 选择结果直接存入 gender，并作为具体值出现在筛选下拉里
+                 （见 /marketplace/genders，只显示有卡片的类型）。 -->
             <el-radio-group v-model="publishForm.gender">
               <el-radio-button value="男">{{ t('男', 'Male') }}</el-radio-button>
               <el-radio-button value="女">{{ t('女', 'Female') }}</el-radio-button>
@@ -449,26 +449,23 @@ const loading = ref(false)
 const items = ref([])
 const sortMode = ref('hot')
 const searchKeyword = ref('')
-// 性别筛选：'' 全部 / 具体标签（男/女/自定义值/非二元总览）
+// 类型筛选：'' 全部 / 具体类型（男、女或用户自定义值）
 const genderFilter = ref('')
 // 广场中各性别标签 -> 卡片数量（仅数量 > 0 的才会出现在下拉里）
 const genderCounts = ref({})
 
-// 筛选下拉选项：只保留有卡片的性别，顺序为 男 → 女 → 其他具体值 → 非二元总览
+// 筛选下拉选项：只保留有卡片的类型，顺序为 男 → 女 → 其他具体值。
+// 不提供「非二元」总览项——用户选择具体类型即可，逐项选择更明确。
 const genderOptions = computed(() => {
   const counts = genderCounts.value || {}
   const preset = ['男', '女']
   const extras = Object.keys(counts).filter(
     g => !preset.includes(g) && g !== '非二元'
   )
-  const ordered = [
+  return [
     ...preset.filter(g => counts[g] > 0).map(g => ({ value: g, label: g, count: counts[g] })),
     ...extras.filter(g => counts[g] > 0).map(g => ({ value: g, label: g, count: counts[g] })),
   ]
-  if (counts['非二元'] > 0) {
-    ordered.push({ value: '非二元', label: t('非二元', 'Non-binary'), count: counts['非二元'] })
-  }
-  return ordered
 })
 const currentPage = ref(1)
 const pageSize = 12
@@ -543,10 +540,10 @@ const publishForm = reactive({
   greeting: '',
   avatar: '',
   gender: '',        // 男 / 女 / 自定义
-  genderCustom: '',  // 自定义性别文本（非男非女，筛选归入非二元）
+  genderCustom: '',  // 「其他」模式下用户填写的类型文本
 })
 
-// 实际提交的性别值：自定义模式下取文本（留空则由后端归入非二元）
+// 实际提交的类型值：「其他」模式下取用户输入（留空则回落到「其他」）
 // 提交给后端的性别值：选「其他」时取自由输入，其余取预设值。
 // 「其他」本身不是有效性别，必须替换为用户填的内容（空则回落到预设值）。
 const effectiveGender = () => {
@@ -819,7 +816,7 @@ async function handleAvatarUpload(file) {
 
 async function handlePublish() {
   if (!publishForm.gender) {
-    ElMessage.warning(t('请选择人物卡性别', 'Please choose a gender'))
+    ElMessage.warning(t('请选择类型', 'Please choose a type'))
     return
   }
   publishing.value = true
