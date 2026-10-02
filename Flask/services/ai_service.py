@@ -363,14 +363,15 @@ class AIService:
         if brand == 'volcengine':
             return AIService._volcengine_tts(provider, config, params, text, format, voice)
 
-        # 阿里云百炼：Qwen-TTS / CosyVoice 系列走 DashScope 原生协议。
+        # 阿里云百炼：Qwen-TTS / Qwen3-TTS / CosyVoice / Qwen-Audio 系列走 DashScope 原生协议。
         # OpenAI 兼容端点（compatible-mode）不提供 /audio/speech，
         # 原生 /api/v1 地址只能按原生协议调用。
         model = (provider.model or params.get('model') or '').strip()
         model_lower = model.lower()
         if brand == 'bailian' and (
-            'qwen-tts' in model_lower or 'qwen3-tts' in model_lower
-            or 'cosyvoice' in model_lower or 'qwen-audio' in model_lower
+            'tts' in model_lower
+            or 'cosyvoice' in model_lower
+            or 'qwen-audio' in model_lower
         ):
             return AIService._dashscope_tts(provider, config, params, text, voice)
 
@@ -409,18 +410,39 @@ class AIService:
 
     @staticmethod
     def _dashscope_tts(provider, config, params, text, voice):
-        """阿里云百炼 TTS 原生协议（OpenAI 兼容端点不支持 /audio/speech）：
+        """阿里云百炼 TTS 原生协议（OpenAI 兼容端点不支持 /audio/speech）。
 
-        - Qwen-TTS：POST {api_url}/services/aigc/multimodal-generation/generation
-        - CosyVoice / Qwen-Audio-TTS：POST {api_url}/services/audio/tts/SpeechSynthesizer
-        两者非流式响应都含 output.audio.url（24h 有效），下载后返回字节。
+        端点按模型族分流：
+        - CosyVoice / Qwen-Audio-TTS：POST {base}/services/audio/tts/SpeechSynthesizer
+        - Qwen-TTS / Qwen3-TTS：   POST {base}/services/aigc/multimodal-generation/generation
+
+        音频提取兼容三种形态（不同版本/流式返回结构不一致）：
+        1. output.audio.url            —— 临时地址，下载后返回字节
+        2. output.audio.data            —— base64 内联，直接解码
+        3. output.choices[].message.audio.data —— 多模态结构的 base64
+
+        另外支持百炼业务空间专属域名（params.workspace_id）：形如
+        https://{workspace_id}.cn-beijing.maas.aliyuncs.com
         """
-        base = (config['api_url'] or 'https://dashscope.aliyuncs.com/api/v1').rstrip('/')
         model = (provider.model or params.get('model') or '').strip()
         model_lower = model.lower()
-        is_cosy = 'cosyvoice' in model_lower or 'qwen-audio' in model_lower
 
-        if is_cosy:
+        # 业务空间专属域名优先：百炼的 qwen-audio-3.x 只在分配的工作空间域名下可用
+        workspace_id = (params.get('workspace_id') or '').strip()
+        if workspace_id:
+            base = f'https://{workspace_id}.cn-beijing.maas.aliyuncs.com/api/v1'
+        else:
+            base = (config['api_url'] or 'https://dashscope.aliyuncs.com/api/v1').rstrip('/')
+
+        # 端点分流：SpeechSynthesizer 覆盖 CosyVoice 与 Qwen-Audio（含 3.x）
+        is_speech_synth = (
+            'cosyvoice' in model_lower
+            or 'qwen-audio' in model_lower
+            or 'qwen3-tts' in model_lower
+            or 'qwen-tts' in model_lower
+        )
+
+        if is_speech_synth:
             tts_url = base + '/services/audio/tts/SpeechSynthesizer'
             payload = {
                 'model': model,
@@ -453,6 +475,11 @@ class AIService:
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {config["api_key"]}',
         }
+        # 流式模式：百炼用 SSE 增量返回 base64 音频分片
+        stream = str(params.get('stream') or '').lower() in ('1', 'true', 'yes', 'on')
+        if stream:
+            headers['X-DashScope-SSE'] = 'enable'
+
         try:
             resp = requests.post(
                 tts_url, headers=headers, json=payload,
@@ -460,9 +487,20 @@ class AIService:
             )
             if resp.status_code not in (200, 201):
                 return None, f"HTTP {resp.status_code}: {resp.text[:300]}"
+
+            # 流式：逐行解析 data: 事件，拼接 base64 音频分片
+            if stream:
+                return AIService._collect_dashscope_stream(resp, params)
+
             body = resp.json()
-            # 兼容 output.audio.url / output.choices[].message.audio.url 两种结构
             output = body.get('output') or {}
+
+            # ① base64 内联（qwen-audio-3.x 非流式直返 data，省一次下载）
+            audio_inline = AIService._extract_dashscope_base64(output)
+            if audio_inline:
+                return audio_inline, None
+
+            # ② 临时音频地址
             audio_url = (output.get('audio') or {}).get('url')
             if not audio_url:
                 for ch in output.get('choices') or []:
@@ -471,12 +509,65 @@ class AIService:
                         break
             if not audio_url:
                 return None, f'响应缺少音频地址: {resp.text[:300]}'
-            audio_resp = requests.get(audio_url, timeout=60)
+            audio_resp = requests.get(
+                audio_url, **AIService._request_kwargs(params, 60)
+            )
             if audio_resp.status_code != 200:
                 return None, f'音频下载失败: HTTP {audio_resp.status_code}'
             return audio_resp.content, None
         except requests.RequestException as e:
             return None, str(e)
+        except ValueError as e:
+            return None, f'响应解析失败: {e}'
+
+    @staticmethod
+    def _extract_dashscope_base64(output):
+        """从百炼响应里取 base64 内联音频并解码（兼容两种结构）。"""
+        candidates = [
+            (output.get('audio') or {}).get('data'),
+        ]
+        for ch in output.get('choices') or []:
+            candidates.append(((ch.get('message') or {}).get('audio') or {}).get('data'))
+        for data in candidates:
+            if not data:
+                continue
+            try:
+                return base64.b64decode(data)
+            except (ValueError, TypeError):
+                continue
+        return None
+
+    @staticmethod
+    def _collect_dashscope_stream(resp, params):
+        """解析百炼 SSE 流式响应，把各分片的 base64 音频拼成完整字节。
+
+        事件格式：data: {"output":{"audio":{"data":"<base64>"}}} ... data: [DONE]
+        注意：分片是「增量音频块」而非完整文件，直接顺序拼接即可播放。
+        """
+        chunks = []
+        for raw in resp.iter_lines(decode_unicode=True):
+            if not raw:
+                continue
+            line = raw.strip()
+            if not line.startswith('data:'):
+                continue
+            payload = line[5:].strip()
+            if not payload or payload == '[DONE]':
+                continue
+            try:
+                obj = json.loads(payload)
+            except ValueError:
+                continue
+            data = ((obj.get('output') or {}).get('audio') or {}).get('data')
+            if not data:
+                continue
+            try:
+                chunks.append(base64.b64decode(data))
+            except (ValueError, TypeError):
+                continue
+        if not chunks:
+            return None, '流式响应未包含音频数据'
+        return b''.join(chunks), None
 
     @staticmethod
     def _volcengine_tts(provider, config, params, text, format, voice):

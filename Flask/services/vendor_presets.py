@@ -85,10 +85,26 @@ TTS_VENDORS = [
     {
         'brand': 'bailian',
         'name': '阿里云百炼',
-        'desc': 'DashScope CosyVoice',
+        'desc': 'DashScope Qwen-TTS / CosyVoice',
         'default_api_url': 'https://dashscope.aliyuncs.com/api/v1',
-        'models': ['cosyvoice-v2'],
-        'voices': ['longxiaochun', 'longhua', 'longlz', 'longshuo'],
+        # 模型族：CosyVoice（ cosyvoice-v1/v2/v3 ）、Qwen-TTS（qwen-tts / qwen3-tts /
+        # qwen3-tts-vc ）、Qwen-Audio-TTS（qwen-audio-3.x-tts，需业务空间域名）
+        'models': [
+            'cosyvoice-v2',
+            'cosyvoice-v3',
+            'qwen3-tts-flash',
+            'qwen3-tts-vc',
+            'qwen-tts-latest',
+            'qwen-audio-3.0-tts-flash',
+        ],
+        'voices': [
+            # CosyVoice
+            'longxiaochun', 'longhua', 'longlz', 'longshuo', 'longxiaoxia',
+            # Qwen-TTS / Qwen3-TTS 常用音色
+            'Cherry', 'Serena', 'Ethan', 'Chelsie',
+            # Qwen-Audio-TTS 音色
+            'loongstella', 'longanhuan_v3.6',
+        ],
     },
     {
         'brand': 'volcengine',
@@ -243,15 +259,37 @@ def _volcengine_tts_schema():
 def _bailian_tts_schema():
     return [
         _text('model', '模型 ID', 'Model ID', default='',
-              placeholder='cosyvoice-v2...', required=True,
-              help='语音合成模型', help_en='TTS model ID', target='model'),
+              placeholder='cosyvoice-v2 / qwen3-tts-flash / qwen-audio-3.0-tts-flash',
+              required=True,
+              help='语音合成模型 ID', help_en='TTS model ID', target='model'),
         _text('voice', '音色', 'Voice', default='',
-              placeholder='输入自定义音色 ID，如 longxiaochun',
-              help='CosyVoice 音色 ID，可自定义输入',
-              help_en='CosyVoice voice ID, custom input'),
+              placeholder='longxiaochun / Cherry / loongstella',
+              help='音色 ID，可自定义输入',
+              help_en='Voice ID, custom input'),
         _select('output_format', '输出格式', 'Format', default='mp3',
-                options=['mp3', 'wav', 'pcm'], help='音频输出格式',
+                options=['mp3', 'wav', 'pcm', 'ogg', 'opus'],
+                help='音频输出格式，需与厂商能力匹配（部分模型仅支持 wav）',
                 help_en='Audio output format'),
+        _text('workspace_id', '业务空间 ID', 'Workspace ID', default='',
+              placeholder='ws-xxxxxxxx',
+              help='百炼业务空间专属域名。qwen-audio-3.x-tts 系列必须填写，'
+                   '留空则使用默认公共域名',
+              help_en='Bailian workspace ID. Required for qwen-audio-3.x-tts models'),
+        _boolean('stream', '流式返回', 'Stream', default=False,
+                 help='开启后分片流式拉取音频，降低首字延迟',
+                 help_en='Stream audio chunks over SSE'),
+        _number('sample_rate', '采样率', 'Sample Rate', default=24000,
+                min=8000, max=48000, unit='Hz',
+                help='音频采样率，部分模型支持 16000/22050/24000',
+                help_en='Audio sample rate'),
+        _text('language_type', '语言类型', 'Language', default='Chinese',
+              placeholder='Chinese / English',
+              help='多模态 TTS（qwen-tts）使用的语言类型',
+              help_en='language_type for multimodal Qwen-TTS'),
+        _text('instructions', '语音指令', 'Instructions', default='',
+              placeholder='用温柔的语气朗读',
+              help='控制语气/情绪的指令，仅 qwen-tts 等多模态模型支持',
+              help_en='Tone/emotion instructions, multimodal models only'),
         _number('timeout', '超时时间', 'Timeout', default=20, min=5, max=120,
                 unit='秒', help='合成超时时间，单位秒', help_en='Timeout in seconds'),
         _text('proxy', '代理地址', 'Proxy', default='',

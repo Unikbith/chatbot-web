@@ -105,13 +105,32 @@ def text_to_speech():
         audio_data, error = AIService.text_to_speech(provider, text, voice)
         if error:
             return jsonify({'code': 500, 'message': f'合成失败: {error}'}), 500
-        
-        # 返回音频流
+        if not audio_data:
+            return jsonify({'code': 500, 'message': '合成失败: 未返回音频数据'}), 500
+
+        # 容器类型必须与厂商实际输出格式一致：百炼 CosyVoice/Qwen-Audio 默认
+        # 输出 wav，若一律标成 audio/mpeg，部分浏览器/音频库会拒播或播不出声。
+        fmt = (data.get('format') or '').strip().lower()
+        if not fmt:
+            params = getattr(provider, 'params', None) or {}
+            fmt = str((params.get('output_format') if isinstance(params, dict) else '') or '').lower()
+        if not fmt:
+            fmt = str(getattr(provider, 'output_format', '') or '').lower()
+        ext, mimetype = {
+            'mp3': ('mp3', 'audio/mpeg'),
+            'wav': ('wav', 'audio/wav'),
+            'pcm': ('pcm', 'audio/L16'),
+            'ogg': ('ogg', 'audio/ogg'),
+            'opus': ('opus', 'audio/opus'),
+            'flac': ('flac', 'audio/flac'),
+            'aac': ('m4a', 'audio/mp4'),
+        }.get(fmt, ('mp3', 'audio/mpeg'))
+
         return send_file(
             BytesIO(audio_data),
-            mimetype='audio/mpeg',
+            mimetype=mimetype,
             as_attachment=False,
-            download_name='speech.mp3'
+            download_name=f'speech.{ext}'
         )
     except Exception as e:
         return jsonify({'code': 500, 'message': f'合成失败: {str(e)}'}), 500
