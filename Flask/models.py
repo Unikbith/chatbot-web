@@ -405,9 +405,11 @@ class PersonaMarketplace(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
-    name = db.Column(db.String(100), nullable=False)
-    description = db.Column(db.String(500), nullable=True)
+    name = db.Column(db.String(1000), nullable=False)
+    description = db.Column(db.String(1000), nullable=True)
     avatar = db.Column(db.String(500), nullable=True)
+    # 上限 50000 字（软上限 10000，超出部分兜底）；SQLite 的 TEXT 不限长度，
+    # 若将来迁 MySQL 需改为 LONGTEXT（VARCHAR/TEXT 上限 65535 字节存不下 5 万汉字）
     system_prompt = db.Column(db.Text, nullable=False)
     greeting = db.Column(db.Text, nullable=True)
     # 人物卡性别：男 / 女 / 自定义文本（非男非女在筛选里统一归入「非二元」）

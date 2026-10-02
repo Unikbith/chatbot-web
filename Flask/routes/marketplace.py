@@ -15,6 +15,19 @@ from sqlalchemy.orm import joinedload
 marketplace_bp = Blueprint('marketplace', __name__, url_prefix='/api/marketplace')
 
 
+# ── 发布卡片字数限制 ──────────────────────────────────────────────
+# 与「人物卡」（PersonaTemplate）保持一致，避免出现「人物卡能写 1000 字、
+# 发布到广场却被拦下」的情况。系统提示词另设软上限：常规建议 10000 字，
+# 确有需要时超出部分兜底到 50000 字。
+PUB_NAME_MAX = 1000
+PUB_DESC_MIN = 30
+PUB_DESC_MAX = 1000
+PUB_PROMPT_MIN = 100
+PUB_PROMPT_SOFT_MAX = 10000
+PUB_PROMPT_MAX = 50000
+PUB_GREETING_MAX = 1000
+
+
 # ── 确定性假名生成 ──────────────────────────────────────────────
 ADJECTIVES = [
     "温柔的", "安静的", "明亮的", "慵懒的", "清澈的", "柔软的", "沉静的", "温暖的",
@@ -522,12 +535,23 @@ def publish_persona():
 
     if not name or not description or not system_prompt or not greeting or not avatar:
         return jsonify({'code': 400, 'message': '请按规范填写'}), 400
-    if len(description) < 30 or len(description) > 100:
-        return jsonify({'code': 400, 'message': '请按规范填写'}), 400
-    if len(system_prompt) < 100 or len(system_prompt) > 800:
-        return jsonify({'code': 400, 'message': '请按规范填写'}), 400
-    if len(greeting) > 50:
-        return jsonify({'code': 400, 'message': '请按规范填写'}), 400
+    # 字数上限与「人物卡」保持一致：名称/描述/开场白 1000，
+    # 系统提示词软上限 10000，超出部分兜底到硬上限 50000
+    if len(name) > PUB_NAME_MAX:
+        return jsonify({'code': 400, 'message': f'名称最多 {PUB_NAME_MAX} 字'}), 400
+    if len(description) < PUB_DESC_MIN or len(description) > PUB_DESC_MAX:
+        return jsonify({
+            'code': 400,
+            'message': f'描述需 {PUB_DESC_MIN}-{PUB_DESC_MAX} 字（当前 {len(description)} 字）'
+        }), 400
+    if len(system_prompt) < PUB_PROMPT_MIN or len(system_prompt) > PUB_PROMPT_MAX:
+        return jsonify({
+            'code': 400,
+            'message': (f'人设提示词至少 {PUB_PROMPT_MIN} 字'
+                        f'（最多 {PUB_PROMPT_SOFT_MAX} 字，超出可到 {PUB_PROMPT_MAX} 字）')
+        }), 400
+    if len(greeting) > PUB_GREETING_MAX:
+        return jsonify({'code': 400, 'message': f'开场白最多 {PUB_GREETING_MAX} 字'}), 400
 
     persona = PersonaMarketplace(
         user_id=user_id,

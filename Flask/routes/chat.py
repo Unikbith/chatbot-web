@@ -9,12 +9,25 @@ from services.ai_service import AIService, FreeAPIProvider
 from services.markdown_streamer import (
     strip_html_to_text,
     render_markdown,
+    render_stream_delta,
     sse_content, sse_reasoning, sse_done, sse_html
 )
 from services.upload_guard import check_upload, detect_image_type, MAX_IMAGE_SIZE
 from services.rate_limit import rate_limit
 
 chat_bp = Blueprint('chat', __name__, url_prefix='/api/chat')
+
+
+# 全局输出格式约定：让模型的排版可预测，生成中与成稿渲染保持一致。
+# 追加在角色设定之后，不覆盖用户自己写的提示词内容。
+OUTPUT_FORMAT_RULE = (
+    "\n\n【输出格式约定】\n"
+    "1. 只输出正文，不要写「好的」「以下是」这类开场白或结尾客套；\n"
+    "2. 使用标准 Markdown：段落之间空一行，列表用 - 或 1.，代码用 ``` 代码块，"
+    "不要用连续空行堆砌排版；\n"
+    "3. 不要输出 HTML 标签（如 <div>/<span>/<br>），排版由渲染层统一处理；\n"
+    "4. 需要分节时用二级或三级标题，需要强调时用 **加粗**，保持结构清晰。"
+)
 
 
 class _ThinkTagFilter:
@@ -124,8 +137,10 @@ def iter_sse_content(response, full_content_holder, reasoning_holder, model_hold
                                 continue
                         new_content += content
                         full_content_holder[0] += content
-                        # 输出原文增量而非整段 Markdown，真正实现逐 token 流式
-                        yield sse_content(content)
+                        # 下发「已转义的 HTML 片段」而不是 Markdown 原文：换行规则
+                        # 与成稿 render_markdown（nl2br）一致，生成中与生成完
+                        # 排版节奏相同，替换时不再出现空行被抹掉的跳变
+                        yield sse_content(render_stream_delta(content))
                 except (json.JSONDecodeError, KeyError, IndexError):
                     pass
     except GeneratorExit:
@@ -443,8 +458,13 @@ def chat():
     if final_prompt and (not formatted_messages or formatted_messages[0].get('role') != 'system'):
         formatted_messages.insert(0, {
             'role': 'system',
-            'content': final_prompt
+            'content': final_prompt + OUTPUT_FORMAT_RULE
         })
+    elif formatted_messages and formatted_messages[0].get('role') == 'system':
+        # 前端已自带 system（续写等场景）：同样补上格式约定，保持排版一致
+        formatted_messages[0]['content'] = (
+            formatted_messages[0].get('content') or ''
+        ) + OUTPUT_FORMAT_RULE
 
     # 滑动窗口截断，控制上下文长度
     formatted_messages = _apply_context_window(formatted_messages)

@@ -88,6 +88,22 @@ def render_markdown(text):
     return sanitize_html(md.convert(text))
 
 
+def render_stream_delta(text):
+    """把流式增量转成与成稿渲染一致的 HTML 片段。
+
+    成稿走 markdown 的 nl2br（单换行 → <br>），所以流式阶段采用同样规则：
+    先把整个片段转义，再把换行还原成 <br>。因为文本已完全转义，片段内
+    不会出现任何未闭合标签，前端可安全地边收边 v-html 拼接。
+
+    效果：生成中与生成完看到的都是同一套 HTML 排版，段落/换行节奏一致，
+    不会出现「回复结束后空行被抹掉、内容猛地一缩」的跳变。
+    """
+    if not text:
+        return ''
+    escaped = html_lib.escape(text, quote=False).replace('\n', '<br>')
+    return sanitize_html(escaped)
+
+
 def strip_html_to_text(html_text):
     """将 HTML 还原为纯文本，供模型续写/后续对话使用"""
     if not html_text:

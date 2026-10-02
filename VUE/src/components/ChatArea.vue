@@ -94,7 +94,9 @@ const showWelcome = computed(() => greetingActive.value);
 let _msgSeq = 0;
 const createMessage = (role, content = '', imageUrl = null) => ({ 
   _key: `m${++_msgSeq}`,  // 稳定唯一 key，避免用 index 作 key 导致重排时 DOM 复用错乱
-  role, content, raw: '', streaming: false, reasoning: '', showReasoning: false, imageUrl 
+  // raw：Markdown 原文（落库/语音朗读用）；streamHtml：后端下发的已转义 HTML 片段
+  // （生成中直接渲染，与成稿排版一致，避免回复结束后空行被抹掉造成跳变）
+  role, content, raw: '', streamHtml: '', streaming: false, reasoning: '', showReasoning: false, imageUrl 
 });
 
 const messages = ref([]);
@@ -340,7 +342,7 @@ const handleSend = async () => {
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '', html = '' } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
-      if (content) { aiMsg.raw += content; aiMsg.streaming = true; }
+      if (content) { aiMsg.raw += content; aiMsg.streamHtml += content; aiMsg.streaming = true; }
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 
@@ -526,7 +528,7 @@ const handleVisionChat = async (text) => {
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '', html = '' } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
-      if (content) { aiMsg.raw += content; aiMsg.streaming = true; }
+      if (content) { aiMsg.raw += content; aiMsg.streamHtml += content; aiMsg.streaming = true; }
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 
@@ -658,7 +660,7 @@ const regenerate = async (assistantIndex = null) => {
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '', html = '' } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
-      if (content) { aiMsg.raw += content; aiMsg.streaming = true; }
+      if (content) { aiMsg.raw += content; aiMsg.streamHtml += content; aiMsg.streaming = true; }
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
   } catch (error) {
@@ -856,8 +858,9 @@ onUnmounted(() => {
                 <img :src="item.imageUrl" alt="生成图片" @click="previewImage(item.imageUrl)" />
               </div>
               
-              <!-- 消息内容：流式期间展示原文增量，流结束后展示渲染好的 HTML -->
-              <div v-if="item.streaming" class="content-text raw-streaming">{{ item.raw }}</div>
+              <!-- 消息内容：生成中渲染后端下发的 HTML 片段（已转义，与成稿一致），
+                   流结束后由 sse_html 的完整渲染结果替换 -->
+              <div v-if="item.streaming" class="content-text streaming-html" v-html="item.streamHtml"></div>
               <div v-else-if="item.content" class="content-text" v-html="item.content"></div>
               <div v-else-if="item.raw" class="content-text raw-streaming">{{ item.raw }}</div>
 
@@ -1327,10 +1330,26 @@ onUnmounted(() => {
   word-wrap: break-word;
 }
 
-/* 流式期间展示原文：保留换行与 Markdown 语法，随 token 逐块增量显示 */
+/* 流式期间展示原文（仅在未收到渲染结果时兜底）：保留换行与 Markdown 语法 */
 .content-text.raw-streaming {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* 生成中的 HTML 片段：后端已转义并把换行转成 <br>，排版与成稿一致，
+   因此不需要 pre-wrap（否则会与成稿的段落间距产生错位） */
+.content-text.streaming-html {
+  word-break: break-word;
+}
+
+/* 段落间距：与流式阶段「空行」的高度（约 1.6em 行高）对齐，
+   避免回复结束切换成成稿时段落被挤在一起、看起来很乱 */
+.content-text :deep(p) {
+  margin: 0 0 1.4em;
+}
+
+.content-text :deep(p:last-child) {
+  margin-bottom: 0;
 }
 
 .message-user .content-text {
