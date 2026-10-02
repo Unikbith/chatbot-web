@@ -346,13 +346,15 @@ class AIService:
         config = AIService._get_api_config(provider)
         params = AIService._provider_params(provider)
         brand = (provider.brand or '').lower()
-        # OpenAI 默认音色（alloy 等）只是占位符：用户显式配置的自定义音色应优先，
-        # 否则前端默认传 alloy 会覆盖掉厂商专属音色（如百炼 Momo）。
+        # OpenAI 默认音色（alloy 等）只是占位符：前端可能默认传 alloy，
+        # 不能让它覆盖厂商专属音色；这里只做「占位符 → 厂商音色」的替换。
+        # 注意：不要在此处兜底 'alloy'——百炼/火山等厂商不认这个音色，
+        # 传下去会直接报错。各厂商分支内部各自兜底自己的默认音色。
         openai_default_voices = {'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'}
         if voice in openai_default_voices:
-            voice = params.get('voice') or config.get('voice') or voice
+            voice = params.get('voice') or config.get('voice') or ''
         else:
-            voice = voice or params.get('voice') or config.get('voice') or 'alloy'
+            voice = voice or params.get('voice') or config.get('voice') or ''
 
         # SSRF 防护
         ssrf_err = AIService._ssrf_error(config['api_url'])
@@ -375,7 +377,7 @@ class AIService:
         ):
             return AIService._dashscope_tts(provider, config, params, text, voice)
 
-        # OpenAI 兼容：mimotts / 其它
+        # OpenAI 兼容：mimotts / 其它（这里 alloy 是合法音色，可安全兜底）
         resp_format = params.get('output_format') or format
 
         tts_url = AIService._resolve_base(config['api_url']) + '/audio/speech'
@@ -386,7 +388,7 @@ class AIService:
         payload = {
             'model': model,
             'input': text,
-            'voice': voice,
+            'voice': voice or 'alloy',
             'response_format': resp_format,
         }
         # 厂商专属参数（有则附加）
