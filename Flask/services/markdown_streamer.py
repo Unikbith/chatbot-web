@@ -3,7 +3,6 @@ import markdown
 import re
 import html as html_lib
 from services.html_sanitize import sanitize_html
-from services.ai_style import extract_ai_css, SCOPE_CLASS  # noqa: F401
 
 
 class MarkdownStreamer:
@@ -78,38 +77,15 @@ class MarkdownStreamer:
         return ""
 
 
-def _highlight(text):
-    """把 ==高亮== 转成 <mark>。
-
-    这是很多模型习惯用的强调写法（部分也用 **加粗**，两者互不冲突）。
-    只处理成对出现的标记，且转义在前、先转义后替换，避免破坏 HTML 转义结果。
-    """
-    # 先切分避免跨标签误替换：仅对纯文本片段做处理
-    parts = re.split(r'(<[^>]+>)', text)
-    for i, part in enumerate(parts):
-        if part.startswith('<'):
-            continue
-        # 避免把 == 内部的 <br> 等标签拆开：此处 parts 已按标签切分，天然安全
-        parts[i] = re.sub(r'==(.+?)==', r'<mark>\1</mark>', part, flags=re.DOTALL)
-    return ''.join(parts)
-
-
 def render_markdown(text):
-    """将一段 Markdown 渲染为经过白名单过滤的 HTML（流结束后一次性渲染）
-
-    同时提取模型自绘的 CSS（```css 代码块 / <style> 片段），交由调用方通过
-    独立通道下发（不进 v-html，避免 XSS），实现「模型按内容自定样式」。
-    返回 (html, ai_css)
-    """
+    """将一段 Markdown 渲染为经过白名单过滤的 HTML（流结束后一次性渲染）"""
     if not text:
-        return '', ''
-    # 先抽出模型自绘样式，其余内容照常走 Markdown 渲染
-    text, ai_css = extract_ai_css(text)
+        return ''
     try:
         md = markdown.Markdown(extensions=['extra', 'nl2br'])
     except Exception:
         md = markdown.Markdown(extensions=['extra'])
-    return sanitize_html(_highlight(md.convert(text))), ai_css
+    return sanitize_html(md.convert(text))
 
 
 def render_stream_delta(text):
@@ -125,7 +101,7 @@ def render_stream_delta(text):
     if not text:
         return ''
     escaped = html_lib.escape(text, quote=False).replace('\n', '<br>')
-    return sanitize_html(_highlight(escaped))
+    return sanitize_html(escaped)
 
 
 def strip_html_to_text(html_text):
@@ -176,14 +152,6 @@ def sse_html(html_text):
 def sse_tokens(total_tokens):
     """构造 token 用量的 SSE 消息（前端据此在消息下方显示消耗）"""
     return f"data: {json.dumps({'choices': [{'delta': {'tokens': total_tokens}}]}, ensure_ascii=False)}\n\n"
-
-
-def sse_style(css_text):
-    """构造模型自绘样式的 SSE 消息。
-
-    独立通道下发（不进 v-html），前端以 CSSOM 方式注入到消息容器作用域内。
-    """
-    return f"data: {json.dumps({'choices': [{'delta': {'style': css_text}}]}, ensure_ascii=False)}\n\n"
 
 
 import json

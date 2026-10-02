@@ -10,7 +10,7 @@ from services.markdown_streamer import (
     strip_html_to_text,
     render_markdown,
     render_stream_delta,
-    sse_content, sse_reasoning, sse_done, sse_html, sse_tokens, sse_style
+    sse_content, sse_reasoning, sse_done, sse_html, sse_tokens
 )
 from services.upload_guard import check_upload, detect_image_type, MAX_IMAGE_SIZE
 from services.rate_limit import rate_limit
@@ -20,30 +20,15 @@ chat_bp = Blueprint('chat', __name__, url_prefix='/api/chat')
 
 # 全局输出格式约定：让模型的排版可预测，生成中与成稿渲染保持一致。
 # 追加在角色设定之后，不覆盖用户自己写的提示词内容。
+# 注意：只允许标准 Markdown，不引导模型输出 HTML/自绘样式，排版由渲染层统一处理。
 OUTPUT_FORMAT_RULE = (
     "\n\n【输出格式约定】\n"
     "1. 只输出正文，不要写「好的」「以下是」这类开场白或结尾客套；\n"
     "2. 使用标准 Markdown：段落之间空一行，列表用 - 或 1.，代码用 ``` 代码块，"
     "不要用连续空行堆砌排版；\n"
     "3. 需要分节时用二级或三级标题，需要强调时用 **加粗**，保持结构清晰；\n"
-    "4. 输出设定集、属性面板、档案表格这类结构化内容时，可以用下面这套 HTML "
-    "类名组织版式（渲染层已有配套样式，支持亮暗主题）：\n"
-    "   <div class=\"rp-card\">整块卡片</div>\n"
-    "   <div class=\"rp-title\">🏡 标题</div>\n"
-    "   <div class=\"rp-sub\">副标题</div>\n"
-    "   <div class=\"rp-divider\">小节标题</div>\n"
-    "   <div class=\"rp-section\"><span class=\"rp-section-title\">📜 背景</span>内容</div>\n"
-    "   <span class=\"rp-badge\">标签</span>\n"
-    "   <div class=\"rp-grid\"><div class=\"rp-cell\">"
-    "<span class=\"rp-cell-label\">年龄</span>20</div></div>\n"
-    "   <div class=\"rp-table-wrap\"><table class=\"rp-table\">"
-    "<thead><tr><th>列</th></tr></thead><tbody><tr><td>值</td></tr></tbody>"
-    "</table></div>\n"
-    "   <details class=\"rp-collapse\"><summary>分组标题</summary>"
-    "<div class=\"rp-collapse-body\">内容</div></details>\n"
-    "   <div class=\"rp-quote\">角色台词</div>\n"
-    "   禁止写 style 属性，禁止自写 CSS 或 <style> 标签；\n"
-    "5. 纯聊天叙事时不要套卡片，正常写 Markdown 即可，只在真正需要结构化版面时才用上述类名。"
+    "4. 不要输出 HTML 标签（如 <div>/<span>/<br>），也不要写 style 属性或自写 CSS，"
+    "排版由渲染层统一处理。"
 )
 
 
@@ -599,11 +584,7 @@ def chat():
             if prompt_tokens or completion_tokens:
                 yield sse_tokens((prompt_tokens or 0) + (completion_tokens or 0))
             # 流结束后一次性下发渲染好的（含白名单过滤）完整 HTML，前端替换流式原文
-            final_html, ai_css = render_markdown(full_content)
-            if ai_css:
-                # 模型自绘样式走独立通道：只含受控属性，前端以 CSSOM 注入到本条消息作用域
-                yield sse_style(ai_css)
-            yield sse_html(final_html)
+            yield sse_html(render_markdown(full_content))
             yield sse_done()
         except GeneratorExit:
             # 客户端断开：内容已收集完整时尽力落库，避免回复丢失
@@ -737,10 +718,7 @@ def vision_chat():
 
             if usage_holder[0] or usage_holder[1]:
                 yield sse_tokens((usage_holder[0] or 0) + (usage_holder[1] or 0))
-            final_html, ai_css = render_markdown(full_content_holder[0])
-            if ai_css:
-                yield sse_style(ai_css)
-            yield sse_html(final_html)
+            yield sse_html(render_markdown(full_content_holder[0]))
             yield sse_done()
         except GeneratorExit:
             # 客户端断开：内容已收集完整时尽力落库

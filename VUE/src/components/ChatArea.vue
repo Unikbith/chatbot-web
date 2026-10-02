@@ -97,8 +97,7 @@ const createMessage = (role, content = '', imageUrl = null) => ({
   // raw：Markdown 原文（落库/语音朗读用）；streamHtml：后端下发的已转义 HTML 片段
   // （生成中直接渲染，与成稿排版一致，避免回复结束后空行被抹掉造成跳变）
   // tokens：本次回复的 token 消耗（厂商未返回时为 null，不展示）
-  // hasAiStyle：本条回复是否带模型自绘样式（决定是否加作用域类）
-  role, content, raw: '', streamHtml: '', streaming: false, reasoning: '', showReasoning: false, imageUrl, tokens: null, hasAiStyle: false
+  role, content, raw: '', streamHtml: '', streaming: false, reasoning: '', showReasoning: false, imageUrl, tokens: null
 });
 
 const messages = ref([]);
@@ -107,40 +106,6 @@ const loading = ref(false);
 const messageListRef = ref(null);
 const deepThink = ref(false);
 let abortController = null;
-
-// ===== 模型自绘样式（AI 自助 CSS）=====
-// 后端已把模型写的 CSS 过滤到「视觉属性白名单 + 仅 class 选择器」，
-// 这里以 CSSOM 注入到消息容器的作用域内：既不经过 v-html（无 XSS 风险），
-// 也不会污染全局（选择器被限定在 .ai-style-scope 下）。
-const AI_SCOPE_CLASS = 'ai-style-scope';
-
-let aiStyleSheet = null;
-let aiStyleText = '';
-
-function ensureAiStyleSheet() {
-  if (aiStyleSheet) return aiStyleSheet;
-  if (typeof document === 'undefined') return null;
-  const style = document.createElement('style');
-  style.setAttribute('data-ai-style', '1');
-  style.textContent = '';
-  document.head.appendChild(style);
-  aiStyleSheet = style;
-  return aiStyleSheet;
-}
-
-function applyAiStyle(cssText) {
-  if (!cssText) return;
-  const sheet = ensureAiStyleSheet();
-  if (!sheet) return;
-  // 作用域前缀：把 .card 改写成 .ai-style-scope .card，
-  // 配合消息容器的 ai-style-scope 类实现「只在本条消息内生效」
-  const scoped = `.${AI_SCOPE_CLASS} {\n${cssText}\n}`;
-  // 累积而非覆盖：模型可能在多条消息里分别给样式
-  if (!aiStyleText.includes(scoped)) {
-    aiStyleText += scoped;
-    sheet.textContent = aiStyleText;
-  }
-}
 
 // ========== 对话模型选择器（输入框左下角） ==========
 // 数据来源：当前用户全部已启用的对话模型配置（含配置内启用的模型），
@@ -376,11 +341,10 @@ const handleSend = async () => {
 
     const response = await chatApi.stream(requestBody, { signal: abortController.signal });
     await readStream(response, (data) => {
-      const { reasoning_content: reasoning = '', content = '', html = '', tokens = null, style: aiCss = '' } = data.choices?.[0]?.delta || {};
+      const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml += content; aiMsg.streaming = true; }
       if (tokens) aiMsg.tokens = tokens;
-      if (aiCss) { applyAiStyle(aiCss); aiMsg.hasAiStyle = true; }
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 
@@ -564,11 +528,10 @@ const handleVisionChat = async (text) => {
 
     const response = await chatApi.vision(formData, { signal: abortController.signal });
     await readStream(response, (data) => {
-      const { reasoning_content: reasoning = '', content = '', html = '', tokens = null, style: aiCss = '' } = data.choices?.[0]?.delta || {};
+      const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml += content; aiMsg.streaming = true; }
       if (tokens) aiMsg.tokens = tokens;
-      if (aiCss) { applyAiStyle(aiCss); aiMsg.hasAiStyle = true; }
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 
@@ -698,11 +661,10 @@ const regenerate = async (assistantIndex = null) => {
 
     const response = await chatApi.stream(requestBody, { signal: abortController.signal });
     await readStream(response, (data) => {
-      const { reasoning_content: reasoning = '', content = '', html = '', tokens = null, style: aiCss = '' } = data.choices?.[0]?.delta || {};
+      const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml += content; aiMsg.streaming = true; }
       if (tokens) aiMsg.tokens = tokens;
-      if (aiCss) { applyAiStyle(aiCss); aiMsg.hasAiStyle = true; }
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
   } catch (error) {
@@ -909,10 +871,9 @@ onUnmounted(() => {
               </div>
               
               <!-- 消息内容：生成中渲染后端下发的 HTML 片段（已转义，与成稿一致），
-                   流结束后由 sse_html 的完整渲染结果替换。
-                   hasAiStyle 的消息加上作用域类，让模型自绘的 CSS 只在本条内生效 -->
-              <div v-if="item.streaming" class="content-text streaming-html" :class="{ 'ai-style-scope': item.hasAiStyle }" v-html="item.streamHtml"></div>
-              <div v-else-if="item.content" class="content-text" :class="{ 'ai-style-scope': item.hasAiStyle }" v-html="item.content"></div>
+                   流结束后由 sse_html 的完整渲染结果替换 -->
+              <div v-if="item.streaming" class="content-text streaming-html" v-html="item.streamHtml"></div>
+              <div v-else-if="item.content" class="content-text" v-html="item.content"></div>
               <div v-else-if="item.raw" class="content-text raw-streaming">{{ item.raw }}</div>
 
               <!-- 加载状态 -->
@@ -1792,15 +1753,6 @@ onUnmounted(() => {
 }
 .content-text :deep(a:hover) { border-bottom-color: var(--brand); }
 
-/* 高亮标记：==高亮== 是很多模型爱用的强调写法，转成带底色的胶囊标签 */
-.content-text mark {
-  background: linear-gradient(180deg, transparent 58%, rgba(255, 214, 102, 0.55) 58%);
-  color: inherit;
-  padding: 0 2px;
-  border-radius: 3px;
-  font-weight: 600;
-}
-
 /* 代码块语言标签：块右上角小字，视觉上更像 IDE */
 .content-text :deep(pre) {
   position: relative;
@@ -1852,204 +1804,6 @@ onUnmounted(() => {
   font-weight: 700;
   line-height: 1.5em;
   text-align: center;
-}
-
-/* ============================================================
-   RP 卡片组件库
-   模型输出的 HTML 只能使用这里定义的类名来表达结构与视觉，
-   由本组件库提供样式（亮/暗双主题），无需模型现写 CSS。
-   命名约定：rp- 前缀 = roleplay card
-   ============================================================ */
-
-/* 主卡片：圆角 + 描边 + 柔和投影，内层留白舒适 */
-:deep(.rp-card) {
-  margin: 0.6em 0 1em;
-  padding: 16px 18px;
-  border-radius: 16px;
-  background: var(--surface);
-  border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-soft);
-}
-:deep(.rp-card) > :first-child { margin-top: 0; }
-:deep(.rp-card) > :last-child { margin-bottom: 0; }
-
-/* 卡片标题：居中大标题 + 可选副标题（对应截图的「🏡 庄园家教日记」） */
-:deep(.rp-title) {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin: 0 0 6px;
-  font-size: 1.24em;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  color: var(--text-primary);
-  text-align: center;
-}
-:deep(.rp-sub) {
-  margin: 0 0 14px;
-  text-align: center;
-  font-size: 0.86em;
-  color: var(--text-secondary);
-}
-
-/* 区块：左侧竖线 + 浅色底，对应截图的「📜 背景」 */
-:deep(.rp-section) {
-  margin: 0.8em 0;
-  padding: 12px 14px;
-  border-left: 3px solid var(--brand);
-  border-radius: 0 10px 10px 0;
-  background: var(--brand-soft);
-}
-:deep(.rp-section) > :first-child { margin-top: 0; }
-:deep(.rp-section) > :last-child { margin-bottom: 0; }
-:deep(.rp-section-title) {
-  display: block;
-  margin: 0 0 6px;
-  font-weight: 650;
-  color: var(--brand-dark);
-}
-
-/* 徽章 / 标签：用于属性、状态等短标记 */
-:deep(.rp-badge) {
-  display: inline-block;
-  margin: 0.2em 0.4em 0.2em 0;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 0.8em;
-  font-weight: 600;
-  color: var(--brand-dark);
-  background: var(--brand-soft);
-  border: 1px solid transparent;
-}
-:deep(.rp-badge-alt) {
-  color: #4a6fa5;
-  background: rgba(110, 143, 223, 0.14);
-}
-
-/* 信息网格：卡片式键值对，比裸表格更适合展示属性 */
-:deep(.rp-grid) {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 8px;
-  margin: 0.8em 0;
-}
-:deep(.rp-cell) {
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: var(--surface-hover);
-  font-size: 0.9em;
-}
-:deep(.rp-cell-label) {
-  display: block;
-  font-size: 0.82em;
-  color: var(--text-secondary);
-  margin-bottom: 2px;
-}
-
-/* 表格：表头带品牌色底 + 斑马纹，横向可滚动 */
-:deep(.rp-table-wrap) {
-  margin: 0.8em 0;
-  overflow-x: auto;
-  border-radius: 10px;
-  border: 1px solid var(--border-color);
-}
-:deep(.rp-table) {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9em;
-}
-:deep(.rp-table) th {
-  padding: 8px 10px;
-  background: var(--brand);
-  color: #fff;
-  font-weight: 600;
-  text-align: left;
-  white-space: nowrap;
-}
-:deep(.rp-table) td {
-  padding: 8px 10px;
-  border-top: 1px solid var(--border-color);
-  vertical-align: top;
-}
-:deep(.rp-table) tbody tr:nth-child(even) { background: rgba(120, 130, 145, 0.05); }
-
-/* 折叠分组：对应截图的「▸ 周围其他角色」 */
-:deep(.rp-collapse) {
-  margin: 0.6em 0;
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  background: var(--surface);
-  overflow: hidden;
-}
-:deep(.rp-collapse) > summary {
-  padding: 9px 13px;
-  cursor: pointer;
-  font-weight: 600;
-  font-size: 0.94em;
-  color: var(--text-primary);
-  background: var(--surface-hover);
-  list-style: none;
-  user-select: none;
-}
-:deep(.rp-collapse) > summary::-webkit-details-marker { display: none; }
-:deep(.rp-collapse) > summary::before {
-  content: '▸';
-  display: inline-block;
-  margin-right: 7px;
-  color: var(--brand);
-  transition: transform 0.18s ease;
-}
-:deep(.rp-collapse)[open] > summary::before { transform: rotate(90deg); }
-:deep(.rp-collapse-body) {
-  padding: 11px 13px;
-  border-top: 1px solid var(--border-color);
-}
-:deep(.rp-collapse-body) > :first-child { margin-top: 0; }
-:deep(.rp-collapse-body) > :last-child { margin-bottom: 0; }
-
-/* 引用台词：左侧双竖线 + 斜体，用于角色说话 */
-:deep(.rp-quote) {
-  margin: 0.7em 0;
-  padding: 8px 12px;
-  border-left: 3px double var(--brand);
-  color: var(--text-secondary);
-  font-style: italic;
-}
-
-/* 分隔标题：带文字的横向分割线 */
-:deep(.rp-divider) {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 1.3em 0 0.7em;
-  color: var(--text-secondary);
-  font-size: 0.88em;
-  font-weight: 600;
-}
-:deep(.rp-divider)::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--border-color);
-}
-
-/* 暗色主题下微调：卡片描边与表头更柔和 */
-:global(html.dark) .rp-card,
-:global(html.dark) .rp-collapse {
-  background: rgba(255, 255, 255, 0.04);
-}
-:global(html.dark) .rp-collapse > summary { background: rgba(255, 255, 255, 0.06); }
-:global(html.dark) .rp-table th { background: var(--brand-dark); }
-
-/* 移动端：卡片内边距收紧，网格降为单列 */
-@media (max-width: 768px) {
-  :deep(.rp-card) { padding: 13px 14px; border-radius: 14px; }
-  :deep(.rp-title) { font-size: 1.12em; }
-  :deep(.rp-grid) { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
-  :deep(.rp-table) { font-size: 0.85em; }
-  :deep(.rp-table) th,
-  :deep(.rp-table) td { padding: 6px 8px; }
 }
 
 /* 移动端：表格与代码块在窄屏更容易溢出，统一压一档字号 */
