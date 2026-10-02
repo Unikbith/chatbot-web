@@ -408,29 +408,37 @@ class AIService:
         except requests.RequestException as e:
             return None, str(e)
 
+    # 百炼业务空间专属域名（华北2·北京）。qwen-audio-3.x-tts 只在该业务空间的
+    # 域名下可用；作为默认值写死，用户无需在配置页填写。
+    DEFAULT_BAILIAN_MAAS_HOST = 'https://ws-h8xcrx30tosjpex8.cn-beijing.maas.aliyuncs.com'
+
     @staticmethod
     def _dashscope_tts(provider, config, params, text, voice):
         """阿里云百炼 TTS 原生协议（OpenAI 兼容端点不支持 /audio/speech）。
 
         端点按模型族分流：
-        - CosyVoice / Qwen-Audio-TTS：POST {base}/services/audio/tts/SpeechSynthesizer
-        - Qwen-TTS / Qwen3-TTS：   POST {base}/services/aigc/multimodal-generation/generation
+        - CosyVoice / Qwen-Audio-TTS / Qwen3-TTS：POST {base}/services/audio/tts/SpeechSynthesizer
+        - Qwen-TTS：                        POST {base}/services/aigc/multimodal-generation/generation
 
         音频提取兼容三种形态（不同版本/流式返回结构不一致）：
         1. output.audio.url            —— 临时地址，下载后返回字节
-        2. output.audio.data            —— base64 内联，直接解码
+        2. output.audio.data           —— base64 内联，直接解码
         3. output.choices[].message.audio.data —— 多模态结构的 base64
 
-        另外支持百炼业务空间专属域名（params.workspace_id）：形如
-        https://{workspace_id}.cn-beijing.maas.aliyuncs.com
+        配置策略：配置页只暴露「模型 / 音色 / 超时」三项，其余参数
+        （业务空间域名、音频格式、采样率、语言、语音指令）均有可用默认值，
+        仍可通过 params 覆盖（便于将来需要时手动改数据库配置）。
         """
         model = (provider.model or params.get('model') or '').strip()
         model_lower = model.lower()
 
-        # 业务空间专属域名优先：百炼的 qwen-audio-3.x 只在分配的工作空间域名下可用
+        # 业务空间专属域名优先；未配置时按模型族决定用工作空间域名还是公共域名
         workspace_id = (params.get('workspace_id') or '').strip()
         if workspace_id:
             base = f'https://{workspace_id}.cn-beijing.maas.aliyuncs.com/api/v1'
+        elif 'qwen-audio' in model_lower:
+            # qwen-audio-3.x 系列在公共域名上不可用，默认走内置业务空间
+            base = AIService.DEFAULT_BAILIAN_MAAS_HOST + '/api/v1'
         else:
             base = (config['api_url'] or 'https://dashscope.aliyuncs.com/api/v1').rstrip('/')
 
@@ -448,19 +456,19 @@ class AIService:
                 'model': model,
                 'input': {
                     'text': text,
-                    'voice': voice,
-                    'format': params.get('output_format') or 'mp3',
+                    # 音色兜底：用户没填时用百炼通用音色，避免空 voice 被拒
+                    'voice': voice or 'longanyuanfei',
+                    'format': params.get('output_format') or 'wav',
+                    'sample_rate': int(params.get('sample_rate') or 24000),
                 },
             }
-            if params.get('sample_rate'):
-                payload['input']['sample_rate'] = int(params['sample_rate'])
         else:
             tts_url = base + '/services/aigc/multimodal-generation/generation'
             payload = {
                 'model': model,
                 'input': {
                     'text': text,
-                    'voice': voice,
+                    'voice': voice or 'Cherry',
                     'language_type': params.get('language_type') or 'Chinese',
                 },
             }
@@ -536,6 +544,34 @@ class AIService:
             except (ValueError, TypeError):
                 continue
         return None
+
+    @staticmethod
+    def text_to_speech_with_format(provider, text, voice=None, format='mp3'):
+        """文字转语音，并返回实际使用的音频格式。
+
+        返回 (audio_bytes, fmt, error)。fmt 是厂商真实输出的格式，
+        供路由层设置正确的 mimetype——百炼 Qwen-Audio/CosyVoice 默认输出 wav，
+        若按 mp3 标注会导致浏览器拒播，所以格式必须由本层如实给出。
+        """
+        audio, err = AIService.text_to_speech(provider, text, voice, format)
+        if err or not audio:
+            return None, None, err
+
+        fmt = ''
+        brand = (provider.brand or '').lower()
+        params = AIService._provider_params(provider)
+        if brand == 'volcengine':
+            fmt = str(params.get('output_format') or format or 'mp3')
+        elif brand == 'bailian':
+            model_lower = (provider.model or params.get('model') or '').lower()
+            if 'qwen-tts' in model_lower and 'qwen-audio' not in model_lower:
+                # 多模态 qwen-tts 不传 format 时由服务端决定，按 wav 标注更安全
+                fmt = str(params.get('output_format') or 'wav')
+            else:
+                fmt = str(params.get('output_format') or 'wav')
+        else:
+            fmt = str(params.get('output_format') or format or 'mp3')
+        return audio, fmt.lower(), None
 
     @staticmethod
     def _collect_dashscope_stream(resp, params):

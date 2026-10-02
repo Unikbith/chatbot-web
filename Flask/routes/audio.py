@@ -98,24 +98,20 @@ def text_to_speech():
     if not provider:
         return jsonify({'code': 400, 'message': '请先配置语音合成模型提供商'}), 400
 
-    # 未显式指定音色时，优先使用 TTS 提供商自带配置的音色
-    voice = data.get('voice') or getattr(provider, 'voice', None) or 'alloy'
-    
+    # 未显式指定音色时，优先使用 TTS 提供商自带配置的音色。
+    # 不再回落到 'alloy'：那是 OpenAI 占位音，百炼等厂商不认，会导致空音色被拒。
+    voice = data.get('voice') or getattr(provider, 'voice', None) or ''
+
     try:
-        audio_data, error = AIService.text_to_speech(provider, text, voice)
+        audio_data, fmt, error = AIService.text_to_speech_with_format(provider, text, voice)
         if error:
             return jsonify({'code': 500, 'message': f'合成失败: {error}'}), 500
         if not audio_data:
             return jsonify({'code': 500, 'message': '合成失败: 未返回音频数据'}), 500
 
-        # 容器类型必须与厂商实际输出格式一致：百炼 CosyVoice/Qwen-Audio 默认
+        # 容器类型必须与厂商实际输出格式一致：百炼 Qwen-Audio/CosyVoice 默认
         # 输出 wav，若一律标成 audio/mpeg，部分浏览器/音频库会拒播或播不出声。
-        fmt = (data.get('format') or '').strip().lower()
-        if not fmt:
-            params = getattr(provider, 'params', None) or {}
-            fmt = str((params.get('output_format') if isinstance(params, dict) else '') or '').lower()
-        if not fmt:
-            fmt = str(getattr(provider, 'output_format', '') or '').lower()
+        # 格式由 TTS 层按实际使用的参数返回，不靠猜。
         ext, mimetype = {
             'mp3': ('mp3', 'audio/mpeg'),
             'wav': ('wav', 'audio/wav'),
@@ -124,7 +120,7 @@ def text_to_speech():
             'opus': ('opus', 'audio/opus'),
             'flac': ('flac', 'audio/flac'),
             'aac': ('m4a', 'audio/mp4'),
-        }.get(fmt, ('mp3', 'audio/mpeg'))
+        }.get((fmt or '').lower(), ('mp3', 'audio/mpeg'))
 
         return send_file(
             BytesIO(audio_data),

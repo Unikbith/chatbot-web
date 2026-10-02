@@ -257,45 +257,23 @@ def _volcengine_tts_schema():
 
 # 文字转语音 - 阿里云百炼（DashScope / OpenAI 兼容）
 def _bailian_tts_schema():
+    """百炼 TTS 额外字段。
+
+    ID / 启用 / API Key / Base URL 是公共字段，这里只补模型与音色。
+    业务空间域名、音频格式、采样率等都有可用默认值（见 ai_service
+    的 _dashscope_tts），不额外暴露给用户，保持配置页简洁。
+    """
     return [
         _text('model', '模型 ID', 'Model ID', default='',
-              placeholder='cosyvoice-v2 / qwen3-tts-flash / qwen-audio-3.0-tts-flash',
+              placeholder='qwen-audio-3.0-tts-flash',
               required=True,
               help='语音合成模型 ID', help_en='TTS model ID', target='model'),
         _text('voice', '音色', 'Voice', default='',
-              placeholder='longxiaochun / Cherry / loongstella',
+              placeholder='longanyuanfei',
               help='音色 ID，可自定义输入',
               help_en='Voice ID, custom input'),
-        _select('output_format', '输出格式', 'Format', default='mp3',
-                options=['mp3', 'wav', 'pcm', 'ogg', 'opus'],
-                help='音频输出格式，需与厂商能力匹配（部分模型仅支持 wav）',
-                help_en='Audio output format'),
-        _text('workspace_id', '业务空间 ID', 'Workspace ID', default='',
-              placeholder='ws-xxxxxxxx',
-              help='百炼业务空间专属域名。qwen-audio-3.x-tts 系列必须填写，'
-                   '留空则使用默认公共域名',
-              help_en='Bailian workspace ID. Required for qwen-audio-3.x-tts models'),
-        _boolean('stream', '流式返回', 'Stream', default=False,
-                 help='开启后分片流式拉取音频，降低首字延迟',
-                 help_en='Stream audio chunks over SSE'),
-        _number('sample_rate', '采样率', 'Sample Rate', default=24000,
-                min=8000, max=48000, unit='Hz',
-                help='音频采样率，部分模型支持 16000/22050/24000',
-                help_en='Audio sample rate'),
-        _text('language_type', '语言类型', 'Language', default='Chinese',
-              placeholder='Chinese / English',
-              help='多模态 TTS（qwen-tts）使用的语言类型',
-              help_en='language_type for multimodal Qwen-TTS'),
-        _text('instructions', '语音指令', 'Instructions', default='',
-              placeholder='用温柔的语气朗读',
-              help='控制语气/情绪的指令，仅 qwen-tts 等多模态模型支持',
-              help_en='Tone/emotion instructions, multimodal models only'),
         _number('timeout', '超时时间', 'Timeout', default=20, min=5, max=120,
                 unit='秒', help='合成超时时间，单位秒', help_en='Timeout in seconds'),
-        _text('proxy', '代理地址', 'Proxy', default='',
-              placeholder='http://127.0.0.1:7890',
-              help='HTTP/HTTPS 代理，仅对该提供商请求生效',
-              help_en='HTTP/HTTPS proxy for this provider only'),
     ]
 
 
