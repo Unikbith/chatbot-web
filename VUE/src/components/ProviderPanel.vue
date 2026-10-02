@@ -348,18 +348,22 @@ async function loadSchema(type, brand) {
   try {
     const res = await providersApi.configSchema(type, brand)
     if (res.code === 200) {
-      paramSchema.value = res.data || []
-      // 为没有显式值的字段填充默认值
       const schema = res.data || []
-      const values = form.value.paramValues || {}
+      paramSchema.value = schema
+      // 只保留新 schema 里存在的字段，再填默认值：
+      // 不同厂商的专属参数键名不同（如百炼的 workspace_id / mimotts 的
+      // style_prompt），沿用旧值会把不适用项提交到后端。
+      const old = form.value.paramValues || {}
+      const values = {}
       for (const f of schema) {
         if (f.target !== 'params') continue
-        const has = form.value.paramValues && Object.prototype.hasOwnProperty.call(form.value.paramValues, f.key)
-        if (!has && f.default !== undefined && f.default !== null && f.default !== '') {
+        if (Object.prototype.hasOwnProperty.call(old, f.key) && old[f.key] !== undefined && old[f.key] !== null) {
+          values[f.key] = old[f.key]
+        } else if (f.default !== undefined && f.default !== null && f.default !== '') {
           values[f.key] = f.default
         }
       }
-      form.value.paramValues = { ...values }
+      form.value.paramValues = values
     }
   } catch (e) {
     paramSchema.value = []
@@ -448,13 +452,21 @@ async function selectProvider(p) {
 }
 
 function selectVendor(v) {
+  const prev = selectedVendorBrand.value
   selectedVendorBrand.value = v.brand
-  // 未在编辑某个已有配置时，自动用厂商默认地址
-  if (!editingId.value) {
-    if (!form.value.name) form.value.name = v.name
-    form.value.api_url = v.default_api_url || form.value.api_url
+  // 切换厂商意味着这些值不再适用（不同厂商的模型 ID、专属参数完全不同），
+  // 必须清空后按新厂商 schema 重新填默认值。否则编辑已有配置时会把上一个
+  // 厂商的内容（如 deepseek 的模型与参数）原样留在表单里。
+  if (!editingId.value && !form.value.name) form.value.name = v.name
+  form.value.api_url = v.default_api_url || form.value.api_url
+  if (prev !== v.brand) {
     form.value.model = ''
     form.value.paramValues = {}
+    // 模型列表同样属于上一个厂商，重新拉取
+    configuredModels.value = []
+    availableModels.value = []
+    fetchError.value = ''
+    testResult.value = null
   }
   loadSchema(activeType.value, v.brand)
 }
