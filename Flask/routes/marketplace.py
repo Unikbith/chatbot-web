@@ -19,13 +19,13 @@ marketplace_bp = Blueprint('marketplace', __name__, url_prefix='/api/marketplace
 # 与「人物卡」（PersonaTemplate）保持一致，避免出现「人物卡能写 1000 字、
 # 发布到广场却被拦下」的情况。系统提示词另设软上限：常规建议 10000 字，
 # 确有需要时超出部分兜底到 50000 字。
-PUB_NAME_MAX = 1000
+PUB_NAME_MAX = 100
 PUB_DESC_MIN = 30
-PUB_DESC_MAX = 1000
+PUB_DESC_MAX = 100
 PUB_PROMPT_MIN = 100
 PUB_PROMPT_SOFT_MAX = 10000
 PUB_PROMPT_MAX = 50000
-PUB_GREETING_MAX = 1000
+PUB_GREETING_MAX = 100
 
 
 # ── 确定性假名生成 ──────────────────────────────────────────────

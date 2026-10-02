@@ -431,12 +431,13 @@ class PersonaMarketplace(db.Model):
 
     @staticmethod
     def gender_tag_of(gender):
+        """卡片上显示的性别标签。
+
+        保留用户填写的具体值（神秘/双性/无性别…），只有未填写时才回落为
+        「非二元」—— 否则用户发布「双性」却显示成「非二元」，与预期不符。
+        """
         g = (gender or '').strip()
-        if g == '男':
-            return '男'
-        if g == '女':
-            return '女'
-        return '非二元'
+        return g or '非二元'
 
     author = db.relationship('User', backref='marketplace_personas')
     comments = db.relationship('MarketplaceComment', backref='persona_card', lazy='dynamic',
