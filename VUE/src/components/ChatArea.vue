@@ -96,7 +96,8 @@ const createMessage = (role, content = '', imageUrl = null) => ({
   _key: `m${++_msgSeq}`,  // 稳定唯一 key，避免用 index 作 key 导致重排时 DOM 复用错乱
   // raw：Markdown 原文（落库/语音朗读用）；streamHtml：后端下发的已转义 HTML 片段
   // （生成中直接渲染，与成稿排版一致，避免回复结束后空行被抹掉造成跳变）
-  role, content, raw: '', streamHtml: '', streaming: false, reasoning: '', showReasoning: false, imageUrl 
+  // tokens：本次回复的 token 消耗（厂商未返回时为 null，不展示）
+  role, content, raw: '', streamHtml: '', streaming: false, reasoning: '', showReasoning: false, imageUrl, tokens: null
 });
 
 const messages = ref([]);
@@ -340,9 +341,10 @@ const handleSend = async () => {
 
     const response = await chatApi.stream(requestBody, { signal: abortController.signal });
     await readStream(response, (data) => {
-      const { reasoning_content: reasoning = '', content = '', html = '' } = data.choices?.[0]?.delta || {};
+      const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml += content; aiMsg.streaming = true; }
+      if (tokens) aiMsg.tokens = tokens;
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 
@@ -526,9 +528,10 @@ const handleVisionChat = async (text) => {
 
     const response = await chatApi.vision(formData, { signal: abortController.signal });
     await readStream(response, (data) => {
-      const { reasoning_content: reasoning = '', content = '', html = '' } = data.choices?.[0]?.delta || {};
+      const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml += content; aiMsg.streaming = true; }
+      if (tokens) aiMsg.tokens = tokens;
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 
@@ -658,9 +661,10 @@ const regenerate = async (assistantIndex = null) => {
 
     const response = await chatApi.stream(requestBody, { signal: abortController.signal });
     await readStream(response, (data) => {
-      const { reasoning_content: reasoning = '', content = '', html = '' } = data.choices?.[0]?.delta || {};
+      const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml += content; aiMsg.streaming = true; }
+      if (tokens) aiMsg.tokens = tokens;
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
   } catch (error) {
@@ -726,7 +730,15 @@ const handlePromptInsert = (text) => {
 // 暴露方法
 defineExpose({
   setMessages: (msgList) => {
-    messages.value = msgList.map(m => createMessage(m.role, m.content, m.image_url || m.imageUrl));
+    messages.value = msgList.map(m => {
+      const item = createMessage(m.role, m.content, m.image_url || m.imageUrl);
+      // 回填思考过程与 token 用量（历史消息才能显示"深度思考"展开与消耗）
+      if (m.reasoning_content) { item.reasoning = m.reasoning_content; item.showReasoning = true; }
+      const total = m.total_tokens
+        ?? ((m.prompt_tokens || 0) + (m.completion_tokens || 0) || null);
+      item.tokens = total;
+      return item;
+    });
     // 载入历史对话：仅空对话展示开场白
     greetingActive.value = messages.value.length === 0;
     scrollToBottom();
@@ -893,6 +905,10 @@ onUnmounted(() => {
                 >
                   {{ speakingIndex === index ? t('播放中', 'Playing') : t('语音', 'Voice') }}
                 </el-button>
+                <!-- token 消耗：厂商未返回 usage 时不展示 -->
+                <span v-if="item.tokens" class="token-usage" :title="t('本次回复消耗的 token 数', 'Tokens used by this reply')">
+                  {{ t('消耗', 'Used') }} {{ item.tokens.toLocaleString() }} {{ t('tokens', 'tokens') }}
+                </span>
               </div>
             </div>
           </div>
@@ -1394,6 +1410,7 @@ onUnmounted(() => {
 /* 消息操作 */
 .message-actions {
   display: flex;
+  align-items: center;
   gap: 4px;
   margin-top: 8px;
   opacity: 0;
@@ -1402,6 +1419,15 @@ onUnmounted(() => {
 
 .message-item:hover .message-actions {
   opacity: 1;
+}
+
+/* token 消耗：放在操作按钮末尾的轻量文字，hover 时随操作区一起出现 */
+.token-usage {
+  margin-left: 4px;
+  font-size: 11px;
+  color: #9ca3af;
+  white-space: nowrap;
+  user-select: text;
 }
 
 .action-btn {
@@ -1726,6 +1752,68 @@ onUnmounted(() => {
   transition: border-color 0.15s ease;
 }
 .content-text :deep(a:hover) { border-bottom-color: var(--brand); }
+
+/* 高亮标记：==高亮== 是很多模型爱用的强调写法，转成带底色的胶囊标签 */
+.content-text mark {
+  background: linear-gradient(180deg, transparent 58%, rgba(255, 214, 102, 0.55) 58%);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+/* 代码块语言标签：块右上角小字，视觉上更像 IDE */
+.content-text :deep(pre) {
+  position: relative;
+}
+.content-text :deep(pre)::before {
+  content: 'CODE';
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: #6b7280;
+  font-family: 'SF Mono', Consolas, monospace;
+  pointer-events: none;
+}
+
+/* 提示块：把「提示 / 注意 / 警告」这类引用块做成带色边的卡片 */
+.content-text :deep(blockquote) {
+  position: relative;
+  font-size: 0.97em;
+}
+
+/* 列表项内的多行内容：第二行起与首行文字对齐 */
+.content-text :deep(li > p) { margin: 0 0 0.4em; }
+.content-text :deep(li > p:last-child) { margin-bottom: 0; }
+
+/* 有序列表当作「步骤」呈现：序号用圆形浅底，视觉上区分于普通有序列表。
+   用 CSS counter 而非 ::marker（兼容性更好），序号由 ol 的计数器驱动。 */
+.content-text :deep(ol) {
+  counter-reset: step;
+}
+.content-text :deep(ol > li) {
+  position: relative;
+  padding-left: 0.2em;
+  list-style: none;
+}
+.content-text :deep(ol > li)::before {
+  content: counter(step);
+  counter-increment: step;
+  position: absolute;
+  left: -1.5em;
+  top: 0.15em;
+  width: 1.5em;
+  height: 1.5em;
+  border-radius: 50%;
+  background: rgba(110, 143, 223, 0.16);
+  color: var(--brand);
+  font-size: 0.78em;
+  font-weight: 700;
+  line-height: 1.5em;
+  text-align: center;
+}
 
 /* 移动端：表格与代码块在窄屏更容易溢出，统一压一档字号 */
 @media (max-width: 768px) {

@@ -77,6 +77,22 @@ class MarkdownStreamer:
         return ""
 
 
+def _highlight(text):
+    """把 ==高亮== 转成 <mark>。
+
+    这是很多模型习惯用的强调写法（部分也用 **加粗**，两者互不冲突）。
+    只处理成对出现的标记，且转义在前、先转义后替换，避免破坏 HTML 转义结果。
+    """
+    # 先切分避免跨标签误替换：仅对纯文本片段做处理
+    parts = re.split(r'(<[^>]+>)', text)
+    for i, part in enumerate(parts):
+        if part.startswith('<'):
+            continue
+        # 避免把 == 内部的 <br> 等标签拆开：此处 parts 已按标签切分，天然安全
+        parts[i] = re.sub(r'==(.+?)==', r'<mark>\1</mark>', part, flags=re.DOTALL)
+    return ''.join(parts)
+
+
 def render_markdown(text):
     """将一段 Markdown 渲染为经过白名单过滤的 HTML（流结束后一次性渲染）"""
     if not text:
@@ -85,7 +101,7 @@ def render_markdown(text):
         md = markdown.Markdown(extensions=['extra', 'nl2br'])
     except Exception:
         md = markdown.Markdown(extensions=['extra'])
-    return sanitize_html(md.convert(text))
+    return sanitize_html(_highlight(md.convert(text)))
 
 
 def render_stream_delta(text):
@@ -101,7 +117,7 @@ def render_stream_delta(text):
     if not text:
         return ''
     escaped = html_lib.escape(text, quote=False).replace('\n', '<br>')
-    return sanitize_html(escaped)
+    return sanitize_html(_highlight(escaped))
 
 
 def strip_html_to_text(html_text):
@@ -147,6 +163,11 @@ def sse_done():
 def sse_html(html_text):
     """构造最终渲染结果的 SSE 消息（HTML，前端据此替换流式原文）"""
     return f"data: {json.dumps({'choices': [{'delta': {'html': html_text}}]}, ensure_ascii=False)}\n\n"
+
+
+def sse_tokens(total_tokens):
+    """构造 token 用量的 SSE 消息（前端据此在消息下方显示消耗）"""
+    return f"data: {json.dumps({'choices': [{'delta': {'tokens': total_tokens}}]}, ensure_ascii=False)}\n\n"
 
 
 import json

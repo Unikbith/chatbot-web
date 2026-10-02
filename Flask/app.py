@@ -162,6 +162,17 @@ def _ensure_schema_columns(app):
     try:
         inspector = inspect(db.engine)
         with app.app_context():
+            # messages.prompt_tokens / completion_tokens - 单条回复的 token 用量
+            if 'messages' in inspector.get_table_names():
+                cols = {c['name'] for c in inspector.get_columns('messages')}
+                if 'prompt_tokens' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text('ALTER TABLE messages ADD COLUMN prompt_tokens INTEGER'))
+                    app.logger.info('[迁移] 已为 messages 增加 prompt_tokens 字段')
+                if 'completion_tokens' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text('ALTER TABLE messages ADD COLUMN completion_tokens INTEGER'))
+                    app.logger.info('[迁移] 已为 messages 增加 completion_tokens 字段')
             # model_providers.params - 厂商专属参数（STT/TTS）
             if 'model_providers' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('model_providers')}

@@ -10,7 +10,7 @@ from services.markdown_streamer import (
     strip_html_to_text,
     render_markdown,
     render_stream_delta,
-    sse_content, sse_reasoning, sse_done, sse_html
+    sse_content, sse_reasoning, sse_done, sse_html, sse_tokens
 )
 from services.upload_guard import check_upload, detect_image_type, MAX_IMAGE_SIZE
 from services.rate_limit import rate_limit
@@ -92,13 +92,17 @@ class _ThinkTagFilter:
 
 
 def iter_sse_content(response, full_content_holder, reasoning_holder, model_holder=None,
-                     deep_think=True):
+                     deep_think=True, usage_holder=None):
     """遍历 API 流式响应，原文逐块透传（增量展示），思考过程单独下发。
 
     deep_think=False 时在服务端强制抑制思考输出（双保险，覆盖无法通过请求
     参数关闭思考的中转网关，如自定义命名的 deepseek 系列模型）：
     - reasoning_content 增量直接丢弃：不下发、不落库；
     - content 中混入的 <think>...</think> 段落跨 chunk 剥离。
+
+    usage_holder 传入长度为 2 的列表，用于回填 (prompt_tokens, completion_tokens)：
+    厂商在流式最后一帧（或开了 include_usage 时）才给 usage，个别网关缺失，
+    此时保持 None，前端不显示 token 统计。
     """
     think_filter = None if deep_think else _ThinkTagFilter()
     new_content = ""
@@ -116,6 +120,21 @@ def iter_sse_content(response, full_content_holder, reasoning_holder, model_hold
                     chunk = json.loads(data_str)
                     if model_holder is not None and chunk.get('model'):
                         model_holder[0] = chunk['model']
+
+                    # token 用量：有的厂商在最后一帧 usage，有的要求请求里带
+                    # stream_options.include_usage；两种位置都兼容
+                    if usage_holder is not None:
+                        u = chunk.get('usage') or chunk.get('token_usage')
+                        if isinstance(u, dict):
+                            p = u.get('prompt_tokens', u.get('input_tokens'))
+                            c = u.get('completion_tokens', u.get('output_tokens'))
+                            t = u.get('total_tokens')
+                            if p is not None:
+                                usage_holder[0] = int(p)
+                            if c is not None:
+                                usage_holder[1] = int(c)
+                            if t is not None and usage_holder[0] is None and usage_holder[1] is None:
+                                usage_holder[1] = max(0, int(t))
                     
                     choice = chunk.get("choices", [{}])[0]
                     delta = choice.get("delta", {})
@@ -141,7 +160,7 @@ def iter_sse_content(response, full_content_holder, reasoning_holder, model_hold
                         # 与成稿 render_markdown（nl2br）一致，生成中与生成完
                         # 排版节奏相同，替换时不再出现空行被抹掉的跳变
                         yield sse_content(render_stream_delta(content))
-                except (json.JSONDecodeError, KeyError, IndexError):
+                except (json.JSONDecodeError, KeyError, IndexError, ValueError, TypeError):
                     pass
     except GeneratorExit:
         current_app.logger.info('客户端断开，停止生成')
@@ -277,7 +296,8 @@ def _get_system_prompt(conv, user_id, persona_id=None, custom_prompt=None):
 
 
 def _save_ai_message(conversation_id, user_id, content, reasoning=None,
-                     model_name=None, title_source=None, model_id=None):
+                     model_name=None, title_source=None, model_id=None,
+                     prompt_tokens=None, completion_tokens=None):
     """将 AI 回复落库（普通聊天与识图共用）。
 
     独立于流式生成器之外可复用：正常流结束调用一次；
@@ -295,7 +315,9 @@ def _save_ai_message(conversation_id, user_id, content, reasoning=None,
             role='assistant',
             content=strip_html_to_text(content),
             reasoning_content=reasoning or None,
-            model=model_name
+            model=model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens
         )
         db.session.add(ai_msg)
 
@@ -488,6 +510,7 @@ def chat():
         full_content_holder = [""]
         reasoning_holder = [""]
         model_holder = [""]
+        usage_holder = [None, None]
         saved = False
 
         # 本次请求最后一条用户消息（用于自动命名标题）
@@ -536,9 +559,10 @@ def chat():
 
             new_content, finish_reason = yield from iter_sse_content(
                 response, full_content_holder, reasoning_holder, model_holder,
-                deep_think=deep_think,
+                deep_think=deep_think, usage_holder=usage_holder,
             )
             full_content = full_content_holder[0]
+            prompt_tokens, completion_tokens = usage_holder[0], usage_holder[1]
 
             # 先落库再下发最终事件：客户端收到 [DONE] 即断开连接，
             # 若在最后一个 yield 之后才写库，生成器不再被推进，AI 回复会丢失（并发实测出现）
@@ -549,9 +573,14 @@ def chat():
                     model_name=model_holder[0] or model_name,
                     title_source=last_user_text,
                     model_id=effective_model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
                 )
                 saved = True
 
+            # token 用量（有厂商才返回，缺失时前端不展示）
+            if prompt_tokens or completion_tokens:
+                yield sse_tokens((prompt_tokens or 0) + (completion_tokens or 0))
             # 流结束后一次性下发渲染好的（含白名单过滤）完整 HTML，前端替换流式原文
             yield sse_html(render_markdown(full_content))
             yield sse_done()
@@ -564,6 +593,8 @@ def chat():
                     model_name=model_holder[0] or model_name,
                     title_source=last_user_text,
                     model_id=effective_model,
+                    prompt_tokens=usage_holder[0],
+                    completion_tokens=usage_holder[1],
                 )
             current_app.logger.info('用户停止，生成被中断 user=%s', user_id)
             raise
@@ -636,6 +667,7 @@ def vision_chat():
         full_content_holder = [""]
         reasoning_holder = [""]
         model_holder = [""]
+        usage_holder = [None, None]
         saved = False
 
         try:
@@ -667,7 +699,8 @@ def vision_chat():
                 return
 
             yield from iter_sse_content(
-                response, full_content_holder, reasoning_holder, model_holder
+                response, full_content_holder, reasoning_holder, model_holder,
+                usage_holder=usage_holder,
             )
             # 先落库再下发最终事件（与普通聊天一致，避免客户端断开后生成器不推进导致丢失）
             if conversation_id:
@@ -676,9 +709,13 @@ def vision_chat():
                     reasoning=reasoning_holder[0],
                     model_name=model_holder[0],
                     title_source=text,
+                    prompt_tokens=usage_holder[0],
+                    completion_tokens=usage_holder[1],
                 )
                 saved = True
 
+            if usage_holder[0] or usage_holder[1]:
+                yield sse_tokens((usage_holder[0] or 0) + (usage_holder[1] or 0))
             yield sse_html(render_markdown(full_content_holder[0]))
             yield sse_done()
         except GeneratorExit:
@@ -689,6 +726,8 @@ def vision_chat():
                     reasoning=reasoning_holder[0],
                     model_name=model_holder[0],
                     title_source=text,
+                    prompt_tokens=usage_holder[0],
+                    completion_tokens=usage_holder[1],
                 )
             current_app.logger.info('用户停止，识图生成被中断 user=%s', user_id)
             raise

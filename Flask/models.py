@@ -385,6 +385,9 @@ class Message(db.Model):
     reasoning_content = db.Column(db.Text, nullable=True)
     image_url = db.Column(db.String(500), nullable=True)
     model = db.Column(db.String(100), nullable=True)
+    # 本次回复的 token 消耗（厂商 usage 缺失时为 None，前端不展示）
+    prompt_tokens = db.Column(db.Integer, nullable=True)
+    completion_tokens = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, default=local_now)
 
     def to_dict(self):
@@ -395,6 +398,10 @@ class Message(db.Model):
             'reasoning_content': self.reasoning_content,
             'image_url': self.image_url,
             'model': self.model,
+            'prompt_tokens': self.prompt_tokens,
+            'completion_tokens': self.completion_tokens,
+            'total_tokens': ((self.prompt_tokens or 0) + (self.completion_tokens or 0)
+                             or None),
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 

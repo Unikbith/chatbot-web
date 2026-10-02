@@ -8,7 +8,7 @@ from html.parser import HTMLParser
 
 # markdown(extra/nl2br) 实际会产出的标签白名单
 ALLOWED_TAGS = {
-    'p', 'br', 'hr',
+    'p', 'br', 'hr', 'mark',
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'strong', 'b', 'em', 'i', 'del', 's',
     'code', 'pre',

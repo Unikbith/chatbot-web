@@ -145,6 +145,10 @@ class AIService:
             'messages': messages,
             'stream': stream,
         }
+        # 流式场景请求带上 include_usage，让厂商在最后一帧回传 token 用量
+        # （部分厂商默认不回传，部分网关不识别该字段会忽略）
+        if stream:
+            payload['stream_options'] = {'include_usage': True}
 
         # Qwen3、GLM-4.5/4.7、火山 doubao-seed 等系列默认即进入推理模式，必须在请求里
         # 显式声明关闭深度思考，否则「未启用深思」时模型仍会输出思考过程。
