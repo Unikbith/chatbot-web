@@ -487,6 +487,17 @@ const adminApi = {
   async marketplaceCardDetail(pid) {
     return adminReq.get(`/api/admin/marketplace/${pid}`);
   },
+  // 管理员编辑任意广场卡片（不受作者归属限制）
+  async updateMarketplaceCard(pid, data) {
+    return adminReq.put(`/api/admin/marketplace/${pid}`, data);
+  },
+  // 提示词工具使用记录：谁在何时用了、输入、生成结果
+  async promptToolLogs(page = 1, perPage = 20, userId = '', category = '') {
+    let url = `/api/admin/prompt-tool-logs?page=${page}&per_page=${perPage}`;
+    if (userId) url += `&user_id=${userId}`;
+    if (category) url += `&category=${category}`;
+    return adminReq.get(url);
+  },
   async feedbackList(page = 1, perPage = 20) {
     return adminReq.get(`/api/feedback?page=${page}&per_page=${perPage}`);
   },
@@ -571,6 +582,10 @@ const marketplaceApi = {
   },
   delete(id) {
     return resAi.delete(`/api/marketplace/${id}`);
+  },
+  // 编辑卡片：创建者与管理员均可调用，未提交的字段保持原值
+  update(id, data) {
+    return resAi.put(`/api/marketplace/${id}`, data);
   },
   vote(id, voteType) {
     return resAi.post(`/api/marketplace/${id}/vote`, { vote_type: voteType });

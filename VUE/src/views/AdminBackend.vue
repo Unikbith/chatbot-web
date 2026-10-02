@@ -33,7 +33,7 @@
         </div>
       </div>
 
-      <el-tabs v-model="activeTab" class="admin-tabs">
+      <el-tabs v-model="activeTab" class="admin-tabs" @tab-change="onTabChange">
         <!-- 用户数据 Tab -->
         <el-tab-pane :label="t('用户数据', 'User Data')" name="users">
           <div class="admin-toolbar">
@@ -158,6 +158,38 @@
                         v-if="conv.background_image"
                         :src="conv.background_image"
                         :preview-src-list="[conv.background_image]"
+                        :initial-index="0"
+                        preview-teleported
+                        fit="cover"
+                        class="bg-thumb"
+                        hide-on-click-modal
+                      />
+                      <span v-else>-</span>
+                    </template>
+                  </el-table-column>
+                  <!-- 对话内设置的 AI / 用户头像：这两个字段与用户表上的全局头像
+                       不同，是本对话独有的设置，排查「用户看到的头像不对」时必需 -->
+                  <el-table-column :label="t('AI头像', 'AI Avatar')" width="90" align="center">
+                    <template #default="{ row: conv }">
+                      <el-image
+                        v-if="conv.ai_avatar"
+                        :src="conv.ai_avatar"
+                        :preview-src-list="[conv.ai_avatar]"
+                        :initial-index="0"
+                        preview-teleported
+                        fit="cover"
+                        class="bg-thumb"
+                        hide-on-click-modal
+                      />
+                      <span v-else>-</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('用户头像', 'User Avatar')" width="90" align="center">
+                    <template #default="{ row: conv }">
+                      <el-image
+                        v-if="conv.user_avatar"
+                        :src="conv.user_avatar"
+                        :preview-src-list="[conv.user_avatar]"
                         :initial-index="0"
                         preview-teleported
                         fit="cover"
@@ -413,6 +445,9 @@
                   <el-tooltip :content="t('查看卡片', 'View card')" placement="top">
                     <el-button size="small" type="primary" plain :icon="View" @click="previewMpCard(row)" />
                   </el-tooltip>
+                  <el-tooltip :content="t('编辑卡片', 'Edit card')" placement="top">
+                    <el-button size="small" type="warning" plain :icon="Edit" @click="openMpEdit(row)" />
+                  </el-tooltip>
                   <el-tooltip :content="t('删除', 'Delete')" placement="top">
                     <el-button size="small" type="danger" plain :icon="Delete" @click="deleteMpCard(row)" />
                   </el-tooltip>
@@ -421,7 +456,133 @@
             </el-table-column>
           </el-table>
         </el-tab-pane>
+
+        <el-tab-pane :label="t('提示词记录', 'Prompt Tool Logs')" name="promptLogs">
+          <div class="admin-toolbar">
+            <span class="admin-title">{{ t('提示词工具使用记录', 'Prompt Tool Usage') }}</span>
+            <el-button size="small" :icon="Refresh" @click="loadPromptLogs">{{ t('刷新', 'Refresh') }}</el-button>
+          </div>
+          <div class="filter-panel">
+            <el-input
+              v-model="plFilters.userId"
+              :placeholder="t('按用户 ID 筛选', 'Filter by user ID')"
+              size="small"
+              clearable
+              class="filter-input"
+              @input="applyPlFilters"
+            />
+            <el-select
+              v-model="plFilters.category"
+              :placeholder="t('类型', 'Category')"
+              clearable
+              size="small"
+              class="filter-select"
+              @change="applyPlFilters"
+            >
+              <el-option :label="t('人物设定', 'Character')" value="character" />
+              <el-option :label="t('生图/改图', 'Image')" value="image" />
+            </el-select>
+          </div>
+
+          <el-table :data="promptLogs" v-loading="plLoading" size="small" stripe>
+            <el-table-column prop="id" label="ID" width="60" align="center" />
+            <el-table-column prop="username" :label="t('用户', 'User')" width="110" show-overflow-tooltip />
+            <el-table-column prop="email" :label="t('邮箱', 'Email')" width="150" show-overflow-tooltip />
+            <el-table-column prop="category_label" :label="t('类型', 'Type')" width="90" align="center" />
+            <el-table-column prop="model" :label="t('模型', 'Model')" width="130" show-overflow-tooltip />
+            <el-table-column :label="t('自定义提示词', 'Custom prompt')" width="100" align="center">
+              <template #default="{ row }">
+                <el-tag v-if="row.has_custom_prompt" type="warning" size="small">{{ t('有', 'Yes') }}</el-tag>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('内容', 'Content')" width="90" align="center">
+              <template #default="{ row }">
+                <el-button size="small" text type="primary" @click="viewPlRow(row)">
+                  {{ t('查看', 'View') }}
+                </el-button>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('时间', 'Time')" width="150">
+              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+            </el-table-column>
+          </el-table>
+          <el-pagination
+            v-if="plTotal > 0"
+            v-model:current-page="plPage"
+            :page-size="plPerPage"
+            :total="plTotal"
+            layout="total, prev, pager, next"
+            @current-change="loadPromptLogs"
+            style="margin-top: 12px; justify-content: flex-end"
+          />
+        </el-tab-pane>
       </el-tabs>
+
+      <!-- 管理员编辑广场卡片 -->
+      <el-dialog
+        v-model="mpEditVisible"
+        :title="t('编辑卡片', 'Edit Card')"
+        width="min(520px, 94vw)"
+        append-to-body
+        destroy-on-close
+      >
+        <el-form :model="mpEditForm" label-position="top">
+          <el-form-item :label="t('名称', 'Name')" required>
+            <el-input v-model="mpEditForm.name" maxlength="100" />
+          </el-form-item>
+          <el-form-item :label="t('描述', 'Description')" required>
+            <el-input v-model="mpEditForm.description" type="textarea" :rows="2" maxlength="100" resize="none" />
+          </el-form-item>
+          <el-form-item :label="t('类型', 'Type')">
+            <el-input v-model="mpEditForm.gender" maxlength="20" :placeholder="t('男 / 女 / 神秘 / 自定义', 'Male / Female / Custom')" />
+          </el-form-item>
+          <el-form-item :label="t('人设提示词', 'Character Prompt')" required>
+            <el-input v-model="mpEditForm.system_prompt" type="textarea" :rows="6" maxlength="50000" resize="none" />
+          </el-form-item>
+          <el-form-item :label="t('开场白', 'Greeting')" required>
+            <el-input v-model="mpEditForm.greeting" type="textarea" :rows="3" maxlength="100" resize="none" />
+          </el-form-item>
+          <el-form-item :label="t('头像 URL', 'Avatar URL')">
+            <el-input v-model="mpEditForm.avatar" :placeholder="t('留空则不修改', 'Leave empty to keep')" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="mpEditVisible = false">{{ t('取消', 'Cancel') }}</el-button>
+          <el-button type="primary" :loading="mpEditSaving" @click="saveMpEdit">
+            {{ t('保存', 'Save') }}
+          </el-button>
+        </template>
+      </el-dialog>
+
+      <!-- 提示词记录详情 -->
+      <el-dialog
+        v-model="plDetailVisible"
+        :title="t('使用详情', 'Usage Detail')"
+        width="min(680px, 94vw)"
+        append-to-body
+      >
+        <div v-if="plDetail" class="pl-detail">
+          <p class="pl-detail-meta">
+            {{ t('用户', 'User') }}: <b>{{ plDetail.username }}</b> ({{ plDetail.email }})<br />
+            {{ t('类型', 'Type') }}: {{ plDetail.category_label }} ·
+            {{ t('模型', 'Model') }}: {{ plDetail.model }}<br />
+            {{ t('时间', 'Time') }}: {{ formatTime(plDetail.created_at) }}
+          </p>
+          <div class="pl-detail-block">
+            <div class="pl-detail-label">{{ t('自定义提示词', 'Custom prompt') }}</div>
+            <pre class="pl-detail-text">{{ plDetail.custom_prompt || t('（未使用自定义，使用系统默认）', '(none — system default used)') }}</pre>
+          </div>
+          <div class="pl-detail-block">
+            <div class="pl-detail-label">{{ t('基础信息', 'Base info') }}</div>
+            <pre class="pl-detail-text">{{ plDetail.base_info || t('（未填写）', '(empty)') }}</pre>
+          </div>
+          <div class="pl-detail-block">
+            <div class="pl-detail-label">{{ t('生成结果', 'Generated result') }}</div>
+            <pre class="pl-detail-text">{{ plDetail.result }}</pre>
+          </div>
+        </div>
+      </el-dialog>
     </main>
 
     <!-- 人设详情模态框 -->
@@ -651,8 +812,9 @@
 import { ref, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Back, SwitchButton, Monitor, View, Download, Delete, ChatLineRound } from '@element-plus/icons-vue'
+import { Refresh, Back, SwitchButton, Monitor, View, Download, Delete, Edit, ChatLineRound } from '@element-plus/icons-vue'
 import { adminApi, resAi } from '@/utils/resAi'
+import logger from '@/utils/logger'
 import { t } from '../i18n'
 import ThumbIcon from '../components/ThumbIcon.vue'
 import brandIcon from '@/assets/icon/ChatBotIcon.png'
@@ -1095,6 +1257,101 @@ async function loadMarketplaceCards() {
 }
 
 // 查看卡片详情：拉取完整数据（含 system_prompt / greeting / 评论区真实用户名）并打开弹窗
+// ========== 管理员编辑广场卡片 ==========
+const mpEditVisible = ref(false)
+const mpEditSaving = ref(false)
+const mpEditForm = reactive({ id: null, name: '', description: '', gender: '', system_prompt: '', greeting: '', avatar: '' })
+
+// 列表接口不返回 system_prompt（体积大），打开编辑时按需拉完整详情
+async function openMpEdit(card) {
+  if (!card) return
+  Object.assign(mpEditForm, {
+    id: card.id,
+    name: card.name || '',
+    description: card.description || '',
+    gender: card.gender || '',
+    system_prompt: '',
+    greeting: '',
+    avatar: card.avatar || '',
+  })
+  mpEditVisible.value = true
+  try {
+    const res = await adminApi.marketplaceCardDetail(card.id)
+    if (res.code === 200) {
+      mpEditForm.system_prompt = res.data.system_prompt || ''
+      mpEditForm.greeting = res.data.greeting || ''
+    }
+  } catch (e) {
+    ElMessage.warning(t('读取提示词失败，可直接重写', 'Failed to load prompt; you may retype it'))
+  }
+}
+
+async function saveMpEdit() {
+  mpEditSaving.value = true
+  try {
+    const payload = {
+      name: mpEditForm.name.trim(),
+      description: mpEditForm.description.trim(),
+      gender: mpEditForm.gender.trim(),
+      system_prompt: mpEditForm.system_prompt.trim(),
+      greeting: mpEditForm.greeting.trim(),
+    }
+    // 头像留空表示不修改，避免误清
+    if (mpEditForm.avatar.trim()) payload.avatar = mpEditForm.avatar.trim()
+    const res = await adminApi.updateMarketplaceCard(mpEditForm.id, payload)
+    if (res.code === 200) {
+      ElMessage.success(t('已保存', 'Saved'))
+      mpEditVisible.value = false
+      loadMarketplaceCards()
+    } else {
+      ElMessage.warning(res.message || t('保存失败', 'Save failed'))
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || t('保存失败', 'Save failed'))
+  } finally {
+    mpEditSaving.value = false
+  }
+}
+
+// ========== 提示词工具使用记录 ==========
+const promptLogs = ref([])
+const plLoading = ref(false)
+const plPage = ref(1)
+const plPerPage = 20
+const plTotal = ref(0)
+const plFilters = ref({ userId: '', category: '' })
+const plDetailVisible = ref(false)
+const plDetail = ref(null)
+
+async function loadPromptLogs() {
+  plLoading.value = true
+  try {
+    const res = await adminApi.promptToolLogs(
+      plPage.value, plPerPage,
+      plFilters.value.userId.trim(), plFilters.value.category
+    )
+    if (res.code === 200) {
+      promptLogs.value = res.data.items || []
+      plTotal.value = res.data.total || 0
+    }
+  } catch (e) {
+    logger.error('加载提示词记录失败', e)
+    ElMessage.error(t('加载提示词记录失败', 'Failed to load prompt tool logs'))
+  } finally {
+    plLoading.value = false
+  }
+}
+
+function applyPlFilters() {
+  plPage.value = 1
+  loadPromptLogs()
+}
+
+function viewPlRow(row) {
+  plDetail.value = row
+  plDetailVisible.value = true
+}
+
 async function previewMpCard(card) {
   if (!card) return
   mpDetailVisible.value = true
@@ -1188,6 +1445,11 @@ watch(activeTab, (val) => {
     loadFeedback()
   }
 })
+
+// 切换标签页时按需加载：提示词记录首次进入才拉取，避免首屏多余请求
+function onTabChange(name) {
+  if (name === 'promptLogs') loadPromptLogs()
+}
 </script>
 
 <style scoped>
@@ -1937,5 +2199,35 @@ watch(activeTab, (val) => {
   .admin-table :deep(th.el-table__cell) {
     padding: 6px 4px;
   }
+}
+
+/* 提示词记录详情 */
+.pl-detail-meta {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-secondary, #6a5d53);
+}
+.pl-detail-block { margin-bottom: 14px; }
+.pl-detail-label {
+  margin-bottom: 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary, #2a2522);
+}
+.pl-detail-text {
+  margin: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary, #6a5d53);
+  background: var(--surface-hover, #ebe4de);
+  border: 1px solid var(--border-color, #e7ded6);
+  border-radius: 8px;
 }
 </style>

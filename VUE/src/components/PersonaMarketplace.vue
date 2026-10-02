@@ -174,7 +174,10 @@
             />
             <span class="dl-creator-name">{{ detailData.creator_pseudonym }}</span>
           </div>
-          <div v-if="isCreator" class="dl-creator-actions">
+          <div v-if="detailData.can_edit" class="dl-creator-actions">
+            <el-button size="small" plain @click="openEditDialog">
+              {{ t('编辑', 'Edit') }}
+            </el-button>
             <el-button size="small" type="danger" plain @click="handleDeleteCard">
               {{ t('删除卡片', 'Delete Card') }}
             </el-button>
@@ -396,6 +399,57 @@
       </template>
     </el-dialog>
 
+    <!-- 编辑卡片对话框：创建者与管理员共用 -->
+    <el-dialog
+      v-model="showEditDialog"
+      :title="t('编辑卡片', 'Edit Card')"
+      width="min(520px, 94vw)"
+      append-to-body
+      destroy-on-close
+    >
+      <el-form :model="editForm" label-position="top">
+        <el-form-item :label="t('名称', 'Name')" required>
+          <el-input v-model="editForm.name" maxlength="100" />
+        </el-form-item>
+        <el-form-item :label="t('描述', 'Description')" required>
+          <el-input v-model="editForm.description" type="textarea" :rows="2" maxlength="100" resize="none" />
+        </el-form-item>
+        <el-form-item :label="t('类型', 'Type')" required>
+          <el-radio-group v-model="editForm.gender">
+            <el-radio-button value="男">{{ t('男', 'Male') }}</el-radio-button>
+            <el-radio-button value="女">{{ t('女', 'Female') }}</el-radio-button>
+            <el-radio-button value="神秘">{{ t('神秘', 'Mystery') }}</el-radio-button>
+            <el-radio-button value="双性">{{ t('双性', 'Intersex') }}</el-radio-button>
+            <el-radio-button value="无性别">{{ t('无性别', 'Genderless') }}</el-radio-button>
+            <el-radio-button value="其他">{{ t('其他', 'Other') }}</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="editForm.gender === '其他'" :label="t('自定义类型', 'Custom Type')">
+          <el-input v-model="editForm.genderCustom" maxlength="20" :placeholder="t('输入自定义类型', 'Enter a custom type')" />
+        </el-form-item>
+        <el-form-item :label="t('人设提示词', 'Character Prompt')" required>
+          <el-input v-model="editForm.system_prompt" type="textarea" :rows="6" maxlength="50000" resize="none" />
+        </el-form-item>
+        <el-form-item :label="t('开场白', 'Greeting')" required>
+          <el-input v-model="editForm.greeting" type="textarea" :rows="3" maxlength="100" resize="none" />
+        </el-form-item>
+        <el-form-item :label="t('头像', 'Avatar')" required>
+          <div class="edit-avatar-row">
+            <el-avatar :size="56" :src="editForm.avatar" />
+            <el-upload :show-file-list="false" :before-upload="handleEditAvatarUpload" accept="image/*">
+              <el-button size="small">{{ t('更换头像', 'Change') }}</el-button>
+            </el-upload>
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showEditDialog = false">{{ t('取消', 'Cancel') }}</el-button>
+        <el-button type="primary" :loading="editSaving" @click="handleSaveEdit">
+          {{ t('保存', 'Save') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- 头像大图预览：点击详情页的头像后弹出，与聊天大图预览体验一致 -->
     <el-image-viewer
       v-if="previewImageVisible && previewImageUrl"
@@ -507,6 +561,75 @@ watch(detailVisible, (val) => {
 const isCreator = computed(() =>
   detailData.value && props.currentUserId && detailData.value.author_id === props.currentUserId
 )
+
+// ========== 编辑卡片 ==========
+const showEditDialog = ref(false)
+const editSaving = ref(false)
+const editForm = reactive({
+  name: '', description: '', gender: '', genderCustom: '',
+  system_prompt: '', greeting: '', avatar: '',
+})
+
+// 从详情打开编辑：把当前值填入表单。原「其他」类型需还原成"其他 + 文本"，
+// 否则直接填入具体值会与单选组选项不匹配，导致回显丢失。
+function openEditDialog() {
+  const d = detailData.value
+  if (!d) return
+  const raw = (d.gender || '').trim()
+  const isPreset = ['男', '女', '神秘', '双性', '无性别'].includes(raw)
+  Object.assign(editForm, {
+    name: d.name || '',
+    description: d.description || '',
+    gender: !raw ? '男' : (isPreset ? raw : '其他'),
+    genderCustom: isPreset || !raw ? '' : raw,
+    system_prompt: d.system_prompt || '',
+    greeting: d.greeting || '',
+    avatar: d.avatar || '',
+  })
+  showEditDialog.value = true
+}
+
+const editEffectiveGender = () =>
+  editForm.gender === '其他' ? (editForm.genderCustom.trim() || '其他') : editForm.gender
+
+async function handleEditAvatarUpload(file) {
+  try {
+    const res = await uploadApi.uploadImage(file)
+    if (res.code === 200) editForm.avatar = res.data.url
+    else ElMessage.error(t('上传失败', 'Upload failed'))
+  } catch {
+    ElMessage.error(t('上传失败', 'Upload failed'))
+  }
+  return false
+}
+
+async function handleSaveEdit() {
+  if (!detailData.value) return
+  editSaving.value = true
+  try {
+    const res = await marketplaceApi.update(detailData.value.id, {
+      name: editForm.name.trim(),
+      description: editForm.description.trim(),
+      gender: editEffectiveGender(),
+      system_prompt: editForm.system_prompt.trim(),
+      greeting: editForm.greeting.trim(),
+      avatar: editForm.avatar,
+    })
+    if (res.code === 200) {
+      ElMessage.success(t('已保存', 'Saved'))
+      showEditDialog.value = false
+      // 用最新数据覆盖详情，避免关闭编辑后仍显示旧值
+      if (res.data) detailData.value = { ...detailData.value, ...res.data }
+      loadList()
+    } else {
+      ElMessage.warning(res.message || t('保存失败', 'Save failed'))
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || t('保存失败', 'Save failed'))
+  } finally {
+    editSaving.value = false
+  }
+}
 
 // 大图预览：点击详情页头像后打开 el-image-viewer 全屏预览
 const previewImageVisible = ref(false)
@@ -976,6 +1099,13 @@ function formatDate(ts) {
   color: var(--text-muted);
 }
 
+/* 编辑对话框头像行 */
+.edit-avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 .gender-picker {
   display: flex;
   align-items: center;
@@ -1238,6 +1368,9 @@ function formatDate(ts) {
 .detail-right {
   flex: 1;
   min-width: 0;
+  /* 关键：flex 子项默认 min-height:auto 会拒绝收缩，导致 .dr-scroll 的
+     overflow-y:auto 失效、内容顶出容器（移动端表现为只有底部一小块可操作）。 */
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1496,16 +1629,40 @@ function formatDate(ts) {
 }
 
 @media (max-width: 768px) {
+  /* 弹窗本体限高并转为纵向 flex：header / body / footer 三段，
+     body 作为唯一的滚动承载（内部由 .dr-scroll 负责），
+     避免整窗超出视口后 align-center 把顶部顶出屏幕。 */
+  .detail-dialog {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+    margin: 0 auto;
+  }
+  .detail-dialog :deep(.el-dialog__body) {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0;
+  }
   .mp-grid {
     grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
     gap: 8px;
   }
   .detail-split {
     flex-direction: column;
-    max-height: none;
+    /* 关键：原先是 max-height:none，内容按自然高度无限撑开，
+       配合 dialog 的 align-center 居中，弹窗高度超过视口后
+       顶部被顶到视口之上，于是只有底部一小块能点（移动端反馈的 bug）。
+       改为限制在视口内并由内部区域滚动。100dvh 会随地址栏收起而变化，
+       比 vh 更贴近移动端实际可视高度。 */
+    height: calc(100vh - 148px);
+    height: calc(100dvh - 148px);
+    max-height: calc(100dvh - 148px);
   }
   .detail-left {
     width: 100%;
+    flex-shrink: 0;   /* 左侧信息区固定高度，不参与内部滚动 */
     border-right: none;
     border-bottom: 1px solid var(--border-color);
     padding: 16px;

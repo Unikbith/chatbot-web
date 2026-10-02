@@ -4,7 +4,7 @@ import base64
 from flask import Blueprint, request, Response, stream_with_context, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
-from models import ModelProvider, Conversation, Message, PersonaTemplate, UserSettings
+from models import ModelProvider, Conversation, Message, PersonaTemplate, UserSettings, PromptToolLog
 from services.ai_service import AIService, FreeAPIProvider
 from services.markdown_streamer import (
     strip_html_to_text,
@@ -815,7 +815,10 @@ def prompt_tool_info():
         if hasattr(p, 'models'):
             for m in p.models or []:
                 if m.enabled:
-                    models.append({'id': m.model_id, 'name': m.model_id})
+                    # 展示名与输入框的模型选择器保持一致：优先用户填写的昵称，
+                    # 缺省才回落到 model_id。此前硬编码 name=model_id，
+                    # 导致提示词工具里只显示裸模型 ID，与输入框显示不一致。
+                    models.append({'id': m.model_id, 'name': m.name or m.model_id})
         if not models and p.model:
             models.append({'id': p.model, 'name': p.model})
         prov_list.append({'id': p.id, 'name': p.name, 'models': models})
@@ -912,5 +915,22 @@ def prompt_tool_generate():
         content = response.json()['choices'][0]['message']['content']
     except (KeyError, IndexError, TypeError, ValueError):
         return jsonify({'code': 500, 'message': '响应格式异常'}), 500
+
+    # 审计：记录本次使用（谁、用了什么模型、输入与产出），供后台追溯。
+    # 只在生成成功时记录；写日志失败不能影响用户正常使用，故单独 try。
+    try:
+        db.session.add(PromptToolLog(
+            user_id=user_id,
+            category=category,
+            provider_id=provider.id,
+            model=model,
+            custom_prompt=custom_prompt or None,
+            base_info=base_info or None,
+            result=content,
+        ))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.warning('[提示词工具] 审计记录写入失败', exc_info=True)
 
     return jsonify({'code': 200, 'data': {'content': content, 'model': model}})
