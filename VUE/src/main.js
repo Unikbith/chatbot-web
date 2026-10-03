@@ -1,6 +1,13 @@
 import { createApp } from 'vue'
-import ElementPlus from 'element-plus'
-import 'element-plus/dist/index.css'
+// 只引入必要的基础样式；组件样式由 unplugin-vue-components 按需注入，
+// 函数式 API（ElMessage/ElMessageBox/ElLoading）与指令的样式需手动补，
+// 否则消息提示 / v-loading 会没有样式。
+import 'element-plus/theme-chalk/base.css'
+import 'element-plus/theme-chalk/el-message.css'
+import 'element-plus/theme-chalk/el-message-box.css'
+import 'element-plus/theme-chalk/el-loading.css'
+// v-loading 指令不经过模板组件扫描，显式全局注册（样式已在上行引入）
+import { ElLoading } from 'element-plus'
 import App from './App.vue'
 import router from './router'
 
@@ -24,7 +31,8 @@ window.addEventListener('chatbot:theme-change', ensureDarkThemeCss)
 
 const app = createApp(App)
 
-app.use(ElementPlus)
+// v-loading 指令显式全局注册（已在上方引入 el-loading.css）
+app.directive('loading', ElLoading.directive)
 app.use(router)
 app.mount('#app')
 
