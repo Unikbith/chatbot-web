@@ -43,6 +43,43 @@
           </el-select>
         </section>
 
+        <!-- 提示词兜底：默认关闭，开启才会把后端写死的兜底词接在人物设定后面 -->
+        <section class="cv-panel">
+          <header class="cv-panel__head">
+            <span class="cv-tick" aria-hidden="true"></span>
+            <h3 class="cv-panel__title">{{ t('提示词兜底', 'Fallback Prompt') }}</h3>
+          </header>
+          <div class="cv-toggle">
+            <div class="cv-toggle__text">
+              <span class="cv-toggle__label">{{ t('开启后生成的内容（你懂的）', 'Enable fallback prompt') }}</span>
+              <span class="cv-toggle__hint">
+                {{ t('稳定生成内容后可关闭，减少token消耗', 'Enable only when the AI cannot produce what you want; turn it off once generation is stable to save tokens') }}
+              </span>
+            </div>
+            <el-switch v-model="form.append_prompt_enabled" />
+          </div>
+        </section>
+
+        <!-- 记忆宫殿（滚动摘要）：紧随人物设定——两者共同决定 AI "记住什么" -->
+        <section class="cv-panel">
+          <header class="cv-panel__head">
+            <span class="cv-tick" aria-hidden="true"></span>
+            <h3 class="cv-panel__title">{{ t('记忆宫殿', 'Memory Palace') }}</h3>
+          </header>
+          <div class="cv-toggle">
+            <div class="cv-toggle__text">
+              <span class="cv-toggle__label">{{ t('每 N 轮压缩一次', 'Compress every N rounds') }}</span>
+              <span class="cv-toggle__hint">{{ t('把较早对话压成一条摘要：既防止遗忘，又减少输入 token', 'Condense older chat into one summary: keeps memory, cuts input tokens') }}</span>
+            </div>
+            <el-select v-model="form.summary_threshold" size="small" class="mp-select">
+              <el-option v-for="n in 20" :key="n" :value="n" :label="`${n} ${t('轮', 'rounds')}`" />
+            </el-select>
+          </div>
+          <el-button class="mp-open" size="small" :icon="MagicStick" :disabled="!conversation" @click="openMemory">
+            {{ t('打开记忆宫殿', 'Open Memory Palace') }}
+          </el-button>
+        </section>
+
         <!-- 头像：AI / 用户可分别设置，仅当前对话生效 -->
         <section class="cv-panel">
           <header class="cv-panel__head">
@@ -129,7 +166,7 @@
             <div class="cv-meter__head">
               <span class="cv-meter__label">{{ t('消息框透明度', 'Message opacity') }}</span>
               <span class="cv-meter__value">
-                {{ form.message_opacity == null ? t('系统默认', 'System default') : Math.round(form.message_opacity * 100) + '%' }}
+                {{ Math.round((form.message_opacity == null ? generalOpacity : form.message_opacity) * 100) + '%' }}
               </span>
             </div>
             <el-slider
@@ -162,9 +199,15 @@
 
           <div v-for="p in paramDefs" :key="p.key" class="cv-meter">
             <div class="cv-meter__head">
-              <span class="cv-meter__label">{{ p.label }}</span>
+              <span class="cv-meter__label">
+                {{ p.label }}
+                <el-tooltip :content="p.tip" placement="top">
+                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </span>
+              <!-- 未单独设置时直接显示系统里那个值，而不是显示「系统默认」四个字 -->
               <span class="cv-meter__value">
-                {{ form[p.key] == null ? t('系统默认', 'System default') : Number(form[p.key]).toFixed(1) }}
+                {{ Number(form[p.key] == null ? p.general : form[p.key]).toFixed(1) }}
               </span>
             </div>
             <div class="cv-meter__body">
@@ -181,10 +224,10 @@
                 text
                 class="cv-reset"
                 :disabled="form[p.key] == null"
-                :aria-label="t('恢复系统默认', 'Use system default')"
+                :aria-label="t('跟随系统', 'Follow system')"
                 @click="form[p.key] = null"
               >
-                {{ t('默认', 'Default') }}
+                {{ t('跟随系统', 'Follow system') }}
               </el-button>
             </div>
           </div>
@@ -204,23 +247,56 @@
             <el-switch v-model="form.auto_play_voice" />
           </div>
         </section>
+
       </template>
     </div>
 
+    <!-- 改动即时生效，不再需要点「保存」 -->
     <template #footer>
-      <el-button @click="emit('update:modelValue', false)">{{ t('取消', 'Cancel') }}</el-button>
-      <el-button type="primary" :disabled="!conversation" :loading="saving" @click="save">
-        {{ t('保存', 'Save') }}
-      </el-button>
+      <div class="cv-footer">
+        <el-button type="primary" @click="emit('update:modelValue', false)">{{ t('完成', 'Done') }}</el-button>
+      </div>
     </template>
   </el-drawer>
+
+  <!-- 记忆宫殿：查看历次压缩摘要 -->
+  <el-dialog
+    v-model="memoryOpen"
+    :title="t('记忆宫殿', 'Memory Palace')"
+    width="min(560px, 92%)"
+    class="mp-dialog"
+    append-to-body
+  >
+    <div v-if="memoryLoading" class="mp-empty">{{ t('加载中…', 'Loading…') }}</div>
+    <div v-else-if="!memoryData || !memoryData.items.length" class="mp-empty">
+      {{ t('暂无压缩记录。聊天达到设定轮数后会自动生成第一条摘要。', 'No compression yet — the first summary appears once the chat reaches the set number of rounds.') }}
+    </div>
+    <template v-else>
+      <div class="mp-stat">
+        <span class="mp-stat__num">{{ memoryData.compress_count }}</span>
+        <span class="mp-stat__unit">{{ t('次压缩', 'compressions') }}</span>
+        <span class="mp-stat__dot">·</span>
+        <span class="mp-stat__unit">{{ t('每', 'every') }} {{ memoryData.threshold }} {{ t('轮触发', 'rounds') }}</span>
+      </div>
+      <div class="mp-list">
+        <article v-for="item in memoryData.items" :key="item.id" class="mp-item">
+          <header class="mp-item__head">
+            <span class="mp-seq">#{{ item.seq }}</span>
+            <span class="mp-meta">{{ t('压缩', 'merged') }} {{ item.message_count }} {{ t('条消息', 'msgs') }}</span>
+            <span class="mp-time">{{ formatTime(item.created_at) }}</span>
+          </header>
+          <div class="mp-item__body">{{ item.content }}</div>
+        </article>
+      </div>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { MagicStick, User } from '@element-plus/icons-vue'
-import { uploadApi } from '../utils/resAi'
+import { MagicStick, User, QuestionFilled } from '@element-plus/icons-vue'
+import { uploadApi, conversationApi } from '../utils/resAi'
 import { t } from '../i18n'
 
 const props = defineProps({
@@ -236,19 +312,75 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'save'])
 
-const saving = ref(false)
 // 仅列出已启用（enabled）的模型配置供当前对话选择
-const form = reactive({ persona_id: null, ai_avatar: null, user_avatar: null, background_image: null, background_cover: 'contain', message_opacity: null, temperature: null, frequency_penalty: null, presence_penalty: null, auto_play_voice: false })
+const form = reactive({
+  persona_id: null, ai_avatar: null, user_avatar: null,
+  background_image: null, background_cover: 'contain', message_opacity: null,
+  temperature: null, frequency_penalty: null, presence_penalty: null,
+  auto_play_voice: false,
+  summary_threshold: 10,
+  append_prompt_enabled: false,
+})
+
+// 记忆宫殿：历次压缩摘要
+const memoryOpen = ref(false)
+const memoryLoading = ref(false)
+const memoryData = ref(null)
+
+async function openMemory() {
+  const convId = props.conversation && props.conversation.id
+  if (!convId) return
+  memoryOpen.value = true
+  memoryLoading.value = true
+  memoryData.value = null
+  try {
+    const res = await conversationApi.summaries(convId)
+    if (res.code === 200) {
+      memoryData.value = res.data
+    } else {
+      ElMessage.warning(res.message || t('加载失败', 'Load failed'))
+    }
+  } catch (e) {
+    ElMessage.error(t('加载失败', 'Load failed'))
+  } finally {
+    memoryLoading.value = false
+  }
+}
+
+function formatTime(iso) {
+  if (!iso) return ''
+  try {
+    const d = new Date(iso)
+    const p = (n) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  } catch (e) {
+    return ''
+  }
+}
 
 // 参数微调的量表定义：模板用 v-for 渲染，避免三段结构重复
 const paramDefs = computed(() => ([
-  { key: 'temperature', label: t('温度', 'Temperature'), min: 0, max: 2, step: 0.1, general: props.generalTemperature },
-  { key: 'frequency_penalty', label: t('频率惩罚', 'Frequency Penalty'), min: -2, max: 2, step: 0.1, general: props.generalFrequencyPenalty },
-  { key: 'presence_penalty', label: t('存在惩罚', 'Presence Penalty'), min: -2, max: 2, step: 0.1, general: props.generalPresencePenalty },
+  {
+    key: 'temperature', label: t('温度', 'Temperature'), min: 0, max: 2, step: 0.1,
+    general: props.generalTemperature,
+    tip: t('较高值使输出更随机创意，较低值更确定保守', 'Higher is more creative, lower is more focused'),
+  },
+  {
+    key: 'frequency_penalty', label: t('频率惩罚', 'Frequency Penalty'), min: -2, max: 2, step: 0.1,
+    general: props.generalFrequencyPenalty,
+    tip: t('减少重复内容，值越高越倾向于使用新词', 'Reduce repetition'),
+  },
+  {
+    key: 'presence_penalty', label: t('存在惩罚', 'Presence Penalty'), min: -2, max: 2, step: 0.1,
+    general: props.generalPresencePenalty,
+    tip: t('增加谈论新话题的可能性', 'Increase chance of new topics'),
+  },
 ]))
 
 function resetForm() {
   const conv = props.conversation || {}
+  // 回填期间抑制自动保存，避免「打开抽屉」就被当成一次改动回写
+  suppressAuto = true
   form.persona_id = conv.persona_id != null ? conv.persona_id : null
   form.ai_avatar = conv.ai_avatar || null
   form.user_avatar = conv.user_avatar || null
@@ -259,10 +391,15 @@ function resetForm() {
   form.frequency_penalty = (conv.frequency_penalty != null && conv.frequency_penalty !== '') ? conv.frequency_penalty : null
   form.presence_penalty = (conv.presence_penalty != null && conv.presence_penalty !== '') ? conv.presence_penalty : null
   form.auto_play_voice = !!conv.auto_play_voice
+  form.summary_threshold = (conv.summary_threshold != null && conv.summary_threshold !== '') ? Number(conv.summary_threshold) : 10
+  form.append_prompt_enabled = !!conv.append_prompt_enabled
+  // 让本轮回填引起的 watch 在同一微任务里被忽略，下一轮才恢复自动保存
+  nextTick(() => { suppressAuto = false })
 }
 
 watch(() => props.modelValue, (val) => {
   if (val) resetForm()
+  else if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null }
 })
 
 const bgPreviewStyle = computed(() => {
@@ -311,12 +448,15 @@ async function handleBgUpload(file) {
   return false
 }
 
-function save() {
-  saving.value = true
+/* ---------- 自动保存：改动即存，无需再点「保存」 ---------- */
+let autoSaveTimer = null
+let suppressAuto = false
+
+function buildPayload() {
   // 不再下发 provider_id / model_id：模型改由输入框左下角的模型选择器控制
   //（每轮消息实时生效）。后端 `if 'provider_id' in data` 语义下传 null
   // 会把对话的模型绑定清空，因此必须整项省略而不是置 null。
-  emit('save', {
+  return {
     persona_id: form.persona_id != null ? form.persona_id : null,
     ai_avatar: form.ai_avatar || null,
     user_avatar: form.user_avatar || null,
@@ -327,9 +467,19 @@ function save() {
     frequency_penalty: form.frequency_penalty != null ? Number(form.frequency_penalty) : null,
     presence_penalty: form.presence_penalty != null ? Number(form.presence_penalty) : null,
     auto_play_voice: !!form.auto_play_voice,
-  })
-  setTimeout(() => { saving.value = false }, 500)
+    summary_threshold: Number(form.summary_threshold) || 10,
+    append_prompt_enabled: !!form.append_prompt_enabled,
+  }
 }
+
+// _silent：自动保存不弹「已保存」提示，否则拖一下滑块就弹一次会很烦
+watch(form, () => {
+  if (suppressAuto) return
+  clearTimeout(autoSaveTimer)
+  autoSaveTimer = setTimeout(() => {
+    emit('save', { ...buildPayload(), _silent: true })
+  }, 400)
+}, { deep: true })
 </script>
 <style scoped>
 /* ============================================================
@@ -611,5 +761,90 @@ function save() {
   .cv-cover-group { display: flex; width: 100%; }
   .cv-cover-group :deep(.el-radio-button) { flex: 1; }
   .cv-cover-group :deep(.el-radio-button__inner) { width: 100%; min-height: 34px; }
+}
+
+/* ---------- 记忆宫殿（抽屉内） ---------- */
+.mp-select { width: 108px; flex-shrink: 0; }
+.mp-open { margin-top: 12px; width: 100%; min-height: 36px; }
+
+/* 参数说明小问号：与系统设置保持一致 */
+.help-icon {
+  margin-left: 4px;
+  color: var(--text-muted, #909399);
+  cursor: help;
+  vertical-align: -1px;
+}
+
+/* 底部：改动即存，只留一个「完成」 */
+.cv-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 100%;
+}
+</style>
+
+<style>
+/* 记忆宫殿弹窗：append-to-body，scoped 不生效，故用全局样式 */
+.mp-dialog .mp-empty {
+  padding: 24px 4px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary, #6b5b4a);
+}
+.mp-dialog .mp-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color, #e6ddd4);
+}
+.mp-dialog .mp-stat__num {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--brand, #b06a2e);
+  font-variant-numeric: tabular-nums;
+}
+.mp-dialog .mp-stat__unit { font-size: 12px; color: var(--text-secondary, #6b5b4a); }
+.mp-dialog .mp-stat__dot { color: var(--text-muted, #9c8b7a); }
+.mp-dialog .mp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+.mp-dialog .mp-item {
+  padding: 12px 14px;
+  border: 1px solid var(--border-color, #e6ddd4);
+  border-radius: 10px;
+  background: var(--surface-hover, #faf7f4);
+}
+.mp-dialog .mp-item__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.mp-dialog .mp-seq {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand, #b06a2e);
+  font-variant-numeric: tabular-nums;
+}
+.mp-dialog .mp-meta { font-size: 11px; color: var(--text-secondary, #6b5b4a); }
+.mp-dialog .mp-time {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted, #9c8b7a);
+  font-variant-numeric: tabular-nums;
+}
+.mp-dialog .mp-item__body {
+  font-size: 13px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary, #2a2522);
 }
 </style>

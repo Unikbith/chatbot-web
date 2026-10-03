@@ -2,7 +2,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
-from models import PersonaTemplate, MarketplaceAdopt
+from models import PersonaTemplate, MarketplaceAdopt, WorldBookEntry
 
 persona_bp = Blueprint('persona', __name__, url_prefix='/api/personas')
 
@@ -267,3 +267,143 @@ def set_default(persona_id):
         'message': '已设为默认',
         'data': persona.to_dict()
     })
+
+
+# ---------------------------------------------------------------------------
+# 世界书（设定条目）CRUD
+# ---------------------------------------------------------------------------
+# 用途：把一大块「每次全量重发」的角色设定，拆成按需注入的小条目。
+# 聊天时后端自动按关键词命中注入，聊天用户无需任何操作。
+MAX_WB_TITLE_LEN = 200
+MAX_WB_KEYWORDS_LEN = 1000
+MAX_WB_CONTENT_LEN = 4000
+MAX_WB_ENTRIES_PER_PERSONA = 50
+
+
+def _wb_entry_of(entry_id, user_id):
+    """取当前用户自己的条目，越权返回 None"""
+    return WorldBookEntry.query.filter_by(id=entry_id, user_id=user_id).first()
+
+
+@persona_bp.route('/<int:persona_id>/worldbook', methods=['GET'])
+@jwt_required()
+def list_worldbook(persona_id):
+    """列出某角色的世界书条目（含该用户的全局条目）"""
+    user_id = int(get_jwt_identity())
+    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first()
+    if not persona:
+        return jsonify({'code': 404, 'message': '角色不存在'}), 404
+
+    from sqlalchemy import or_
+    entries = WorldBookEntry.query.filter(
+        WorldBookEntry.user_id == user_id,
+        or_(WorldBookEntry.persona_id == persona_id,
+            WorldBookEntry.persona_id.is_(None))
+    ).order_by(
+        WorldBookEntry.always_on.desc(),
+        WorldBookEntry.weight.desc(),
+        WorldBookEntry.id.asc()
+    ).all()
+
+    return jsonify({
+        'code': 200,
+        'data': [e.to_dict() for e in entries]
+    })
+
+
+@persona_bp.route('/<int:persona_id>/worldbook', methods=['POST'])
+@jwt_required()
+def create_worldbook_entry(persona_id):
+    """新增世界书条目"""
+    user_id = int(get_jwt_identity())
+    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first()
+    if not persona:
+        return jsonify({'code': 404, 'message': '角色不存在'}), 404
+
+    count = WorldBookEntry.query.filter_by(user_id=user_id, persona_id=persona_id).count()
+    if count >= MAX_WB_ENTRIES_PER_PERSONA:
+        return jsonify({
+            'code': 400,
+            'message': f'每个角色最多 {MAX_WB_ENTRIES_PER_PERSONA} 条设定'
+        }), 400
+
+    data = request.get_json() or {}
+    content = (data.get('content') or '').strip()
+    if not content:
+        return jsonify({'code': 400, 'message': '设定内容不能为空'}), 400
+    if len(content) > MAX_WB_CONTENT_LEN:
+        return jsonify({'code': 400, 'message': f'设定内容过长（最多 {MAX_WB_CONTENT_LEN} 字）'}), 400
+
+    keywords = (data.get('keywords') or '').strip()
+    if len(keywords) > MAX_WB_KEYWORDS_LEN:
+        return jsonify({'code': 400, 'message': f'关键词过长（最多 {MAX_WB_KEYWORDS_LEN} 字）'}), 400
+
+    title = (data.get('title') or '').strip()[:MAX_WB_TITLE_LEN]
+
+    entry = WorldBookEntry(
+        user_id=user_id,
+        persona_id=persona_id,
+        title=title,
+        keywords=keywords,
+        content=content,
+        always_on=bool(data.get('always_on', False)),
+        enabled=bool(data.get('enabled', True)),
+        weight=int(data.get('weight') or 0),
+    )
+    db.session.add(entry)
+    db.session.commit()
+
+    return jsonify({'code': 200, 'message': '已添加', 'data': entry.to_dict()})
+
+
+@persona_bp.route('/<int:persona_id>/worldbook/<int:entry_id>', methods=['PUT'])
+@jwt_required()
+def update_worldbook_entry(persona_id, entry_id):
+    """修改世界书条目"""
+    user_id = int(get_jwt_identity())
+    entry = _wb_entry_of(entry_id, user_id)
+    if not entry or entry.persona_id != persona_id:
+        return jsonify({'code': 404, 'message': '条目不存在'}), 404
+
+    data = request.get_json() or {}
+
+    if 'content' in data:
+        content = (data.get('content') or '').strip()
+        if not content:
+            return jsonify({'code': 400, 'message': '设定内容不能为空'}), 400
+        if len(content) > MAX_WB_CONTENT_LEN:
+            return jsonify({'code': 400, 'message': f'设定内容过长（最多 {MAX_WB_CONTENT_LEN} 字）'}), 400
+        entry.content = content
+    if 'keywords' in data:
+        kws = (data.get('keywords') or '').strip()
+        if len(kws) > MAX_WB_KEYWORDS_LEN:
+            return jsonify({'code': 400, 'message': f'关键词过长（最多 {MAX_WB_KEYWORDS_LEN} 字）'}), 400
+        entry.keywords = kws
+    if 'title' in data:
+        entry.title = (data.get('title') or '').strip()[:MAX_WB_TITLE_LEN]
+    if 'always_on' in data:
+        entry.always_on = bool(data.get('always_on'))
+    if 'enabled' in data:
+        entry.enabled = bool(data.get('enabled'))
+    if 'weight' in data:
+        try:
+            entry.weight = int(data.get('weight') or 0)
+        except (TypeError, ValueError):
+            pass
+
+    db.session.commit()
+    return jsonify({'code': 200, 'message': '已保存', 'data': entry.to_dict()})
+
+
+@persona_bp.route('/<int:persona_id>/worldbook/<int:entry_id>', methods=['DELETE'])
+@jwt_required()
+def delete_worldbook_entry(persona_id, entry_id):
+    """删除世界书条目"""
+    user_id = int(get_jwt_identity())
+    entry = _wb_entry_of(entry_id, user_id)
+    if not entry or entry.persona_id != persona_id:
+        return jsonify({'code': 404, 'message': '条目不存在'}), 404
+
+    db.session.delete(entry)
+    db.session.commit()
+    return jsonify({'code': 200, 'message': '已删除'})

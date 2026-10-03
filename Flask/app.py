@@ -170,6 +170,14 @@ def _ensure_schema_columns(app):
             if 'conversation_media_logs' not in inspector.get_table_names():
                 db.create_all()
                 app.logger.info('[迁移] 已创建 conversation_media_logs 表')
+            # conversation_summaries — 记忆宫殿：对话滚动摘要的每次压缩记录
+            if 'conversation_summaries' not in inspector.get_table_names():
+                db.create_all()
+                app.logger.info('[迁移] 已创建 conversation_summaries 表')
+            # worldbook_entries — 世界书：按需注入的设定条目
+            if 'worldbook_entries' not in inspector.get_table_names():
+                db.create_all()
+                app.logger.info('[迁移] 已创建 worldbook_entries 表')
             # messages.prompt_tokens / completion_tokens - 单条回复的 token 用量
             if 'messages' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('messages')}
@@ -228,6 +236,12 @@ def _ensure_schema_columns(app):
                     'frequency_penalty': 'FLOAT',
                     'presence_penalty': 'FLOAT',
                     'auto_play_voice': 'BOOLEAN',
+                    # 记忆宫殿（滚动摘要）
+                    'summary_threshold': 'INTEGER',
+                    'summary': 'TEXT',
+                    'summary_upto_id': 'INTEGER',
+                    # 提示词兜底开关
+                    'append_prompt_enabled': 'BOOLEAN',
                 }
                 for cname, ctype in conv_add.items():
                     if cname not in cols:

@@ -197,12 +197,6 @@
             <el-button type="primary" :loading="saving" @click="saveConfig">
               {{ editingId ? t('保存修改', 'Save') : t('创建配置', 'Create') }}
             </el-button>
-            <el-button v-if="editingId" :loading="testing" @click="testConfig">
-              {{ t('测试配置', 'Test Config') }}
-            </el-button>
-          </div>
-          <div v-if="testResult" class="test-result" :class="testResult.ok ? 'ok' : 'err'">
-            {{ testResult.msg }}
           </div>
         </div>
 
@@ -309,8 +303,6 @@ const drawerSize = ref('760px')
 const form = ref({ name: '', api_key: '', api_url: '', model: '', paramValues: {} })
 const paramSchema = ref([]) // 厂商专属额外字段（STT/TTS）
 const saving = ref(false)
-const testing = ref(false)
-const testResult = ref(null)
 const loading = ref(false)
 
 const isAudio = () => activeType.value === 'stt' || activeType.value === 'tts'
@@ -477,7 +469,6 @@ function selectVendor(v) {
     configuredModels.value = []
     availableModels.value = []
     fetchError.value = ''
-    testResult.value = null
   }
   loadSchema(activeType.value, v.brand)
 }
@@ -499,7 +490,6 @@ function startNew() {
   configuredModels.value = []
   availableModels.value = []
   fetchError.value = ''
-  testResult.value = null
 }
 
 async function saveConfig() {
@@ -551,23 +541,6 @@ async function saveConfig() {
     ElMessage.error(e.response?.data?.message || t('操作失败', 'Failed'))
   } finally {
     saving.value = false
-  }
-}
-
-async function testConfig() {
-  testing.value = true
-  testResult.value = null
-  try {
-    const res = await providersApi.test(editingId.value)
-    if (res.code === 200) {
-      testResult.value = { ok: true, msg: t('连接成功', 'Connection OK') }
-    } else {
-      testResult.value = { ok: false, msg: res.message || t('连接失败', 'Failed') }
-    }
-  } catch (e) {
-    testResult.value = { ok: false, msg: e.response?.data?.message || t('测试失败', 'Test failed') }
-  } finally {
-    testing.value = false
   }
 }
 
@@ -712,7 +685,6 @@ function switchType(type) {
   configuredModels.value = []
   availableModels.value = []
   fetchError.value = ''
-  testResult.value = null
   loadVendors()
   loadProviders()
 }
