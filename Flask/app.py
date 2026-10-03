@@ -162,6 +162,10 @@ def _ensure_schema_columns(app):
     try:
         inspector = inspect(db.engine)
         with app.app_context():
+            # prompt_tool_logs — 提示词工具使用审计（较新表，旧库可能缺失）
+            if 'prompt_tool_logs' not in inspector.get_table_names():
+                db.create_all()
+                app.logger.info('[迁移] 已创建 prompt_tool_logs 表')
             # messages.prompt_tokens / completion_tokens - 单条回复的 token 用量
             if 'messages' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('messages')}

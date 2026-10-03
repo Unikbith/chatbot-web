@@ -445,7 +445,10 @@ class PersonaMarketplace(db.Model):
 
     def to_dict(self, include_prompt=False, comment_count=None):
         """序列化。comment_count 可由调用方预先批量聚合传入，
-        避免逐卡片执行 count() 造成 N+1 查询。"""
+        避免逐卡片执行 count() 造成 N+1 查询。
+
+        can_edit 需调用方传入当前请求者是否为管理员（或卡片作者），
+        由接口层判定后回填 —— 前端不自行判断权限，一律以此字段为准。"""
         data = {
             'id': self.id,
             'name': self.name,
@@ -581,3 +584,43 @@ class Feedback(db.Model):
                 'gender': self.user.gender,
             }
         return data
+
+
+class PromptToolLog(db.Model):
+    """提示词工具使用审计记录。
+
+    记录谁在何时用了提示词工具、输入了什么、产出什么，供运营在管理后台
+    排查与追溯。只在生成成功时落库（失败请求不污染记录）。
+    字段刻意保留原始文本而非摘要：排查「生成了什么」时需要看到原文。
+    """
+    __tablename__ = 'prompt_tool_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    # character=人物设定 / image=生图改图
+    category = db.Column(db.String(20), nullable=False, index=True)
+    provider_id = db.Column(db.Integer)
+    model = db.Column(db.String(200))
+    custom_prompt = db.Column(db.Text)      # 用户自定义系统提示词（为空表示用默认）
+    base_info = db.Column(db.Text)          # 用户填写的基础信息
+    result = db.Column(db.Text)             # 模型生成结果
+    created_at = db.Column(db.DateTime, default=local_now, index=True)
+
+    user = db.relationship('User', backref='prompt_tool_logs')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'username': self.user.username if self.user else None,
+            'email': self.user.email if self.user else None,
+            'category': self.category,
+            'category_label': '人物设定' if self.category == 'character' else '生图/改图',
+            'provider_id': self.provider_id,
+            'model': self.model,
+            'custom_prompt': self.custom_prompt,
+            'has_custom_prompt': bool(self.custom_prompt),
+            'base_info': self.base_info,
+            'result': self.result,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }

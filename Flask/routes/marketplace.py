@@ -2,7 +2,7 @@
 import hashlib
 from datetime import date, datetime, timedelta
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from extensions import db
 from models import (
     PersonaMarketplace, MarketplaceVote, MarketplaceComment,
@@ -221,6 +221,18 @@ def ensure_system_adopts(user_id):
         db.session.commit()
 
 
+def _is_admin():
+    """当前请求是否携带管理员令牌。
+
+    公开接口不带 JWT，get_jwt() 会抛错；此时按「非管理员」处理，
+    避免公开页因为缺令牌而 500。
+    """
+    try:
+        return get_jwt().get('role') == 'admin'
+    except Exception:
+        return False
+
+
 def _apply_gender_filter(query, gender_tag):
     """按性别标签筛选人物卡。
 
@@ -343,6 +355,8 @@ def get_marketplace_persona_public(pid):
     d = persona.to_dict(include_prompt=True)
     d['creator_pseudonym'] = _pseudonym_for(persona.user_id, pid)
     d['creator_identicon_seed'] = _identicon_seed_for(persona.user_id, pid)
+    # 公开接口不暴露可编辑标志：未登录时无法判定归属，恒为不可编辑
+    d['can_edit'] = False
     return jsonify({'code': 200, 'data': d})
 
 
@@ -527,11 +541,14 @@ def list_marketplace():
         }
 
     items = []
+    is_admin = _is_admin()
     for p in page_items:
         d = p.to_dict(comment_count=comment_counts.get(p.id, 0))
         d['comment_count'] = comment_counts.get(p.id, 0)
         d['user_vote'] = user_votes.get(p.id)
         d['is_adopted'] = p.id in adopted_ids
+        # 前端不自行判断权限，一律以后端下发的 can_edit 为准
+        d['can_edit'] = p.user_id == user_id or is_admin
         items.append(d)
 
     return jsonify({
@@ -559,6 +576,8 @@ def get_marketplace_persona(pid):
     d['is_adopted'] = _is_adopted(pid, user_id)
     d['creator_pseudonym'] = _pseudonym_for(persona.user_id, pid)
     d['creator_identicon_seed'] = _identicon_seed_for(persona.user_id, pid)
+    # 详情页的编辑/删除按钮一律以此字段为准（管理员由后端放行）
+    d['can_edit'] = persona.user_id == user_id or _is_admin()
     return jsonify({'code': 200, 'data': d})
 
 
@@ -735,6 +754,65 @@ def adopt_persona(pid):
 
 
 # ── 删除（仅创建者） ────────────────────────────────────────────
+@marketplace_bp.route('/<int:pid>', methods=['PUT'])
+@jwt_required()
+def update_persona(pid):
+    """编辑卡片。创建者可编辑自己发布的卡片；管理员可编辑任意卡片。
+
+    只提交需要变更的字段（PATCH 语义），未出现的字段保持原值，
+    便于前端复用已有的发布表单做局部更新。
+    """
+    user_id = int(get_jwt_identity())
+    is_admin = get_jwt().get('role') == 'admin'
+    persona = PersonaMarketplace.query.get(pid)
+    if not persona:
+        return jsonify({'code': 404, 'message': '卡片不存在'}), 404
+    if persona.user_id != user_id and not is_admin:
+        return jsonify({'code': 403, 'message': '只能编辑自己发布的卡片'}), 403
+
+    data = request.get_json() or {}
+    # 与发布接口共用同一套字数上限，避免编辑绕过校验
+    name = data.get('name')
+    description = data.get('description')
+    system_prompt = data.get('system_prompt')
+    greeting = data.get('greeting')
+    avatar = data.get('avatar')
+    gender = data.get('gender')
+
+    if name is not None:
+        name = name.strip()
+        if not name or len(name) > PUB_NAME_MAX:
+            return jsonify({'code': 400, 'message': f'名称需 1-{PUB_NAME_MAX} 字'}), 400
+        persona.name = name
+    if description is not None:
+        description = description.strip()
+        if len(description) < PUB_DESC_MIN or len(description) > PUB_DESC_MAX:
+            return jsonify({'code': 400, 'message': f'描述需 {PUB_DESC_MIN}-{PUB_DESC_MAX} 字'}), 400
+        persona.description = description
+    if system_prompt is not None:
+        system_prompt = system_prompt.strip()
+        if len(system_prompt) < PUB_PROMPT_MIN or len(system_prompt) > PUB_PROMPT_MAX:
+            return jsonify({'code': 400, 'message': f'人设提示词需 {PUB_PROMPT_MIN}-{PUB_PROMPT_MAX} 字'}), 400
+        persona.system_prompt = system_prompt
+    if greeting is not None:
+        greeting = greeting.strip()
+        if not greeting or len(greeting) > PUB_GREETING_MAX:
+            return jsonify({'code': 400, 'message': f'开场白需 1-{PUB_GREETING_MAX} 字'}), 400
+        persona.greeting = greeting
+    if avatar is not None:
+        if not avatar.strip():
+            return jsonify({'code': 400, 'message': '请上传头像'}), 400
+        persona.avatar = avatar.strip()
+    if gender is not None:
+        gender = gender.strip()
+        if len(gender) > 20:
+            return jsonify({'code': 400, 'message': '性别自定义内容过长（最多20字）'}), 400
+        persona.gender = gender or None
+
+    db.session.commit()
+    return jsonify({'code': 200, 'message': '已保存', 'data': persona.to_dict()})
+
+
 @marketplace_bp.route('/<int:pid>', methods=['DELETE'])
 @jwt_required()
 def delete_persona(pid):

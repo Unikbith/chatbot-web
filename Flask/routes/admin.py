@@ -12,6 +12,7 @@ from extensions import db
 from services.rate_limit import limiter
 from models import (
     User, Conversation, Message, ModelProvider, PersonaTemplate, local_now,
+    PromptToolLog,
 )
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
@@ -555,3 +556,87 @@ def delete_marketplace_card(pid):
     db.session.delete(persona)
     db.session.commit()
     return jsonify({'code': 200, 'message': '已删除'})
+
+@admin_bp.route('/prompt-tool-logs', methods=['GET'])
+@admin_required
+def list_prompt_tool_logs():
+    """提示词工具使用记录：谁在何时用了、输入了什么、生成结果。
+
+    支持按用户、分类筛选，便于定向排查某个用户或某类生成内容。
+    """
+    page = max(1, int(request.args.get('page', 1)))
+    per_page = min(50, max(1, int(request.args.get('per_page', 20))))
+    user_id = request.args.get('user_id', type=int)
+    category = (request.args.get('category') or '').strip()
+
+    q = PromptToolLog.query
+    if user_id:
+        q = q.filter(PromptToolLog.user_id == user_id)
+    if category in ('character', 'image'):
+        q = q.filter(PromptToolLog.category == category)
+
+    pagination = q.order_by(PromptToolLog.created_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    return jsonify({
+        'code': 200,
+        'data': {
+            'items': [r.to_dict() for r in pagination.items],
+            'total': pagination.total,
+            'page': pagination.page,
+            'pages': pagination.pages,
+        }
+    })
+
+
+@admin_bp.route('/marketplace/<int:pid>', methods=['PUT'])
+@admin_required
+def update_marketplace_card_admin(pid):
+    """管理员编辑任意广场卡片（不受作者归属限制）。"""
+    from models import PersonaMarketplace
+    from routes.marketplace import (
+        PUB_NAME_MAX, PUB_DESC_MIN, PUB_DESC_MAX,
+        PUB_PROMPT_MIN, PUB_PROMPT_MAX, PUB_GREETING_MAX,
+    )
+    persona = PersonaMarketplace.query.get(pid)
+    if not persona:
+        return jsonify({'code': 404, 'message': '卡片不存在'}), 404
+
+    data = request.get_json() or {}
+    name = data.get('name')
+    description = data.get('description')
+    system_prompt = data.get('system_prompt')
+    greeting = data.get('greeting')
+    avatar = data.get('avatar')
+    gender = data.get('gender')
+
+    if name is not None:
+        name = name.strip()
+        if not name or len(name) > PUB_NAME_MAX:
+            return jsonify({'code': 400, 'message': f'名称需 1-{PUB_NAME_MAX} 字'}), 400
+        persona.name = name
+    if description is not None:
+        description = description.strip()
+        if len(description) < PUB_DESC_MIN or len(description) > PUB_DESC_MAX:
+            return jsonify({'code': 400, 'message': f'描述需 {PUB_DESC_MIN}-{PUB_DESC_MAX} 字'}), 400
+        persona.description = description
+    if system_prompt is not None:
+        system_prompt = system_prompt.strip()
+        if len(system_prompt) < PUB_PROMPT_MIN or len(system_prompt) > PUB_PROMPT_MAX:
+            return jsonify({'code': 400, 'message': f'人设提示词需 {PUB_PROMPT_MIN}-{PUB_PROMPT_MAX} 字'}), 400
+        persona.system_prompt = system_prompt
+    if greeting is not None:
+        greeting = greeting.strip()
+        if not greeting or len(greeting) > PUB_GREETING_MAX:
+            return jsonify({'code': 400, 'message': f'开场白需 1-{PUB_GREETING_MAX} 字'}), 400
+        persona.greeting = greeting
+    if avatar is not None and avatar.strip():
+        persona.avatar = avatar.strip()
+    if gender is not None:
+        gender = gender.strip()
+        if len(gender) > 20:
+            return jsonify({'code': 400, 'message': '性别内容过长（最多20字）'}), 400
+        persona.gender = gender or None
+
+    db.session.commit()
+    return jsonify({'code': 200, 'message': '已保存', 'data': persona.to_dict()})

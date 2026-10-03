@@ -26,6 +26,18 @@ const providerOptions = () => [
   ...(info.value.providers || [])
 ];
 
+
+// 当前所选提供商下的模型候选：[{id, name}]，name 为用户填写的展示名
+const modelOptions = (cat) => {
+  const pid = state[cat].providerId;
+  if (pid === null || pid === undefined) {
+    const fm = info.value.free_model;
+    return fm ? [{ id: fm, name: info.value.free_name || fm }] : [];
+  }
+  const p = (info.value.providers || []).find(x => x.id === pid);
+  return p?.models || [];
+};
+
 const onProviderChange = (cat) => {
   const s = state[cat];
   const pid = s.providerId;
@@ -156,7 +168,22 @@ onMounted(() => {
               >
                 <el-option v-for="p in providerOptions()" :key="p.id ?? 'free'" :value="p.id" :label="p.label" />
               </el-select>
-              <el-input v-model="state.character.model" :placeholder="t('模型 ID（可自定义）', 'Model ID (custom)')" />
+              <el-select
+                v-model="state.character.model"
+                :placeholder="t('选择模型', 'Select model')"
+                class="pt-model-select"
+                clearable
+                filterable
+                allow-create
+                default-first-option
+              >
+                <el-option
+                  v-for="m in modelOptions('character')"
+                  :key="m.id"
+                  :value="m.id"
+                  :label="m.name || m.id"
+                />
+              </el-select>
             </div>
           </div>
 
@@ -231,7 +258,22 @@ onMounted(() => {
               >
                 <el-option v-for="p in providerOptions()" :key="p.id ?? 'free'" :value="p.id" :label="p.label" />
               </el-select>
-              <el-input v-model="state.image.model" :placeholder="t('模型 ID（可自定义）', 'Model ID (custom)')" />
+              <el-select
+                v-model="state.image.model"
+                :placeholder="t('选择模型', 'Select model')"
+                class="pt-model-select"
+                clearable
+                filterable
+                allow-create
+                default-first-option
+              >
+                <el-option
+                  v-for="m in modelOptions('image')"
+                  :key="m.id"
+                  :value="m.id"
+                  :label="m.name || m.id"
+                />
+              </el-select>
             </div>
           </div>
 
@@ -358,6 +400,11 @@ onMounted(() => {
 .pt-row {
   display: flex;
   gap: 8px;
+}
+
+.pt-model-select {
+  flex: 1;
+  min-width: 0;
 }
 
 .pt-provider {
