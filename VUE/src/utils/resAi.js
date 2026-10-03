@@ -294,6 +294,19 @@ const personaApi = {
   async setDefault(id) {
     return resAi.put(`/api/personas/${id}/default`);
   },
+  // 世界书（设定条目）：按需注入的设定，命中关键词才送进模型，省 token
+  async listWorldBook(personaId) {
+    return resAi.get(`/api/personas/${personaId}/worldbook`);
+  },
+  async createWorldBook(personaId, data) {
+    return resAi.post(`/api/personas/${personaId}/worldbook`, data);
+  },
+  async updateWorldBook(personaId, entryId, data) {
+    return resAi.put(`/api/personas/${personaId}/worldbook/${entryId}`, data);
+  },
+  async removeWorldBook(personaId, entryId) {
+    return resAi.delete(`/api/personas/${personaId}/worldbook/${entryId}`);
+  },
   getDefaultId() {
     return localStorage.getItem('default_persona_id');
   },
@@ -355,6 +368,9 @@ const conversationApi = {
   },
   async togglePin(id) {
     return resAi.put(`/api/conversations/${id}/pin`);
+  },
+  async summaries(id) {
+    return resAi.get(`/api/conversations/${id}/summaries`);
   },
   async clear(id) {
     return resAi.delete(`/api/conversations/${id}/messages`);

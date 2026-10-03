@@ -838,6 +838,14 @@ async function handleConvoSettingsSaved(payload) {
       frequency_penalty: payload.frequency_penalty,
       presence_penalty: payload.presence_penalty,
       auto_play_voice: payload.auto_play_voice,
+      // 记忆宫殿：压缩触发阈值（1-20 轮）。此前漏转发，导致下拉选了也存不进去。
+      ...(payload.summary_threshold != null
+        ? { summary_threshold: Number(payload.summary_threshold) }
+        : {}),
+      // 提示词兜底：关闭时不再把后端写死的追加提示词拼到人物设定后面
+      ...(payload.append_prompt_enabled != null
+        ? { append_prompt_enabled: !!payload.append_prompt_enabled }
+        : {}),
     }
     const res = await conversationApi.update(currentConvId.value, update)
     if (res.code === 200) {
@@ -853,7 +861,8 @@ async function handleConvoSettingsSaved(payload) {
         currentPersona.value = personas.value.find(p => p.id == payload.persona_id) || currentPersona.value
       }
       loadConversations()
-      ElMessage.success(t('已保存', 'Saved'))
+      // 对话设置改成「改动即存」，自动保存时不再弹提示
+      if (!payload._silent) ElMessage.success(t('已保存', 'Saved'))
     }
   } catch (e) {
     ElMessage.error(t('保存失败', 'Save failed'))

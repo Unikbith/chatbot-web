@@ -2,7 +2,8 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
-from models import Conversation, Message, ModelProvider, PersonaTemplate, local_now, ConversationMediaLog
+from models import (Conversation, Message, ModelProvider, PersonaTemplate,
+                    local_now, ConversationMediaLog, ConversationSummary)
 
 
 def _log_media_if_changed(user_id, conv_id, data, old_bg, old_ai, old_user):
@@ -260,7 +261,20 @@ def update_conversation(conv_id):
         conv.presence_penalty = data['presence_penalty']
     if 'auto_play_voice' in data:
         conv.auto_play_voice = bool(data['auto_play_voice'])
-    
+    # 记忆宫殿：压缩触发阈值（1-20 轮），越界直接拒绝，避免非法值入库
+    if 'summary_threshold' in data:
+        raw = data['summary_threshold']
+        try:
+            thr = int(raw)
+        except (TypeError, ValueError):
+            return jsonify({'code': 400, 'message': '压缩轮数必须是 1-20 的整数'}), 400
+        if thr < 1 or thr > 20:
+            return jsonify({'code': 400, 'message': '压缩轮数必须在 1-20 之间'}), 400
+        conv.summary_threshold = thr
+    # 提示词兜底：默认关闭，开启后才会把后端写死的追加提示词接在人物设定之后
+    if 'append_prompt_enabled' in data:
+        conv.append_prompt_enabled = bool(data['append_prompt_enabled'])
+
     conv.updated_at = local_now()
     db.session.commit()
     
@@ -268,6 +282,34 @@ def update_conversation(conv_id):
         'code': 200,
         'message': '更新成功',
         'data': conv.to_dict()
+    })
+
+
+@conversation_bp.route('/<int:conv_id>/summaries', methods=['GET'])
+@jwt_required()
+def list_summaries(conv_id):
+    """记忆宫殿：列出该对话历次压缩产生的摘要（按压缩次数倒序）。"""
+    user_id = int(get_jwt_identity())
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).filter(
+        Conversation.deleted_at.is_(None)
+    ).first()
+    if not conv:
+        return jsonify({'code': 404, 'message': '对话不存在'}), 404
+
+    rows = ConversationSummary.query.filter_by(
+        conversation_id=conv.id, user_id=user_id
+    ).order_by(ConversationSummary.seq.desc()).all()
+
+    return jsonify({
+        'code': 200,
+        'data': {
+            'conversation_id': conv.id,
+            'threshold': conv.summary_threshold or 10,
+            'compress_count': len(rows),
+            'current_summary': conv.summary,
+            'summary_upto_id': conv.summary_upto_id,
+            'items': [r.to_dict() for r in rows],
+        }
     })
 
 

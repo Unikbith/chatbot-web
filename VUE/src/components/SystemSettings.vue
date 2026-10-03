@@ -42,13 +42,23 @@
                 </el-avatar>
                 <div class="avatar-meta">
                   <span class="avatar-label">{{ t('用户头像', 'User Avatar') }}</span>
-                  <el-upload
-                    :show-file-list="false"
-                    :before-upload="handleUserAvatarUpload"
-                    accept="image/*"
-                  >
-                    <el-button size="small">{{ t('更换', 'Change') }}</el-button>
-                  </el-upload>
+                  <div class="avatar-actions">
+                    <el-upload
+                      :show-file-list="false"
+                      :before-upload="handleUserAvatarUpload"
+                      accept="image/*"
+                    >
+                      <el-button size="small">{{ t('更换', 'Change') }}</el-button>
+                    </el-upload>
+                    <el-button
+                      size="small"
+                      plain
+                      :disabled="!userAvatarUrl"
+                      @click="clearAvatar('avatar')"
+                    >
+                      {{ t('清除', 'Clear') }}
+                    </el-button>
+                  </div>
                 </div>
               </div>
 
@@ -58,13 +68,23 @@
                 </el-avatar>
                 <div class="avatar-meta">
                   <span class="avatar-label">{{ t('AI 头像', 'AI Avatar') }}</span>
-                  <el-upload
-                    :show-file-list="false"
-                    :before-upload="handleAiAvatarUpload"
-                    accept="image/*"
-                  >
-                    <el-button size="small">{{ t('更换', 'Change') }}</el-button>
-                  </el-upload>
+                  <div class="avatar-actions">
+                    <el-upload
+                      :show-file-list="false"
+                      :before-upload="handleAiAvatarUpload"
+                      accept="image/*"
+                    >
+                      <el-button size="small">{{ t('更换', 'Change') }}</el-button>
+                    </el-upload>
+                    <el-button
+                      size="small"
+                      plain
+                      :disabled="!aiAvatarUrl"
+                      @click="clearAvatar('ai_avatar')"
+                    >
+                      {{ t('清除', 'Clear') }}
+                    </el-button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -629,6 +649,18 @@ async function handleUserAvatarUpload(file) {
   return false
 }
 
+/** 清除通用头像：后端 `data['avatar'] or None` 语义下传空串即真正置空 */
+async function clearAvatar(field) {
+  if (field !== 'avatar' && field !== 'ai_avatar') return
+  try {
+    await settingsApi.updateProfile({ [field]: '' })
+    emit('user-updated', { ...props.user, [field]: '' })
+    ElMessage.success(t('已清除', 'Cleared'))
+  } catch (e) {
+    ElMessage.error(t('操作失败', 'Failed'))
+  }
+}
+
 async function handleAiAvatarUpload(file) {
   try {
     const res = await uploadApi.uploadImage(file)
@@ -848,6 +880,13 @@ async function confirmDelete() {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* 更换 / 清除 并排 */
+.avatar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .avatar-label {

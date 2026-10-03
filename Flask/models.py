@@ -317,6 +317,14 @@ class Conversation(db.Model):
     frequency_penalty = db.Column(db.Float, nullable=True)
     presence_penalty = db.Column(db.Float, nullable=True)
     auto_play_voice = db.Column(db.Boolean, nullable=True)  # 对话独立：AI 回复自动播报
+    # 记忆宫殿（滚动摘要）：每 N 轮触发一次压缩，压缩后旧消息被替换为一条摘要
+    summary_threshold = db.Column(db.Integer, default=10, nullable=True)  # 触发阈值，1-20 轮，默认 10
+    summary = db.Column(db.Text, nullable=True)             # 当前滚动摘要正文（最新一次压缩结果）
+    summary_upto_id = db.Column(db.Integer, nullable=True)  # 已摘要到的最后一条 message id
+    # 提示词兜底：开启后，后端写死的 GLOBAL_APPEND_PROMPT 才会接在人物设定之后。
+    # 默认关闭 —— 那段兜底词有几千 token，默认带上会显著抬高每轮输入成本，
+    # 只有在「AI 生成不出想要的内容」时才由用户自行打开。
+    append_prompt_enabled = db.Column(db.Boolean, default=False, nullable=True)
     deleted_at = db.Column(db.DateTime, nullable=True)
     settings = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=local_now)
@@ -346,10 +354,90 @@ class Conversation(db.Model):
             'frequency_penalty': self.frequency_penalty,
             'presence_penalty': self.presence_penalty,
             'auto_play_voice': self.auto_play_voice,
+            'summary_threshold': self.summary_threshold,
+            'summary': self.summary,
+            'summary_upto_id': self.summary_upto_id,
+            'append_prompt_enabled': bool(self.append_prompt_enabled),
             'persona_name': self.persona.name if self.persona else None,
             'persona_avatar': self.persona.avatar if self.persona else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class ConversationSummary(db.Model):
+    """对话压缩记录（记忆宫殿）。
+
+    每次触发滚动摘要时落一条，记录「第几次压缩」与压缩后的完整摘要正文，
+    供前端记忆宫殿展示压缩次数与每一次压缩的结果。
+    """
+    __tablename__ = 'conversation_summaries'
+
+    id = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    seq = db.Column(db.Integer, nullable=False, default=1)           # 第几次压缩（从 1 开始）
+    content = db.Column(db.Text, nullable=False)                      # 本次压缩后的完整摘要正文
+    msg_from = db.Column(db.Integer, nullable=True)                   # 本次被压缩的首条 message id
+    msg_to = db.Column(db.Integer, nullable=True)                     # 本次被压缩的末条 message id
+    message_count = db.Column(db.Integer, nullable=False, default=0)  # 本次压缩涉及的消息条数
+    created_at = db.Column(db.DateTime, default=local_now, index=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'conversation_id': self.conversation_id,
+            'seq': self.seq,
+            'content': self.content,
+            'msg_from': self.msg_from,
+            'msg_to': self.msg_to,
+            'message_count': self.message_count,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class WorldBookEntry(db.Model):
+    """世界书条目（设定条目 / Lorebook Entry）。
+
+    设计目标：把一大块「永远全量重发」的角色设定，拆成若干**按需注入**的小条目，
+    只有当最近对话里出现关键词时才把该条目送进模型 —— 既省 token，又能写更多设定。
+
+    对用户是「零配置」的：不填任何条目时行为与以前完全一致（整块设定常驻）。
+
+    字段说明：
+      persona_id  —— 归属角色；为 None 表示「全局条目」（对当前用户所有角色生效）
+      keywords    —— 触发关键词，逗号/换行分隔；中文无空格分词，用子串匹配最稳
+      content     —— 命中后注入的设定正文
+      always_on   —— True 表示常驻（每次都注入，用于核心人设）；False 表示按需
+      enabled     —— 停用开关（保留条目但不注入）
+      weight      —— 命中过多、超出预算时的优先级，越大越优先
+    """
+    __tablename__ = 'worldbook_entries'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    persona_id = db.Column(db.Integer, db.ForeignKey('persona_templates.id'), nullable=True, index=True)
+    title = db.Column(db.String(200), nullable=False, default='')      # 条目名，仅用于管理界面展示
+    keywords = db.Column(db.Text, nullable=False, default='')          # 触发关键词，逗号/换行分隔
+    content = db.Column(db.Text, nullable=False, default='')           # 命中后注入的设定正文
+    always_on = db.Column(db.Boolean, default=False)                   # 常驻（每次都注入）
+    enabled = db.Column(db.Boolean, default=True)                      # 是否启用
+    weight = db.Column(db.Integer, default=0)                          # 预算不足时的优先级
+    created_at = db.Column(db.DateTime, default=local_now)
+    updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'persona_id': self.persona_id,
+            'title': self.title,
+            'keywords': self.keywords,
+            'content': self.content,
+            'always_on': bool(self.always_on),
+            'enabled': bool(self.enabled),
+            'weight': self.weight or 0,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
 
 

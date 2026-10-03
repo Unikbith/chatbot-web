@@ -141,6 +141,52 @@
           </el-form-item>
         </div>
 
+        <!-- 世界书：按需注入的设定条目（仅已保存的角色可管理） -->
+        <div v-if="editingPersona" class="form-card wb-card">
+          <div class="wb-head">
+            <div>
+              <div class="wb-title">世界书（设定条目）</div>
+              <div class="wb-desc">
+                把只在特定话题才用得上的设定拆成条目，聊到相关词才加载 —— 省 token，还能写更多设定。
+                <b>常驻</b>条目每次都加载（放核心人设）；其余按触发词命中才加载。
+                <b>一条都不加也不影响</b>，照常聊天。
+              </div>
+            </div>
+            <el-button size="small" type="primary" plain @click="openWbCreate">
+              <el-icon><Plus /></el-icon> 添加条目
+            </el-button>
+          </div>
+
+          <div v-if="wbLoading" class="wb-empty">加载中…</div>
+          <div v-else-if="!wbEntries.length" class="wb-empty">
+            暂无条目 —— 当前全部设定都在上面的系统提示词里，每次对话都会整块发送
+          </div>
+          <div v-else class="wb-list">
+            <div v-for="e in wbEntries" :key="e.id" class="wb-item">
+              <div class="wb-item-main">
+                <div class="wb-item-title">
+                  <span class="wb-tag" :class="{ 'is-on': e.always_on }">
+                    {{ e.always_on ? '常驻' : '按需' }}
+                  </span>
+                  <span class="wb-name">{{ e.title || '未命名条目' }}</span>
+                  <span v-if="!e.enabled" class="wb-tag is-off">已停用</span>
+                </div>
+                <div v-if="e.keywords" class="wb-kw">触发词：{{ e.keywords }}</div>
+                <div class="wb-content">{{ e.content }}</div>
+              </div>
+              <div class="wb-ops">
+                <el-switch
+                  v-model="e.enabled"
+                  size="small"
+                  @change="(val) => toggleWb(e, val)"
+                />
+                <el-button size="small" text @click="openWbEdit(e)">编辑</el-button>
+                <el-button size="small" text type="danger" @click="removeWb(e)">删除</el-button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <el-form-item>
           <el-checkbox v-model="form.is_default">设为默认角色</el-checkbox>
         </el-form-item>
@@ -150,6 +196,49 @@
         <el-button type="primary" @click="savePersona" :loading="saving">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 世界书条目编辑（append-to-body，避免被外层弹窗裁剪） -->
+    <el-dialog
+      v-model="wbDialogVisible"
+      :title="wbEditing ? '编辑设定条目' : '添加设定条目'"
+      width="min(560px, 94vw)"
+      append-to-body
+    >
+      <el-form :model="wbForm" label-position="top">
+        <el-form-item label="条目名称（方便自己认，不发给 AI）">
+          <el-input v-model="wbForm.title" placeholder="如：童年经历 / 咖啡馆设定" maxlength="200" />
+        </el-form-item>
+        <el-form-item label="触发词（逗号分隔，最近对话里出现就加载本条）">
+          <el-input
+            v-model="wbForm.keywords"
+            type="textarea"
+            :rows="2"
+            :autosize="false"
+            resize="none"
+            placeholder="如：童年,妈妈,小时候"
+            maxlength="1000"
+          />
+        </el-form-item>
+        <el-form-item label="设定内容">
+          <el-input
+            v-model="wbForm.content"
+            type="textarea"
+            :rows="6"
+            :autosize="false"
+            resize="none"
+            placeholder="命中触发词后才注入的设定正文…"
+            maxlength="4000"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-checkbox v-model="wbForm.always_on">常驻（每次对话都加载，用于核心人设）</el-checkbox>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="wbDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveWbEntry" :loading="wbSaving">保存</el-button>
+      </template>
+    </el-dialog>
   </el-drawer>
 </template>
 
@@ -157,7 +246,7 @@
 import logger from '@/utils/logger';
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { MagicStick, Upload } from '@element-plus/icons-vue'
+import { MagicStick, Upload, Plus } from '@element-plus/icons-vue'
 import { personaApi, uploadApi } from '../utils/resAi'
 
 const props = defineProps({
@@ -240,6 +329,7 @@ function editPersona(persona) {
     persona_type: persona.persona_type || 'ai',
   })
   editDialogVisible.value = true
+  loadWorldBook()
 }
 
 /**
@@ -263,6 +353,115 @@ function openCreateDialog() {
 
 function resetForm() {
   Object.assign(form, defaultForm)
+  wbEntries.value = []
+}
+
+/* ---------- 世界书（设定条目） ---------- */
+const wbEntries = ref([])
+const wbLoading = ref(false)
+const wbDialogVisible = ref(false)
+const wbEditing = ref(null)
+const wbSaving = ref(false)
+const defaultWbForm = {
+  title: '',
+  keywords: '',
+  content: '',
+  always_on: false,
+}
+const wbForm = reactive({ ...defaultWbForm })
+
+async function loadWorldBook() {
+  if (!editingPersona.value) return
+  wbLoading.value = true
+  try {
+    const res = await personaApi.listWorldBook(editingPersona.value.id)
+    wbEntries.value = res.code === 200 ? (res.data || []) : []
+  } catch (e) {
+    wbEntries.value = []
+  } finally {
+    wbLoading.value = false
+  }
+}
+
+function openWbCreate() {
+  wbEditing.value = null
+  Object.assign(wbForm, defaultWbForm)
+  wbDialogVisible.value = true
+}
+
+function openWbEdit(entry) {
+  wbEditing.value = entry
+  Object.assign(wbForm, {
+    title: entry.title || '',
+    keywords: entry.keywords || '',
+    content: entry.content || '',
+    always_on: !!entry.always_on,
+  })
+  wbDialogVisible.value = true
+}
+
+async function saveWbEntry() {
+  if (!editingPersona.value) return
+  if (!wbForm.content.trim()) {
+    ElMessage.warning('请填写设定内容')
+    return
+  }
+  if (!wbForm.always_on && !wbForm.keywords.trim()) {
+    ElMessage.warning('非常驻条目请至少填一个触发词（或勾「常驻」）')
+    return
+  }
+  wbSaving.value = true
+  try {
+    const payload = {
+      title: wbForm.title.trim(),
+      keywords: wbForm.keywords.trim(),
+      content: wbForm.content.trim(),
+      always_on: !!wbForm.always_on,
+    }
+    const pid = editingPersona.value.id
+    const res = wbEditing.value
+      ? await personaApi.updateWorldBook(pid, wbEditing.value.id, payload)
+      : await personaApi.createWorldBook(pid, payload)
+    if (res.code === 200) {
+      ElMessage.success(wbEditing.value ? '已保存' : '已添加')
+      wbDialogVisible.value = false
+      loadWorldBook()
+    } else {
+      ElMessage.error(res.message || '保存失败')
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || '保存失败')
+  } finally {
+    wbSaving.value = false
+  }
+}
+
+async function toggleWb(entry, val) {
+  if (!editingPersona.value) return
+  try {
+    await personaApi.updateWorldBook(editingPersona.value.id, entry.id, { enabled: !!val })
+  } catch (e) {
+    entry.enabled = !val
+    ElMessage.error('操作失败')
+  }
+}
+
+async function removeWb(entry) {
+  if (!editingPersona.value) return
+  try {
+    await ElMessageBox.confirm(`确定删除条目「${entry.title || '未命名条目'}」吗？`, '确认删除', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+  } catch (e) {
+    return
+  }
+  const res = await personaApi.removeWorldBook(editingPersona.value.id, entry.id)
+  if (res.code === 200) {
+    ElMessage.success('已删除')
+    loadWorldBook()
+  }
 }
 
 async function handleAvatarUpload(file) {
@@ -506,6 +705,121 @@ function confirmDelete(id) {
 .form-card :deep(.el-input__wrapper) {
   background: var(--bg, #ffffff);
   border-radius: 10px;
+}
+
+/* ===== 世界书（设定条目） ===== */
+.wb-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.wb-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #303133);
+  margin-bottom: 4px;
+}
+
+.wb-desc {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-secondary, #606266);
+}
+
+.wb-desc b {
+  color: var(--brand, #c98a5a);
+  font-weight: 600;
+}
+
+.wb-empty {
+  font-size: 12px;
+  color: var(--text-muted, #909399);
+  padding: 10px 0 2px;
+}
+
+.wb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 34vh;
+  overflow-y: auto;
+}
+
+.wb-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #e4e7ed);
+  border-radius: 10px;
+  background: var(--bg, #ffffff);
+}
+
+.wb-item-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.wb-item-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.wb-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #303133);
+}
+
+.wb-tag {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--surface-hover, #eef1f6);
+  color: var(--text-secondary, #606266);
+}
+
+.wb-tag.is-on {
+  background: var(--brand, #c98a5a);
+  color: #fff;
+}
+
+.wb-tag.is-off {
+  background: #fde2e2;
+  color: #f56c6c;
+}
+
+.wb-kw {
+  font-size: 12px;
+  color: var(--text-secondary, #606266);
+  margin-bottom: 4px;
+}
+
+.wb-content {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted, #909399);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wb-ops {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 /* ===== 移动端响应式 ===== */
