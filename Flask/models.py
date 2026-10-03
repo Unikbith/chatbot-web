@@ -624,3 +624,41 @@ class PromptToolLog(db.Model):
             'result': self.result,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class ConversationMediaLog(db.Model):
+    """对话素材（背景图 / AI 头像 / 用户头像）设置历史。
+
+    每个对话可独立设置背景图、AI 头像、用户头像。用户在前端「清除」时，
+    后端按保留语义不真正置空（见 conversation.update_conversation），因此这些素材
+    始终有值；本表记录每一次「设置/变更」的历史，供管理员在后台追溯与按需清理。
+    只在设置非空值且较上次有变化时落库，避免重复保存刷屏。
+    """
+    __tablename__ = 'conversation_media_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False, index=True)
+    # background=背景图 / ai_avatar=AI 头像 / user_avatar=用户头像
+    media_type = db.Column(db.String(20), nullable=False, index=True)
+    value = db.Column(db.Text)                 # data-URI 或 URL
+    created_at = db.Column(db.DateTime, default=local_now, index=True)
+
+    user = db.relationship('User', backref='conversation_media_logs')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'username': self.user.username if self.user else None,
+            'email': self.user.email if self.user else None,
+            'conversation_id': self.conversation_id,
+            'media_type': self.media_type,
+            'media_type_label': {
+                'background': '背景图',
+                'ai_avatar': 'AI 头像',
+                'user_avatar': '用户头像',
+            }.get(self.media_type, self.media_type),
+            'value': self.value,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }

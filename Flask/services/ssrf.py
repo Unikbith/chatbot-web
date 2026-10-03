@@ -43,7 +43,13 @@ def classify_url(url):
     """判断 URL 目标是否敏感。安全返回 None，否则返回风险描述。"""
     if not url:
         return None
-    host = urlparse(url).hostname
+    parsed = urlparse(url)
+    # 协议白名单：仅允许 http/https。file:/// gopher:// 等非 HTTP 协议既无必要
+    # 也不安全（file 可读本地文件、gopher 可构造任意 TCP payload），一律拦截。
+    scheme = (parsed.scheme or '').lower()
+    if scheme and scheme not in ('http', 'https'):
+        return f"不支持的协议: {scheme or '(空)'}，仅允许 http/https"
+    host = parsed.hostname
     if not host:
         return None
     for ip in resolve_ips(host):

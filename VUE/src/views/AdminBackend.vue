@@ -458,11 +458,18 @@
         </el-tab-pane>
 
         <el-tab-pane :label="t('提示词记录', 'Prompt Tool Logs')" name="promptLogs">
-          <div class="admin-toolbar">
-            <span class="admin-title">{{ t('提示词工具使用记录', 'Prompt Tool Usage') }}</span>
-            <el-button size="small" :icon="Refresh" @click="loadPromptLogs">{{ t('刷新', 'Refresh') }}</el-button>
+          <div class="admin-toolbar pl-toolbar">
+            <div class="admin-title pl-title">
+              <span class="pl-title-icon"><el-icon><Document /></el-icon></span>
+              <span>{{ t('提示词工具使用记录', 'Prompt Tool Usage') }}</span>
+              <span v-if="plTotal > 0" class="pl-title-count">{{ plTotal }}</span>
+            </div>
+            <div class="toolbar-actions">
+              <el-button size="small" :icon="Refresh" @click="loadPromptLogs">{{ t('刷新', 'Refresh') }}</el-button>
+            </div>
           </div>
-          <div class="filter-panel">
+
+          <div class="filter-panel pl-filter">
             <el-input
               v-model="plFilters.userId"
               :placeholder="t('按用户 ID 筛选', 'Filter by user ID')"
@@ -470,7 +477,9 @@
               clearable
               class="filter-input"
               @input="applyPlFilters"
-            />
+            >
+              <template #prefix><el-icon><Search /></el-icon></template>
+            </el-input>
             <el-select
               v-model="plFilters.category"
               :placeholder="t('类型', 'Category')"
@@ -484,29 +493,42 @@
             </el-select>
           </div>
 
-          <el-table :data="promptLogs" v-loading="plLoading" size="small" stripe>
-            <el-table-column prop="id" label="ID" width="60" align="center" />
-            <el-table-column prop="username" :label="t('用户', 'User')" width="110" show-overflow-tooltip />
-            <el-table-column prop="email" :label="t('邮箱', 'Email')" width="150" show-overflow-tooltip />
-            <el-table-column prop="category_label" :label="t('类型', 'Type')" width="90" align="center" />
-            <el-table-column prop="model" :label="t('模型', 'Model')" width="130" show-overflow-tooltip />
-            <el-table-column :label="t('自定义提示词', 'Custom prompt')" width="100" align="center">
-              <template #default="{ row }">
-                <el-tag v-if="row.has_custom_prompt" type="warning" size="small">{{ t('有', 'Yes') }}</el-tag>
-                <span v-else>-</span>
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('内容', 'Content')" width="90" align="center">
-              <template #default="{ row }">
-                <el-button size="small" text type="primary" @click="viewPlRow(row)">
-                  {{ t('查看', 'View') }}
-                </el-button>
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('时间', 'Time')" width="150">
-              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
-            </el-table-column>
-          </el-table>
+          <div class="pl-table-card">
+            <el-table :data="promptLogs" v-loading="plLoading" size="small" stripe class="pl-table">
+              <el-table-column prop="id" label="ID" width="64" align="center" />
+              <el-table-column prop="username" :label="t('用户', 'User')" width="120" show-overflow-tooltip />
+              <el-table-column prop="email" :label="t('邮箱', 'Email')" width="160" show-overflow-tooltip />
+              <el-table-column :label="t('类型', 'Type')" width="112" align="center">
+                <template #default="{ row }">
+                  <span class="pl-type-pill" :class="row.category === 'image' ? 'is-image' : 'is-character'">
+                    {{ row.category_label }}
+                  </span>
+                </template>
+              </el-table-column>
+              <el-table-column :label="t('模型', 'Model')" width="150" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <span class="pl-model-tag">{{ row.model || '-' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column :label="t('自定义提示词', 'Custom prompt')" width="112" align="center">
+                <template #default="{ row }">
+                  <el-tag v-if="row.has_custom_prompt" type="warning" size="small" effect="light">{{ t('有', 'Yes') }}</el-tag>
+                  <span v-else class="pl-muted">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column :label="t('内容', 'Content')" width="96" align="center">
+                <template #default="{ row }">
+                  <el-button size="small" text type="primary" :icon="View" @click="viewPlRow(row)">
+                    {{ t('查看', 'View') }}
+                  </el-button>
+                </template>
+              </el-table-column>
+              <el-table-column :label="t('时间', 'Time')" width="150">
+                <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+              </el-table-column>
+            </el-table>
+          </div>
+
           <el-pagination
             v-if="plTotal > 0"
             v-model:current-page="plPage"
@@ -514,6 +536,68 @@
             :total="plTotal"
             layout="total, prev, pager, next"
             @current-change="loadPromptLogs"
+            class="pl-pagination"
+          />
+        </el-tab-pane>
+
+        <el-tab-pane :label="t('对话素材记录', 'Media History')" name="mediaLogs">
+          <div class="admin-toolbar">
+            <span class="admin-title">{{ t('对话素材设置历史', 'Conversation Media History') }}</span>
+            <el-button size="small" type="danger" :disabled="!mediaSelected.length" :icon="Delete" @click="deleteMediaLogs">
+              {{ t('删除选中', 'Delete Selected') }} ({{ mediaSelected.length }})
+            </el-button>
+            <el-button size="small" :icon="Refresh" @click="loadMediaLogs">{{ t('刷新', 'Refresh') }}</el-button>
+          </div>
+          <div class="filter-panel">
+            <el-input
+              v-model="mediaFilters.userId"
+              :placeholder="t('按用户 ID 筛选', 'Filter by user ID')"
+              size="small"
+              clearable
+              class="filter-input"
+              @input="applyMediaFilters"
+            />
+            <el-select
+              v-model="mediaFilters.mediaType"
+              :placeholder="t('类型', 'Type')"
+              clearable
+              size="small"
+              class="filter-select"
+              @change="applyMediaFilters"
+            >
+              <el-option :label="t('背景图', 'Background')" value="background" />
+              <el-option :label="t('AI 头像', 'AI Avatar')" value="ai_avatar" />
+              <el-option :label="t('用户头像', 'User Avatar')" value="user_avatar" />
+            </el-select>
+          </div>
+
+          <el-table :data="mediaLogs" v-loading="mediaLoading" size="small" stripe @selection-change="onMediaSelectionChange">
+            <el-table-column type="selection" width="44" />
+            <el-table-column prop="id" label="ID" width="60" align="center" />
+            <el-table-column prop="username" :label="t('用户', 'User')" width="100" show-overflow-tooltip />
+            <el-table-column prop="conversation_id" :label="t('对话ID', 'Conv ID')" width="90" align="center" />
+            <el-table-column prop="media_type_label" :label="t('类型', 'Type')" width="90" align="center" />
+            <el-table-column :label="t('预览', 'Preview')" width="64" align="center">
+              <template #default="{ row }">
+                <el-image :src="row.value" fit="cover" style="width:44px;height:44px;border-radius:6px" :preview-src-list="[row.value]" :initial-index="0" :z-index="3000" />
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('来源', 'Source')" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span class="media-value-preview">{{ row.value }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('时间', 'Time')" width="150">
+              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+            </el-table-column>
+          </el-table>
+          <el-pagination
+            v-if="mediaTotal > 0"
+            v-model:current-page="mediaPage"
+            :page-size="mediaPerPage"
+            :total="mediaTotal"
+            layout="total, prev, pager, next"
+            @current-change="loadMediaLogs"
             style="margin-top: 12px; justify-content: flex-end"
           />
         </el-tab-pane>
@@ -563,22 +647,34 @@
         append-to-body
       >
         <div v-if="plDetail" class="pl-detail">
-          <p class="pl-detail-meta">
-            {{ t('用户', 'User') }}: <b>{{ plDetail.username }}</b> ({{ plDetail.email }})<br />
-            {{ t('类型', 'Type') }}: {{ plDetail.category_label }} ·
-            {{ t('模型', 'Model') }}: {{ plDetail.model }}<br />
-            {{ t('时间', 'Time') }}: {{ formatTime(plDetail.created_at) }}
-          </p>
+          <div class="pl-meta-bar">
+            <div class="pl-meta-item">
+              <span class="pl-meta-key">{{ t('用户', 'User') }}</span>
+              <span class="pl-meta-val">{{ plDetail.username }} <i class="pl-meta-sub">{{ plDetail.email }}</i></span>
+            </div>
+            <div class="pl-meta-item">
+              <span class="pl-meta-key">{{ t('类型', 'Type') }}</span>
+              <span class="pl-meta-val">{{ plDetail.category_label }}</span>
+            </div>
+            <div class="pl-meta-item">
+              <span class="pl-meta-key">{{ t('模型', 'Model') }}</span>
+              <span class="pl-meta-val">{{ plDetail.model || '-' }}</span>
+            </div>
+            <div class="pl-meta-item">
+              <span class="pl-meta-key">{{ t('时间', 'Time') }}</span>
+              <span class="pl-meta-val">{{ formatTime(plDetail.created_at) }}</span>
+            </div>
+          </div>
           <div class="pl-detail-block">
-            <div class="pl-detail-label">{{ t('自定义提示词', 'Custom prompt') }}</div>
+            <div class="pl-detail-label"><span class="pl-dot is-warn"></span>{{ t('自定义提示词', 'Custom prompt') }}</div>
             <pre class="pl-detail-text">{{ plDetail.custom_prompt || t('（未使用自定义，使用系统默认）', '(none — system default used)') }}</pre>
           </div>
           <div class="pl-detail-block">
-            <div class="pl-detail-label">{{ t('基础信息', 'Base info') }}</div>
+            <div class="pl-detail-label"><span class="pl-dot"></span>{{ t('基础信息', 'Base info') }}</div>
             <pre class="pl-detail-text">{{ plDetail.base_info || t('（未填写）', '(empty)') }}</pre>
           </div>
           <div class="pl-detail-block">
-            <div class="pl-detail-label">{{ t('生成结果', 'Generated result') }}</div>
+            <div class="pl-detail-label"><span class="pl-dot is-brand"></span>{{ t('生成结果', 'Generated result') }}</div>
             <pre class="pl-detail-text">{{ plDetail.result }}</pre>
           </div>
         </div>
@@ -812,7 +908,7 @@
 import { ref, reactive, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Back, SwitchButton, Monitor, View, Download, Delete, Edit, ChatLineRound } from '@element-plus/icons-vue'
+import { Refresh, Back, SwitchButton, Monitor, View, Download, Delete, Edit, ChatLineRound, Document, Search } from '@element-plus/icons-vue'
 import { adminApi, resAi } from '@/utils/resAi'
 import logger from '@/utils/logger'
 import { t } from '../i18n'
@@ -1352,6 +1448,60 @@ function viewPlRow(row) {
   plDetailVisible.value = true
 }
 
+// ========== 对话素材设置历史 ==========
+const mediaLogs = ref([])
+const mediaLoading = ref(false)
+const mediaPage = ref(1)
+const mediaPerPage = 20
+const mediaTotal = ref(0)
+const mediaSelected = ref([])
+const mediaFilters = ref({ userId: '', mediaType: '' })
+
+async function loadMediaLogs() {
+  mediaLoading.value = true
+  try {
+    const res = await adminApi.conversationMediaLogs(
+      mediaPage.value, mediaPerPage,
+      mediaFilters.value.userId.trim(), mediaFilters.value.mediaType
+    )
+    if (res.code === 200) {
+      mediaLogs.value = res.data.items || []
+      mediaTotal.value = res.data.total || 0
+    }
+  } catch (e) {
+    logger.error('加载对话素材历史失败', e)
+    ElMessage.error(t('加载对话素材历史失败', 'Failed to load media history'))
+  } finally {
+    mediaLoading.value = false
+  }
+}
+
+function applyMediaFilters() {
+  mediaPage.value = 1
+  loadMediaLogs()
+}
+
+function onMediaSelectionChange(rows) {
+  mediaSelected.value = (rows || []).map(r => r.id)
+}
+
+async function deleteMediaLogs() {
+  if (!mediaSelected.value.length) return
+  try {
+    const res = await adminApi.deleteConversationMediaLogs(mediaSelected.value)
+    if (res.code === 200) {
+      ElMessage.success(t('已删除选中记录', 'Selected records deleted'))
+      mediaSelected.value = []
+      loadMediaLogs()
+    } else {
+      ElMessage.warning(res.message || t('删除失败', 'Delete failed'))
+    }
+  } catch (e) {
+    logger.error('删除对话素材历史失败', e)
+    ElMessage.error(t('删除失败', 'Delete failed'))
+  }
+}
+
 async function previewMpCard(card) {
   if (!card) return
   mpDetailVisible.value = true
@@ -1449,6 +1599,7 @@ watch(activeTab, (val) => {
 // 切换标签页时按需加载：提示词记录首次进入才拉取，避免首屏多余请求
 function onTabChange(name) {
   if (name === 'promptLogs') loadPromptLogs()
+  if (name === 'mediaLogs') loadMediaLogs()
 }
 </script>
 
@@ -2202,15 +2353,12 @@ function onTabChange(name) {
 }
 
 /* 提示词记录详情 */
-.pl-detail-meta {
-  margin: 0 0 14px;
-  font-size: 13px;
-  line-height: 1.7;
-  color: var(--text-secondary, #6a5d53);
-}
 .pl-detail-block { margin-bottom: 14px; }
 .pl-detail-label {
-  margin-bottom: 5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--text-primary, #2a2522);
@@ -2229,5 +2377,144 @@ function onTabChange(name) {
   background: var(--surface-hover, #ebe4de);
   border: 1px solid var(--border-color, #e7ded6);
   border-radius: 8px;
+}
+
+/* ===== 提示词记录 Tab 美化 ===== */
+.pl-toolbar { animation: pl-fade-up 0.42s ease both; }
+.pl-filter { animation: pl-fade-up 0.42s ease 0.06s both; }
+.pl-table-card {
+  animation: pl-fade-up 0.42s ease 0.12s both;
+  padding: 6px 12px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-color, #e9e0d4);
+  border-radius: 12px;
+}
+
+@keyframes pl-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pl-toolbar, .pl-filter, .pl-table-card { animation: none; }
+}
+
+.pl-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pl-title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(176, 106, 46, 0.12);
+  color: var(--brand, #b06a2e);
+  font-size: 16px;
+}
+.pl-title-count {
+  margin-left: 2px;
+  padding: 1px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand, #b06a2e);
+  background: rgba(176, 106, 46, 0.12);
+  border-radius: 999px;
+}
+
+.pl-filter .filter-input { width: 220px; }
+.pl-filter .filter-select { width: 160px; }
+
+.pl-table :deep(.el-table__row) {
+  transition: background 0.15s ease;
+}
+.pl-table :deep(.el-table__row:hover > td) {
+  background: var(--surface-hover, #faf3ea) !important;
+}
+
+/* 类型药丸 */
+.pl-type-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 11px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.pl-type-pill.is-character {
+  color: #b06a2e;
+  background: rgba(176, 106, 46, 0.12);
+}
+.pl-type-pill.is-image {
+  color: #2c8c7c;
+  background: rgba(44, 140, 124, 0.12);
+}
+
+.pl-model-tag {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--text-secondary, #6a5d53);
+}
+.pl-muted { color: var(--text-muted, #b9a98f); }
+
+.pl-pagination {
+  margin-top: 14px;
+  justify-content: flex-end;
+}
+
+/* 详情对话框：元信息条 */
+.pl-meta-bar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  background: var(--surface-hover, #faf3ea);
+  border: 1px solid var(--border-color, #e9e0d4);
+  border-radius: 10px;
+}
+.pl-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pl-meta-key {
+  font-size: 11.5px;
+  color: var(--text-secondary, #6a5d53);
+  letter-spacing: 0.02em;
+}
+.pl-meta-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #2a2522);
+  word-break: break-word;
+}
+.pl-meta-sub {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 11.5px;
+  color: var(--text-muted, #a9815a);
+  margin-left: 6px;
+}
+
+/* 详情块标签前的彩色圆点 */
+.pl-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted, #a9815a);
+  flex: none;
+}
+.pl-dot.is-brand { background: var(--brand, #b06a2e); }
+.pl-dot.is-warn { background: #d9912b; }
+
+@media (max-width: 560px) {
+  .pl-meta-bar { grid-template-columns: 1fr; }
 }
 </style>

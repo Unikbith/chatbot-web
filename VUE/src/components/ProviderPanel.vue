@@ -123,7 +123,7 @@
 
           <div class="form-row">
             <label class="form-label">{{ t('配置 ID（名称）', 'ID / Name') }}</label>
-            <el-input v-model="form.name" :placeholder="t('如：我的 DeepSeek', 'e.g. My DeepSeek')" />
+            <el-input v-model="form.name" :placeholder="t('如：我的 DeepSeek', 'e.g. My DeepSeek')" @input="autoName = ''" />
           </div>
 
           <div class="form-row">
@@ -430,8 +430,9 @@ async function selectProvider(p) {
   if (!p) return
   editingId.value = p.id
   selectedVendorBrand.value = p.brand
-  // 已有配置的名字是用户自己定的，不属于「自动填入」，切断自动跟随
-  autoName.value = ''
+  // 已有配置的名字作为「自动填入的当前值」跟踪：未手动改过时切厂商会跟随更新，
+  // 手动改过（@input 会清空 autoName）则保留用户自定义名。修复「切到智谱仍显示 deepseek」。
+  autoName.value = res.data.name || ''
   try {
     const res = await providersApi.get(p.id)
     if (res.code === 200) {
@@ -462,13 +463,11 @@ function selectVendor(v) {
   // 切换厂商意味着这些值不再适用（不同厂商的模型 ID、专属参数完全不同），
   // 必须清空后按新厂商 schema 重新填默认值。否则编辑已有配置时会把上一个
   // 厂商的内容（如 deepseek 的模型与参数）原样留在表单里。
-  if (!editingId.value) {
-    // 配置 ID 跟随厂商切换，但只在「没填过」或「还是系统自动填的那个」时才改：
-    // 用户手动改过的名字必须保留，否则会覆盖用户的输入。
-    if (!form.value.name || form.value.name === autoName.value) {
-      form.value.name = v.name
-      autoName.value = v.name
-    }
+  // 配置 ID 跟随厂商切换：只要当前名字是「空」或「还是自动填的那个」就更新；
+  // 用户手动改过的名字（autoName 已被 @input 清空）必须保留，否则会覆盖输入。
+  if (!form.value.name || form.value.name === autoName.value) {
+    form.value.name = v.name
+    autoName.value = v.name
   }
   form.value.api_url = v.default_api_url || form.value.api_url
   if (prev !== v.brand) {

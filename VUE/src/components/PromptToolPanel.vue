@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, watch, onMounted } from 'vue';
+import { ref, reactive, watch, onMounted, computed } from 'vue';
 import { ElMessage } from 'element-plus';
 import { MagicStick, CopyDocument, Plus, Delete } from '@element-plus/icons-vue';
 import { promptToolApi } from '@/utils/resAi';
@@ -15,49 +15,48 @@ const info = ref({ free_model: '', free_name: '', providers: [], default_prompts
 const tab = ref('character');
 
 const state = reactive({
-  character: { providerId: null, model: '', customPrompt: '', baseInfo: '', result: '', loading: false },
-  image: { providerId: null, model: '', customPrompt: '', baseInfo: '', result: '', loading: false },
+  character: { selection: '', customPrompt: '', baseInfo: '', result: '', loading: false },
+  image: { selection: '', customPrompt: '', baseInfo: '', result: '', loading: false },
 });
 
 const defaultPrompt = (cat) => info.value.default_prompts?.[cat] || '';
 
-const providerOptions = () => [
-  { id: null, label: info.value.free_name || t('免费 API', 'Free API') },
-  ...(info.value.providers || [])
-];
+// 人物设定占位提示：仅展示给用户看，与后端实际下发的系统提示词解耦。
+// 后端 DEFAULT_CHARACTER_PROMPT 可换成真实使用的提示词，前端占位仍显示这份友好说明。
+const CHARACTER_PLACEHOLDER = '你是一位资深的人物设定策划师。请根据用户的需求，产出一份可直接用于角色扮演、小说或剧本创作的人物设定。要求覆盖：姓名、年龄、身份与职业、性格（含优点与缺点）、背景经历、外貌特征、说话风格与口头禅、能力与特长、目标与动机、人际关系与潜在冲突。内容要具体、有层次，避免空洞套话，用分点或分段呈现。只输出设定正文，不要任何额外解释。';
 
-
-// 当前所选提供商下的模型候选：[{id, name}]，name 为用户填写的展示名
-const modelOptions = (cat) => {
-  const pid = state[cat].providerId;
-  if (pid === null || pid === undefined) {
-    const fm = info.value.free_model;
-    return fm ? [{ id: fm, name: info.value.free_name || fm }] : [];
+// 扁平化的可选模型列表：直接选出「某配置下的某个模型」，无需先选厂商再选模型。
+// 每个选项的 value 编码为 `${providerId}::${modelId}`（免费模型为 `free::${free_model}`），
+// 提交时再拆解出 provider_id 与 model 传给后端。
+const buildFlatOptions = (cat) => {
+  const list = [];
+  const fm = info.value.free_model;
+  if (fm) {
+    list.push({ value: `free::${fm}`, label: info.value.free_name || t('免费 API', 'Free API') });
   }
-  const p = (info.value.providers || []).find(x => x.id === pid);
-  return p?.models || [];
+  for (const p of (info.value.providers || [])) {
+    for (const m of (p.models || [])) {
+      list.push({ value: `${p.id}::${m.id}`, label: `${p.name} / ${m.name || m.id}` });
+    }
+  }
+  return list;
 };
 
-const onProviderChange = (cat) => {
-  const s = state[cat];
-  const pid = s.providerId;
-  if (pid === null) {
-    s.model = info.value.free_model || '';
-    return;
-  }
-  const p = (info.value.providers || []).find(x => x.id === pid);
-  if (p && p.models?.length) {
-    s.model = p.models[0].id;
-  }
-};
+// 缓存为 computed：仅在 info（候选模型列表）变化时重算，避免每次渲染
+// （含用户边输入自定义提示词边触发）都重建数组与对象。
+const characterModelOptions = computed(() => buildFlatOptions('character'));
+const imageModelOptions = computed(() => buildFlatOptions('image'));
 
 const loadOptions = async () => {
   try {
     const res = await promptToolApi.options();
     if (res.code !== 200) return;
     info.value = res.data || info.value;
-    ['character', 'image'].forEach(cat => {
-      if (!state[cat].model) state[cat].model = info.value.free_model || '';
+    ['character', 'image'].forEach((cat) => {
+      if (!state[cat].selection) {
+        const fm = info.value.free_model;
+        state[cat].selection = fm ? `free::${fm}` : (buildFlatOptions(cat)[0]?.value || '');
+      }
     });
   } catch (e) {
     // 静默失败，仅保留默认
@@ -77,11 +76,15 @@ const generate = async (cat) => {
   if (s.loading) return;
   s.loading = true;
   s.result = '';
+  // 从复合选择里拆出 provider_id 与 model
+  const [rawPid, mid] = (s.selection || '').split('::');
+  const providerId = rawPid && rawPid !== 'free' ? Number(rawPid) : null;
+  const model = mid || '';
   try {
     const res = await promptToolApi.generate({
       category: cat,
-      provider_id: s.providerId,
-      model: s.model,
+      provider_id: providerId,
+      model,
       custom_prompt: s.customPrompt,
       base_info: s.baseInfo,
     });
@@ -106,7 +109,7 @@ const generate = async (cat) => {
   }
 };
 
-const isFreeCat = (cat) => state[cat].providerId === null;
+const isFreeCat = (cat) => (state[cat].selection || '').startsWith('free::');
 
 const insertToInput = (cat) => {
   const text = state[cat].result.trim();
@@ -156,35 +159,23 @@ onMounted(() => {
         <div class="pt-pane">
           <div v-if="isFreeCat('character')" class="pt-free-hint">
             <el-icon class="pt-free-icon"><MagicStick /></el-icon>
-            <span>{{ t('当前使用免费模型，高峰期生成可能较慢或超时；若失败请稍后重试，或配置自己的 API Key 更稳定。', 'Using the free model now; generation may be slow or time out during peak hours. Retry later, or configure your own API Key for stability.') }}</span>
+            <span>{{ t('当前使用免费模型，配置自己的 API Key 更能稳定生成，选择已配置的key什么都可以生成哦(๑•̀ㅂ•́)و✧。', 'Using the free model now; generation may be slow or time out during peak hours. Retry later, or configure your own API Key for stability.') }}</span>
           </div>
           <div class="pt-field">
             <label class="pt-label">{{ t('模型', 'Model') }}</label>
-            <div class="pt-row">
-              <el-select
-                :model-value="state.character.providerId"
-                class="pt-provider"
-                @update:model-value="v => { state.character.providerId = v; onProviderChange('character'); }"
-              >
-                <el-option v-for="p in providerOptions()" :key="p.id ?? 'free'" :value="p.id" :label="p.label" />
-              </el-select>
-              <el-select
-                v-model="state.character.model"
-                :placeholder="t('选择模型', 'Select model')"
-                class="pt-model-select"
-                clearable
-                filterable
-                allow-create
-                default-first-option
-              >
-                <el-option
-                  v-for="m in modelOptions('character')"
-                  :key="m.id"
-                  :value="m.id"
-                  :label="m.name || m.id"
-                />
-              </el-select>
-            </div>
+            <el-select
+              v-model="state.character.selection"
+              :placeholder="t('选择模型', 'Select model')"
+              class="pt-model-select"
+              filterable
+            >
+              <el-option
+                v-for="m in characterModelOptions"
+                :key="m.value"
+                :value="m.value"
+                :label="m.label"
+              />
+            </el-select>
           </div>
 
           <div class="pt-field">
@@ -203,7 +194,7 @@ onMounted(() => {
               v-model="state.character.customPrompt"
               type="textarea"
               :rows="6"
-              :placeholder="defaultPrompt('character')"
+              :placeholder="CHARACTER_PLACEHOLDER"
             />
           </div>
 
@@ -213,7 +204,7 @@ onMounted(() => {
               v-model="state.character.baseInfo"
               type="textarea"
               :rows="3"
-              :placeholder="t('如：想生成一位冷艳的末世女剑客，穿黑色长风衣', 'e.g. A cold apocalyptic female swordsman in a black trench coat')"
+              :placeholder="t('如：想生成一位冷艳的末世女剑客，穿黑色长风衣\n选择配置的模型后输入基础信息生成，将提示词复制到人物卡中', 'e.g. A cold apocalyptic female swordsman in a black trench coat')"
             />
           </div>
 
@@ -250,31 +241,19 @@ onMounted(() => {
           </div>
           <div class="pt-field">
             <label class="pt-label">{{ t('模型', 'Model') }}</label>
-            <div class="pt-row">
-              <el-select
-                :model-value="state.image.providerId"
-                class="pt-provider"
-                @update:model-value="v => { state.image.providerId = v; onProviderChange('image'); }"
-              >
-                <el-option v-for="p in providerOptions()" :key="p.id ?? 'free'" :value="p.id" :label="p.label" />
-              </el-select>
-              <el-select
-                v-model="state.image.model"
-                :placeholder="t('选择模型', 'Select model')"
-                class="pt-model-select"
-                clearable
-                filterable
-                allow-create
-                default-first-option
-              >
-                <el-option
-                  v-for="m in modelOptions('image')"
-                  :key="m.id"
-                  :value="m.id"
-                  :label="m.name || m.id"
-                />
-              </el-select>
-            </div>
+            <el-select
+              v-model="state.image.selection"
+              :placeholder="t('选择模型', 'Select model')"
+              class="pt-model-select"
+              filterable
+            >
+              <el-option
+                v-for="m in imageModelOptions"
+                :key="m.value"
+                :value="m.value"
+                :label="m.label"
+              />
+            </el-select>
           </div>
 
           <div class="pt-field">
@@ -397,19 +376,9 @@ onMounted(() => {
   gap: 4px;
 }
 
-.pt-row {
-  display: flex;
-  gap: 8px;
-}
-
 .pt-model-select {
   flex: 1;
   min-width: 0;
-}
-
-.pt-provider {
-  width: 45%;
-  flex-shrink: 0;
 }
 
 .pt-gen {

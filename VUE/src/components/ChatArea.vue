@@ -399,10 +399,19 @@ const handleSend = async () => {
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
-      if (content) { aiMsg.raw += content; aiMsg.streamHtml += content; aiMsg.streaming = true; }
+      if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; }
       if (tokens) aiMsg.tokens = tokens;
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
+
+    // 防御：流结束但未收到最终 html delta（异常/部分 provider 未下发）时，
+    // 用已累积的原文兜底显示，并结束 streaming 态，避免消息空白或一直转圈。
+    if (aiMsg.streaming) {
+      aiMsg.streaming = false
+      if (!aiMsg.content && aiMsg.raw) {
+        aiMsg.content = sanitizeHtml(aiMsg.raw)
+      }
+    }
 
     // 大模型输出带生图/改图标记时，自动代为调用图片生成
     await handleLlmImageMarkers(aiMsg);
@@ -586,10 +595,18 @@ const handleVisionChat = async (text) => {
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
-      if (content) { aiMsg.raw += content; aiMsg.streamHtml += content; aiMsg.streaming = true; }
+      if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; }
       if (tokens) aiMsg.tokens = tokens;
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
+
+    // 防御：流结束但未收到最终 html delta 时，用已累积的原文兜底显示，并结束 streaming 态。
+    if (aiMsg.streaming) {
+      aiMsg.streaming = false
+      if (!aiMsg.content && aiMsg.raw) {
+        aiMsg.content = sanitizeHtml(aiMsg.raw)
+      }
+    }
 
     // 模型若输出「改图」标记，则结合人设与用户上传的参考图自动生图并贴到本条回复
     await handleLlmImageMarkers(aiMsg, refDataUrl);
@@ -782,10 +799,19 @@ const regenerate = async (assistantIndex = null) => {
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
-      if (content) { aiMsg.raw += content; aiMsg.streamHtml += content; aiMsg.streaming = true; }
+      if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; }
       if (tokens) aiMsg.tokens = tokens;
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
+
+    // 防御：流结束但未收到最终 html delta 时，用已累积的原文兜底显示，并结束 streaming 态。
+    if (aiMsg.streaming) {
+      aiMsg.streaming = false
+      if (!aiMsg.content && aiMsg.raw) {
+        aiMsg.content = sanitizeHtml(aiMsg.raw)
+      }
+    }
+
   } catch (error) {
     if (error.name === 'AbortError') {
       aiMsg.streaming = false;

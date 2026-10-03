@@ -166,6 +166,10 @@ def _ensure_schema_columns(app):
             if 'prompt_tool_logs' not in inspector.get_table_names():
                 db.create_all()
                 app.logger.info('[迁移] 已创建 prompt_tool_logs 表')
+            # conversation_media_logs — 对话素材（背景图/头像）设置历史
+            if 'conversation_media_logs' not in inspector.get_table_names():
+                db.create_all()
+                app.logger.info('[迁移] 已创建 conversation_media_logs 表')
             # messages.prompt_tokens / completion_tokens - 单条回复的 token 用量
             if 'messages' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('messages')}
