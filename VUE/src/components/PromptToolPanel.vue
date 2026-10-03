@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, watch, onMounted, computed } from 'vue';
 import { ElMessage } from 'element-plus';
-import { MagicStick, CopyDocument, Plus, Delete } from '@element-plus/icons-vue';
+import { MagicStick, CopyDocument, Plus, Delete, WarningFilled } from '@element-plus/icons-vue';
 import { promptToolApi } from '@/utils/resAi';
 import { t } from '../i18n';
 
@@ -15,8 +15,8 @@ const info = ref({ free_model: '', free_name: '', providers: [], default_prompts
 const tab = ref('character');
 
 const state = reactive({
-  character: { selection: '', customPrompt: '', baseInfo: '', result: '', loading: false },
-  image: { selection: '', customPrompt: '', baseInfo: '', result: '', loading: false },
+  character: { selection: '', customPrompt: '', baseInfo: '', result: '', hasError: false, loading: false },
+  image: { selection: '', customPrompt: '', baseInfo: '', result: '', hasError: false, loading: false },
 });
 
 const defaultPrompt = (cat) => info.value.default_prompts?.[cat] || '';
@@ -76,6 +76,7 @@ const generate = async (cat) => {
   if (s.loading) return;
   s.loading = true;
   s.result = '';
+  s.hasError = false;
   // 从复合选择里拆出 provider_id 与 model
   const [rawPid, mid] = (s.selection || '').split('::');
   const providerId = rawPid && rawPid !== 'free' ? Number(rawPid) : null;
@@ -90,20 +91,31 @@ const generate = async (cat) => {
     });
     if (res.code === 200) {
       s.result = res.data?.content || '';
+      s.hasError = false;
     } else {
-      ElMessage.warning(res.message || t('生成失败', 'Failed'));
+      // 后端返回非 200：把原因写进输出框，同时保留轻量 toast
+      const reason = res.message || t('生成失败', 'Failed');
+      s.result = (t('生成失败：', 'Generation failed: ')) + reason;
+      s.hasError = true;
+      ElMessage.warning(reason);
     }
   } catch (e) {
     const msg = e?.message || '';
+    let reason;
     // 免费模型在繁忙时容易出现请求超时，给出明确的引导提示
     if (/timeout|timed ?out|超时|ETIMEDOUT|ECONNABORTED/i.test(msg)) {
-      ElMessage.warning(t(
+      reason = t(
         '生成超时：免费模型在高峰期响应较慢。请稍后重试，或在「模型配置」中配置自己的 API Key 以获得更稳定的体验。',
         'Generation timed out: the free model can be slow during peak hours. Please retry later, or configure your own API Key for a more stable experience.'
-      ));
+      );
+      ElMessage.warning(reason);
     } else {
-      ElMessage.error((t('生成失败：', 'Generation failed: ')) + (msg || t('请稍后重试', 'please retry later')));
+      reason = (t('生成失败：', 'Generation failed: ')) + (msg || t('请稍后重试', 'please retry later'));
+      ElMessage.error(reason);
     }
+    // 把失败原因直接写进输出框，而非只弹 toast
+    s.result = reason;
+    s.hasError = true;
   } finally {
     s.loading = false;
   }
@@ -218,15 +230,25 @@ onMounted(() => {
             {{ t('一键生成人物设定', 'Generate character') }}
           </el-button>
 
-          <div v-if="state.character.result" class="pt-result">
-            <el-input v-model="state.character.result" type="textarea" :rows="8" readonly />
-            <div class="pt-result-actions">
+          <div v-if="state.character.result" class="pt-result" :class="{ 'is-error': state.character.hasError }">
+            <el-input
+              v-model="state.character.result"
+              type="textarea"
+              :rows="8"
+              readonly
+              :class="{ 'pt-result-input-error': state.character.hasError }"
+            />
+            <div v-if="!state.character.hasError" class="pt-result-actions">
               <el-button size="small" type="primary" plain @click="insertToInput('character')">
                 {{ t('插入输入框', 'Insert to input') }}
               </el-button>
               <el-button size="small" :icon="CopyDocument" @click="copyResult('character')">
                 {{ t('复制', 'Copy') }}
               </el-button>
+            </div>
+            <div v-else class="pt-result-error-tip">
+              <el-icon><WarningFilled /></el-icon>
+              <span>{{ t('生成未完成，请修正后重试', 'Generation failed. Please fix and retry.') }}</span>
             </div>
           </div>
         </div>
@@ -296,15 +318,25 @@ onMounted(() => {
             {{ t('一键生成图片提示词', 'Generate image prompt') }}
           </el-button>
 
-          <div v-if="state.image.result" class="pt-result">
-            <el-input v-model="state.image.result" type="textarea" :rows="8" readonly />
-            <div class="pt-result-actions">
+          <div v-if="state.image.result" class="pt-result" :class="{ 'is-error': state.image.hasError }">
+            <el-input
+              v-model="state.image.result"
+              type="textarea"
+              :rows="8"
+              readonly
+              :class="{ 'pt-result-input-error': state.image.hasError }"
+            />
+            <div v-if="!state.image.hasError" class="pt-result-actions">
               <el-button size="small" type="primary" plain @click="insertToInput('image')">
                 {{ t('插入输入框', 'Insert to input') }}
               </el-button>
               <el-button size="small" :icon="CopyDocument" @click="copyResult('image')">
                 {{ t('复制', 'Copy') }}
               </el-button>
+            </div>
+            <div v-else class="pt-result-error-tip">
+              <el-icon><WarningFilled /></el-icon>
+              <span>{{ t('生成未完成，请修正后重试', 'Generation failed. Please fix and retry.') }}</span>
             </div>
           </div>
         </div>
@@ -391,6 +423,22 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* 输出框：失败原因呈现时整体标红，提醒用户这不是可插入的提示词 */
+.pt-result.is-error :deep(.pt-result-input-error .el-textarea__inner) {
+  background: #fdf2f2;
+  color: #b03a2e;
+  border-color: #f0c9c9;
+  box-shadow: none;
+}
+
+.pt-result-error-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #b03a2e;
 }
 
 .pt-result-actions {
