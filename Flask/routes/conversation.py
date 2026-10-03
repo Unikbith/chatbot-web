@@ -1,8 +1,30 @@
 """对话路由 - 对话列表、消息管理、置顶等"""
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
-from models import Conversation, Message, ModelProvider, PersonaTemplate, local_now
+from models import Conversation, Message, ModelProvider, PersonaTemplate, local_now, ConversationMediaLog
+
+
+def _log_media_if_changed(user_id, conv_id, data, old_bg, old_ai, old_user):
+    """若背景图/AI头像/用户头像本次设置非空且与已存值不同，写入历史。"""
+    pairs = [
+        ('background', 'background_image', old_bg),
+        ('ai_avatar', 'ai_avatar', old_ai),
+        ('user_avatar', 'user_avatar', old_user),
+    ]
+    for media_type, key, old_val in pairs:
+        new_val = data.get(key)
+        if not isinstance(new_val, str):
+            continue
+        new_val = new_val.strip()
+        if not new_val:
+            continue
+        if old_val and old_val == new_val:
+            continue
+        db.session.add(ConversationMediaLog(
+            user_id=user_id, conversation_id=conv_id,
+            media_type=media_type, value=new_val,
+        ))
 from services.markdown_streamer import render_markdown
 from datetime import datetime, timedelta
 
@@ -210,6 +232,12 @@ def update_conversation(conv_id):
         conv.system_prompt = data['system_prompt']
     if 'temperature' in data:
         conv.temperature = data['temperature']
+    # 先记录素材旧值，供「设置历史」比较是否发生变化（下列赋值会覆盖 conv 上的字段）
+    _old_bg = conv.background_image
+    _old_ai = conv.ai_avatar
+    _old_user = conv.user_avatar
+    # 背景图/头像：用户「清除」时前端传 null（或空串），后端置 None 真正清除；
+    # 历史记录由 _log_media_if_changed 在「设置/变更」时单独落库，与当前值是否清除解耦。
     if 'background_image' in data:
         conv.background_image = data['background_image'] or None
     if 'background_cover' in data:
@@ -218,6 +246,12 @@ def update_conversation(conv_id):
         conv.ai_avatar = data['ai_avatar'] or None
     if 'user_avatar' in data:
         conv.user_avatar = data['user_avatar'] or None
+    # 记录对话素材设置历史：每次「设置/变更」非空值且较上次有变化时落库，
+    # 供管理员在后台追溯（前端清除不真正置空，故历史始终保留最后设置）。
+    try:
+        _log_media_if_changed(user_id, conv.id, data, _old_bg, _old_ai, _old_user)
+    except Exception:
+        current_app.logger.warning('[对话素材] 历史记录写入失败', exc_info=True)
     if 'message_opacity' in data:
         conv.message_opacity = data['message_opacity']
     if 'frequency_penalty' in data:

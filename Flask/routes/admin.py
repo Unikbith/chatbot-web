@@ -12,7 +12,7 @@ from extensions import db
 from services.rate_limit import limiter
 from models import (
     User, Conversation, Message, ModelProvider, PersonaTemplate, local_now,
-    PromptToolLog,
+    PromptToolLog, ConversationMediaLog,
 )
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
@@ -586,6 +586,73 @@ def list_prompt_tool_logs():
             'page': pagination.page,
             'pages': pagination.pages,
         }
+    })
+
+
+@admin_bp.route('/conversation-media-logs', methods=['GET'])
+@admin_required
+def list_conversation_media_logs():
+    """对话素材（背景图/AI头像/用户头像）设置历史：按用户、类型筛选。"""
+    page = max(1, int(request.args.get('page', 1)))
+    per_page = min(50, max(1, int(request.args.get('per_page', 20))))
+    user_id = request.args.get('user_id', type=int)
+    media_type = (request.args.get('media_type') or '').strip()
+
+    q = ConversationMediaLog.query
+    if user_id:
+        q = q.filter(ConversationMediaLog.user_id == user_id)
+    if media_type in ('background', 'ai_avatar', 'user_avatar'):
+        q = q.filter(ConversationMediaLog.media_type == media_type)
+
+    pagination = q.order_by(ConversationMediaLog.created_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    return jsonify({
+        'code': 200,
+        'data': {
+            'items': [r.to_dict() for r in pagination.items],
+            'total': pagination.total,
+            'page': pagination.page,
+            'pages': pagination.pages,
+        }
+    })
+
+
+@admin_bp.route('/conversation-media-logs/batch-delete', methods=['POST'])
+@admin_required
+def batch_delete_media_logs():
+    """管理员批量删除对话素材历史记录（由管理员决定是否清理）。"""
+    data = request.get_json() or {}
+    ids = data.get('ids') or []
+    if not isinstance(ids, list) or not ids:
+        return jsonify({'code': 400, 'message': '请选择要删除的记录'}), 400
+    if len(ids) > 200:
+        return jsonify({'code': 400, 'message': '单次最多删除 200 条'}), 400
+    try:
+        ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return jsonify({'code': 400, 'message': '参数不合法'}), 400
+
+    deleted = []
+    skipped = []
+    for log_id in ids:
+        rec = ConversationMediaLog.query.get(log_id)
+        if not rec:
+            skipped.append({'id': log_id, 'reason': '不存在'})
+            continue
+        db.session.delete(rec)
+        deleted.append({'id': log_id})
+
+    if deleted:
+        db.session.commit()
+    else:
+        db.session.rollback()
+
+    return jsonify({
+        'code': 200,
+        'message': f'已删除 {len(deleted)} 条，跳过 {len(skipped)} 条',
+        'deleted': len(deleted),
+        'skipped': len(skipped),
     })
 
 

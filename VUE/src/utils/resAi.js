@@ -498,6 +498,16 @@ const adminApi = {
     if (category) url += `&category=${category}`;
     return adminReq.get(url);
   },
+  // 对话素材（背景图/AI头像/用户头像）设置历史：管理员追溯 + 多选删除
+  async conversationMediaLogs(page = 1, perPage = 20, userId = '', mediaType = '') {
+    let url = `/api/admin/conversation-media-logs?page=${page}&per_page=${perPage}`;
+    if (userId) url += `&user_id=${userId}`;
+    if (mediaType) url += `&media_type=${mediaType}`;
+    return adminReq.get(url);
+  },
+  async deleteConversationMediaLogs(ids = []) {
+    return adminReq.post('/api/admin/conversation-media-logs/batch-delete', { ids });
+  },
   async feedbackList(page = 1, perPage = 20) {
     return adminReq.get(`/api/feedback?page=${page}&per_page=${perPage}`);
   },
