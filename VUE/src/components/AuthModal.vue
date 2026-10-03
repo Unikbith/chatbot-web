@@ -23,6 +23,7 @@ const loading = ref(false);
 const codeLoading = ref(false);
 const forgotCodeLoading = ref(false);
 const forgotLoading = ref(false);
+const agreed = ref(false); // 注册时是否勾选同意《用户须知与免责声明》
 const countdown = ref(0);
 const forgotCountdown = ref(0);
 let countdownTimer = null;
@@ -51,6 +52,7 @@ watch(() => props.modelValue, (val) => {
     inForgot.value = false;
     forgotStep.value = 1;
     forgotForm.value = { email: '', code: '', new_password: '', confirm_password: '' };
+    agreed.value = false;
     clearCountdown();
   }
 });
@@ -267,6 +269,10 @@ const handleSubmit = async () => {
       ElMessage.warning('两次密码输入不一致');
       return;
     }
+    if (!agreed.value) {
+      ElMessage.warning('请先阅读并同意《用户须知与免责声明》');
+      return;
+    }
   }
 
   loading.value = true;
@@ -281,6 +287,7 @@ const handleSubmit = async () => {
         password: form.value.password,
         code: form.value.code,
         gender: form.value.gender,
+        agreed: agreed.value,
       });
     }
 
@@ -437,6 +444,18 @@ const handleSubmit = async () => {
               <el-radio-button value="神秘">神秘</el-radio-button>
             </el-radio-group>
           </div>
+        </el-form-item>
+
+        <el-form-item v-if="!isLogin">
+          <el-checkbox v-model="agreed" size="large" class="agree-check">
+            我已阅读并同意
+            <a
+              href="/user-agreement"
+              target="_blank"
+              class="agree-link"
+              @click.stop
+            >《用户须知与免责声明》</a>
+          </el-checkbox>
         </el-form-item>
 
         <el-button
@@ -727,6 +746,26 @@ const handleSubmit = async () => {
   font-size: 14px;
   color: var(--text-secondary);
   white-space: nowrap;
+}
+
+.agree-check {
+  display: flex;
+  align-items: flex-start;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  white-space: normal;
+  height: auto;
+}
+
+.agree-link {
+  color: var(--brand);
+  text-decoration: none;
+  margin-left: 2px;
+}
+
+.agree-link:hover {
+  text-decoration: underline;
 }
 
 /* ===== 移动端响应式 =====

@@ -22,6 +22,12 @@ const routes = [
     meta: { title: 'Confide 管理后台' }
   },
   {
+    path: '/user-agreement',
+    name: 'UserAgreement',
+    component: () => import('@/views/UserAgreement.vue'),
+    meta: { title: '用户须知与免责声明' }
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/'
   }
