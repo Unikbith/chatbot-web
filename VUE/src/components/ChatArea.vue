@@ -6,7 +6,7 @@ import {
   Setting, RefreshLeft, Lightning, 
   Bell, VideoPause, CircleClose, Upload, Edit, MagicStick, Picture, Notebook
 } from '@element-plus/icons-vue';
-import { readStream, chatApi, audioApi, imageApi, providersApi, conversationApi } from '@/utils/resAi';
+import { readStream, chatApi, audioApi, imageApi, providersApi, conversationApi, uploadApi } from '@/utils/resAi';
 import auth from '@/utils/auth';
 import { sanitizeHtml } from '@/utils/sanitize';
 import { t } from '../i18n';
@@ -182,9 +182,6 @@ const loadChatProviders = async () => {
   } catch (e) {
     logger.warn('加载模型配置失败', e);
   }
-  // 模型配置面板关闭后会触发本函数：同时让「大模型原生生图」探测缓存失效，
-  // 避免改了图片配置 llm_tools 开关后仍沿用旧结果
-  llmToolsCache = null;
 };
 
 const handleModelSelect = (val) => {
@@ -358,9 +355,9 @@ const handleSend = async () => {
     return;
   }
 
-  // 如果有图片，走识图接口
+  // 如果有图片，走识图接口（传原始文本：空文本由函数内部区分「展示」与「发送」）
   if (selectedImage.value) {
-    await handleVisionChat(text || '请描述这张图片');
+    await handleVisionChat(text);
     return;
   }
 
@@ -378,17 +375,11 @@ const handleSend = async () => {
 
   const convId = await ensureConversation();
 
-  // 若打通了「大模型原生工具」，在系统提示中加一句图片生成约定，让模型可输出标记由前端代劳
-  const llmTools = await imageLlmToolsEnabled();
-  const sysPrompt = llmTools
-    ? (props.systemPrompt || '') + '\n\n[系统能力-图片生成] 当用户要求生成图片时只回复一行：`生图：<英文提示词>`；要求修改/结合参考图时只回复一行：`改图：<中文修改要求>`。不要输出其它解释。'
-    : props.systemPrompt;
-
   try {
     const requestBody = {
       messages: messages.value.slice(0, -1).map(({ role, content }) => ({ role, content })),
       deep_think: deepThink.value,
-      system_prompt: sysPrompt,
+      system_prompt: props.systemPrompt,
       temperature: props.temperature,
       provider_id: props.providerId,
       model_id: props.modelId || undefined,
@@ -412,9 +403,6 @@ const handleSend = async () => {
         aiMsg.content = sanitizeHtml(aiMsg.raw)
       }
     }
-
-    // 大模型输出带生图/改图标记时，自动代为调用图片生成
-    await handleLlmImageMarkers(aiMsg);
 
     // 自动播报 AI 回复（该对话开启时）
     if (props.autoPlayVoice && aiMsg.content && !aiMsg.imageUrl) {
@@ -459,37 +447,67 @@ function matchImageCommand(raw) {
   return null;
 }
 
-// 大模型原生工具：探测图片配置是否开启 llm_tools（缓存结果）
-let llmToolsCache = null;
-async function imageLlmToolsEnabled() {
-  if (llmToolsCache !== null) return llmToolsCache;
-  try {
-    const res = await providersApi.list('image');
-    const enabled = (res.data || []).find(p => p.enabled !== false);
-    llmToolsCache = !!(enabled && enabled.params && enabled.params.llm_tools);
-  } catch (e) {
-    llmToolsCache = false;
-  }
-  return llmToolsCache;
+// 识图时判断用户是否真的想「改这张图」：只有出现明确的修改/生成类动词才算。
+// 只发图（文本为空）、或问「这是什么 / 图里有几个人 / 帮我分析」都属识图，不能注入改图能力。
+const IMAGE_EDIT_RE = /(改成|改一下|改一改|修改|换成|变成|做成|画成|画一张|重画|重新画|生成一张|加个|加上|加点|去掉|删掉|删除|调整|美化|优化一下|加个滤镜|换背景|改背景|变成.+色)/;
+
+function wantsImageEdit(text) {
+  const s = (text || '').trim();
+  if (!s) return false;
+  return IMAGE_EDIT_RE.test(s);
 }
 
-// 从模型回复里提取「生图/改图」标记并代为调用图片生成，结果以图片形式附到该消息。
-// reference 供「改图（图生图）」使用：识图对话中用户附带的参考图 / 结合人设生成新图
+/**
+ * 把本地图片换算成服务器 URL（用于消息落库）。
+ * 支持传 File（上传框选的图）或 base64 data URL（改图参考图）。
+ * 失败返回 null —— 调用方据此放弃「历史留图」，但不阻断生图本身。
+ */
+async function persistImageUrl(src) {
+  if (!src) return null;
+  try {
+    let file = src;
+    if (typeof src === 'string' && src.startsWith('data:')) {
+      const blob = await (await fetch(src)).blob();
+      const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+      file = new File([blob], `ref.${ext}`, { type: blob.type || 'image/png' });
+    }
+    const up = await uploadApi.uploadImage(file);
+    if (up && up.code === 200 && up.data?.url) return up.data.url;
+    return null;
+  } catch (e) {
+    logger.warn('参考图上传失败（不影响生图）', e);
+    return null;
+  }
+}
+
+// 从模型回复里提取「改图」标记，结合参考图代为调用图生图，结果附到该消息。
+// 仅用于「识图 + 用户明确要求改图」的场景（见 handleVisionChat）：
+// 用户主动上传图片并要求修改时，模型输出一行 `改图：<要求>`，前端据此调用图生图。
+// 普通纯文字对话不再走这条链路（原「启用大模型原生工具」开关已下线），
+// 避免模型随口输出标记就触发真实生图、白耗额度。
 async function handleLlmImageMarkers(msg, reference = null) {
   const src = msg.raw || msg.content || '';
   if (!src) return;
-  const m2i = src.match(/生图[:：]\s*([^\n]+)/);
-  const mImg = src.match(/改图[:：]\s*([^\n]+)/);
-  const marker = m2i || mImg;
+  // 只认「改图：」标记，且必须位于行首（m flag）：
+  // 正文中间出现的「…可以改图：xxx」不应误触发真实生图
+  const marker = src.match(/^[ \t]*改图[:：][ \t]*([^\n]+)/m);
   if (!marker) return;
   const prompt = marker[1].trim();
   // 移除标记行，保留可读文本；流式原文与最终 HTML 都去掉标记
   msg.raw = ((msg.raw || '').replace(marker[0], '') || '').trim();
   msg.content = ((msg.content || '').replace(marker[0], '') || '').trim();
   try {
-    // 改图时把用户/参考图作为 references 传入，实现「结合人设 + 参考图生成新图」
-    const useRef = mImg ? (reference ? [reference] : []) : [];
-    const res = await imageApi.generate({ prompt, references: useRef });
+    // 把用户上传的图作为参考图传入，实现「结合人设 + 参考图生成新图」
+    const useRef = reference ? [reference] : [];
+    // 带上会话与参考图 URL，让这次生图进入对话历史（否则切走对话就消失）
+    const convId = await ensureConversation();
+    const refUrl = await persistImageUrl(reference);
+    const res = await imageApi.generate({
+      prompt,
+      references: useRef,
+      conversation_id: convId,
+      reference_url: refUrl,
+    });
     if (res.code === 200 && res.data?.url) {
       msg.imageUrl = res.data.url;
       if (res.data?.free) {
@@ -521,9 +539,14 @@ const handleImageGenerate = async (text, mode = 'text2img') => {
   loading.value = true;
   abortController = new AbortController();
   try {
+    // 带上会话与参考图 URL：让这次生图写进对话历史（否则切走对话后整段消失）
+    const convId = await ensureConversation();
+    const refUrl = isEdit ? await persistImageUrl(refDataUrl) : null;
     const res = await imageApi.generate({
       prompt,
       references: refDataUrl ? [refDataUrl] : [],
+      conversation_id: convId,
+      reference_url: refUrl,
     });
     if (res.code === 200 && res.data?.url) {
       aiMsg.imageUrl = res.data.url;
@@ -560,8 +583,13 @@ const handleVisionChat = async (text) => {
   // 先快照用户上传的图片，后续 clearImage 不会影响它（既是消息图，也作改图参考图）
   const img = selectedImage.value
   const refDataUrl = img?.dataUrl || null
+  // 展示与发送分离：聊天框只显示用户真写的字（空则纯图，不替用户说话）；
+  // 发给模型时若为空则用一个自然占位，避免退化成「客观描述任务」
+  const shownText = (text || '').trim()
+  const visionText = shownText || t('（用户发来了一张图片，没说话，想让你看看）', '(The user sent an image without saying anything — just showing you)')
 
-  messages.value.push(createMessage('user', text, refDataUrl));
+  const userMsg = reactive(createMessage('user', shownText, refDataUrl))
+  messages.value.push(userMsg)
   inputText.value = '';
   imageUploadRef.value?.clearImage();
   // 用户发送消息后立即定位到底部
@@ -575,21 +603,51 @@ const handleVisionChat = async (text) => {
 
   const convId = await ensureConversation();
 
+  // 上传图片换取服务器 URL 用于聊天记录留图：先 base64 立即上屏（不卡 UI），
+  // 上传成功后换成 URL（reactive 才会触发视图更新）；失败只 warn 不阻断识图，
+  // 后端还有落盘兜底，两条路保证图片能进历史。
+  let imageUrl = null
+  if (img?.file) {
+    try {
+      const up = await uploadApi.uploadImage(img.file)
+      if (up && up.code === 200 && up.data?.url) {
+        imageUrl = up.data.url
+        userMsg.imageUrl = imageUrl
+      }
+    } catch (e) {
+      logger.warn('识图图片上传失败（后端会兜底落盘）', e)
+    }
+  }
+
   try {
     const formData = new FormData();
-    formData.append('text', text);
+    formData.append('text', visionText);
     formData.append('image', img?.file);
     if (props.providerId) {
       formData.append('provider_id', props.providerId);
     }
+    // 必须带 model_id：否则后端落到厂商「默认 model」（通常非多模态），识图必然失败
+    if (props.modelId) {
+      formData.append('model_id', props.modelId);
+    }
+    // 深度思考跟随输入框按钮，不再恒开（后端缺省是关闭）
+    formData.append('deep_think', deepThink.value ? '1' : '0');
     if (convId) {
       formData.append('conversation_id', convId);
     }
-    // 识图同样注入人设 + 图片生成能力约定：模型输出「改图」标记后，前端结合用户参考图自动生图
+    if (imageUrl) {
+      formData.append('image_url', imageUrl);
+    }
+    // 系统提示分两种：
+    //  ① 用户明确要改这张图 → 给生图/改图能力（模型输出标记，前端代为生图）
+    //  ② 其余情况（只发图、问「这是什么」）→ 给「角色化图片回应」指令：
+    //     让模型以角色本人身份、用自己的口吻对图片作出反应，
+    //     而不是退化成助手口吻的客观描述员。
     const personaPrompt = (props.systemPrompt || '').trim();
-    formData.append('system_prompt', (
-      personaPrompt + '\n\n[系统能力-图片生成] 当用户提供图片并希望在保留图片元素的同时生成/修改图片（例如想看"你的样子"、把图中的元素融入人设风格制作新图）时，只回复一行：`改图：<用中文描述修改要求>`，用户上传的图片会自动作为参考图使用，不要输出其它解释。'
-    ).trim());
+    const sysExtra = wantsImageEdit(shownText)
+      ? '\n\n[系统能力-图片生成] 用户明确要求修改或重新生成这张图，此时只回复一行：`改图：<用中文描述修改要求>`，用户上传的图片会自动作为参考图使用，不要输出其它解释。'
+      : '\n\n[图片回应] 用户发来了一张图片。你就是设定里的这个角色本人，请像用户当面给你看东西那样，用你自己的人设、语气和情绪自然回应（惊讶、好奇、评价、关心、调侃都可以），把它当成你们对话的延续。不要用「这是一张图片」「图中可以看到」这类客观描述的第三方口吻，也不要罗列图片内容清单，除非用户明确要求你描述或分析图片。';
+    formData.append('system_prompt', (personaPrompt + sysExtra).trim());
 
     const response = await chatApi.vision(formData, { signal: abortController.signal });
     await readStream(response, (data) => {

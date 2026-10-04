@@ -107,6 +107,12 @@ class UserSettings(db.Model):
     message_opacity = db.Column(db.Float, default=0.9)  # 消息框透明度 0-1
     sidebar_collapsed = db.Column(db.Boolean, default=False)  # 侧边栏是否收起
 
+    # 新用户使用教程引导：注册时由注册接口置为「未看过 / 未点开」，
+    # 看过弹窗、点开侧栏入口后分别置位。默认值为 True，
+    # 保证功能上线前已存在的老账号不会突然被弹出教程。
+    tutorial_seen = db.Column(db.Boolean, default=True)  # False=新用户，登录后自动弹一次教程
+    tutorial_hint_dismissed = db.Column(db.Boolean, default=True)  # False=侧栏教程入口仍显示
+
     # AI 参数（通用微调）
     temperature = db.Column(db.Float, default=0.8)  # 温度
     frequency_penalty = db.Column(db.Float, default=0.0)  # 频率惩罚 -2.0~2.0
@@ -134,6 +140,8 @@ class UserSettings(db.Model):
             'top_p': self.top_p,
             'default_voice': self.default_voice,
             'auto_play_voice': self.auto_play_voice,
+            'tutorial_seen': bool(self.tutorial_seen),
+            'tutorial_hint_dismissed': bool(self.tutorial_hint_dismissed),
         }
 
 

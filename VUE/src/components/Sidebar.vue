@@ -51,6 +51,23 @@
           </el-button>
         </div>
       </div>
+
+      <!-- 新用户教程入口：位于免费模型提示条下方；新用户看过引导弹窗后出现，
+           点「查看」打开教程即永久消失（与免费提示条同款交互） -->
+      <div v-if="tutorialHint" class="sidebar-tutorial-banner">
+        <span class="stb-icon"><el-icon><Reading /></el-icon></span>
+        <span class="stb-text" @click="emit('open-tutorial')">
+          {{ t('新用户使用教程', 'Getting Started') }}
+        </span>
+        <div class="stb-actions">
+          <el-button size="small" type="primary" link @click="emit('open-tutorial')">
+            {{ t('查看', 'View') }}
+          </el-button>
+          <el-button size="small" text @click="emit('dismiss-tutorial')">
+            {{ t('知道了', 'Got it') }}
+          </el-button>
+        </div>
+      </div>
       
       <div class="new-chat-row">
         <el-button
@@ -100,14 +117,17 @@
         </div>
         <div class="conv-list-scroll">
         <template v-if="groups.pinned.length > 0">
-          <div class="group-title">{{ t('置顶', 'Pinned') }}</div>
+          <div class="group-title pinned-title">
+            <el-icon class="gt-icon"><Top /></el-icon>{{ t('置顶', 'Pinned') }}
+          </div>
           <div 
             v-for="conv in groups.pinned" 
             :key="conv.id"
-            class="conv-item"
+            class="conv-item pinned-item"
             :class="{ active: currentConvId == conv.id }"
             @click="selectConversation(conv.id)"
           >
+            <span class="conv-pin-mark"><el-icon><Top /></el-icon></span>
             <span class="conv-title" :title="conv.title">{{ conv.title }}</span>
             <div class="conv-actions">
               <el-button size="small" text @click.stop="togglePin(conv.id)">
@@ -118,7 +138,15 @@
               </el-button>
             </div>
           </div>
+          <!-- 置顶区与普通对话区之间的分隔线：仅在下方还有非置顶对话时出现 -->
+          <div v-if="hasUnpinnedConversations" class="conv-section-divider"></div>
         </template>
+
+        <!-- 有置顶对话时补上「今天」标题，让第二个分区有明确起点 -->
+        <div
+          v-if="groups.pinned.length > 0 && groups.today.length > 0"
+          class="group-title group-title-after-pinned"
+        >{{ t('今天', 'Today') }}</div>
 
         <div
           v-for="conv in groups.today"
@@ -265,7 +293,7 @@ import { computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, ArrowLeft, ArrowRight, ArrowUp, Top, Delete,
-  User, Setting, Tools, SwitchButton, MagicStick, Menu, Present, ShoppingBag
+  User, Setting, Tools, SwitchButton, MagicStick, Menu, Present, ShoppingBag, Reading
 } from '@element-plus/icons-vue'
 import { t } from '../i18n'
 
@@ -281,6 +309,8 @@ const props = defineProps({
   currentPersona: { type: Object, default: null },
   freeApiBanner: { type: Boolean, default: false },
   freeApiName: { type: String, default: '' },
+  // 新用户教程入口：看过引导弹窗但尚未点开教程时显示在免费提示条下方
+  tutorialHint: { type: Boolean, default: false },
   aiPersonas: { type: Array, default: () => [] },
 })
 
@@ -289,8 +319,19 @@ const emit = defineEmits([
   'toggle-collapse', 'open-provider', 'open-settings',
   'open-persona', 'open-marketplace', 'edit-persona',
   'login', 'logout',
-  'dismiss-free-api'
+  'dismiss-free-api',
+  'open-tutorial', 'dismiss-tutorial'
 ])
+
+/**
+ * 除置顶外是否还有对话：用于决定置顶区下方是否画分隔线、
+ * 以及是否需要给第二个分区补「今天」标题（没有普通对话时不画多余的分隔）
+ */
+const hasUnpinnedConversations = computed(() => {
+  const g = props.groups || {}
+  return ['today', 'yesterday', 'week', 'month', 'older']
+    .some(key => (g[key]?.length || 0) > 0)
+})
 
 function createConversation() {
   emit('create')
@@ -545,6 +586,54 @@ function handleCommand(cmd) {
   font-size: 12px;
 }
 
+/* 新用户教程入口：与免费提示条同宽同位置，色调更低调以免抢走免费提示的注意力 */
+.sidebar-tutorial-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 16px 12px;
+  padding: 8px 12px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.stb-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--brand);
+  font-size: 15px;
+}
+
+.stb-text {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stb-text:hover {
+  color: var(--brand);
+}
+
+.stb-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.stb-actions .el-button {
+  font-size: 12px;
+}
+
 .btn-icon {
   color: var(--brand);
   margin-right: 6px;
@@ -661,6 +750,60 @@ function handleCommand(cmd) {
   padding: 12px 8px 6px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+/* 置顶分组：标题用品牌色并带图钉，配合分隔线与普通对话明确区分 */
+.pinned-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--brand);
+  padding-bottom: 4px;
+}
+
+.gt-icon {
+  font-size: 12px;
+}
+
+/* 置顶区下方的分隔线：视觉上把「置顶」与「今天及更早」切开 */
+.conv-section-divider {
+  height: 1px;
+  margin: 8px 8px 2px;
+  background: var(--border-color);
+  border-radius: 1px;
+}
+
+/* 分隔线之后的第一个分组标题：再多留一点上方间距，避免两区贴在一起 */
+.group-title-after-pinned {
+  padding-top: 10px;
+}
+
+/* 置顶对话：常驻淡品牌底色 + 行首图钉，不依赖悬停即可辨认 */
+.conv-item.pinned-item {
+  background: var(--brand-soft);
+  margin-bottom: 4px;
+}
+
+.conv-item.pinned-item .conv-title {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.conv-item.pinned-item:hover {
+  background: var(--surface-hover);
+}
+
+.conv-item.pinned-item.active {
+  background: var(--brand-soft);
+  box-shadow: inset 2px 0 0 var(--brand);
+}
+
+.conv-pin-mark {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-right: 6px;
+  color: var(--brand);
+  font-size: 12px;
 }
 
 .conv-item {

@@ -465,6 +465,15 @@
               <span v-if="plTotal > 0" class="pl-title-count">{{ plTotal }}</span>
             </div>
             <div class="toolbar-actions">
+              <el-button
+                size="small"
+                type="danger"
+                :icon="Delete"
+                :disabled="!plSelected.length"
+                @click="deletePromptLogs"
+              >
+                {{ t('删除选中', 'Delete Selected') }} ({{ plSelected.length }})
+              </el-button>
               <el-button size="small" :icon="Refresh" @click="loadPromptLogs">{{ t('刷新', 'Refresh') }}</el-button>
             </div>
           </div>
@@ -494,33 +503,52 @@
           </div>
 
           <div class="pl-table-card">
-            <el-table :data="promptLogs" v-loading="plLoading" size="small" stripe class="pl-table">
+            <el-table
+              :data="promptLogs"
+              v-loading="plLoading"
+              size="small"
+              stripe
+              class="pl-table"
+              @selection-change="onPlSelectionChange"
+            >
+              <el-table-column type="selection" width="44" />
               <el-table-column prop="id" label="ID" width="64" align="center" />
-              <el-table-column prop="username" :label="t('用户', 'User')" width="120" show-overflow-tooltip />
-              <el-table-column prop="email" :label="t('邮箱', 'Email')" width="160" show-overflow-tooltip />
-              <el-table-column :label="t('类型', 'Type')" width="112" align="center">
+              <el-table-column prop="username" :label="t('用户', 'User')" min-width="100" show-overflow-tooltip />
+              <el-table-column prop="email" :label="t('邮箱', 'Email')" min-width="150" show-overflow-tooltip />
+              <el-table-column :label="t('类型', 'Type')" width="104" align="center">
                 <template #default="{ row }">
                   <span class="pl-type-pill" :class="row.category === 'image' ? 'is-image' : 'is-character'">
                     {{ row.category_label }}
                   </span>
                 </template>
               </el-table-column>
-              <el-table-column :label="t('模型', 'Model')" width="150" show-overflow-tooltip>
+              <el-table-column :label="t('模型', 'Model')" min-width="140" show-overflow-tooltip>
                 <template #default="{ row }">
                   <span class="pl-model-tag">{{ row.model || '-' }}</span>
                 </template>
               </el-table-column>
-              <el-table-column :label="t('自定义提示词', 'Custom prompt')" width="112" align="center">
+              <el-table-column :label="t('自定义提示词', 'Custom prompt')" width="104" align="center">
                 <template #default="{ row }">
                   <el-tag v-if="row.has_custom_prompt" type="warning" size="small" effect="light">{{ t('有', 'Yes') }}</el-tag>
                   <span v-else class="pl-muted">-</span>
                 </template>
               </el-table-column>
-              <el-table-column :label="t('内容', 'Content')" width="96" align="center">
+              <!-- 内容列不设固定宽度：用 min-width 吃掉表格剩余空间，避免右侧留白 -->
+              <el-table-column :label="t('内容', 'Content')" min-width="220">
                 <template #default="{ row }">
-                  <el-button size="small" text type="primary" :icon="View" @click="viewPlRow(row)">
-                    {{ t('查看', 'View') }}
-                  </el-button>
+                  <span class="pl-content-cell">{{ row.base_info || row.custom_prompt || row.result }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column :label="t('操作', 'Actions')" width="124" align="center" fixed="right">
+                <template #default="{ row }">
+                  <div class="pl-actions">
+                    <el-tooltip :content="t('查看详情', 'View detail')" placement="top">
+                      <el-button size="small" type="primary" plain :icon="View" @click="viewPlRow(row)" />
+                    </el-tooltip>
+                    <el-tooltip :content="t('删除该记录', 'Delete this record')" placement="top">
+                      <el-button size="small" type="danger" plain :icon="Delete" @click="deletePlRow(row)" />
+                    </el-tooltip>
+                  </div>
                 </template>
               </el-table-column>
               <el-table-column :label="t('时间', 'Time')" width="150">
@@ -579,7 +607,18 @@
             <el-table-column prop="media_type_label" :label="t('类型', 'Type')" width="90" align="center" />
             <el-table-column :label="t('预览', 'Preview')" width="64" align="center">
               <template #default="{ row }">
-                <el-image :src="row.value" fit="cover" style="width:44px;height:44px;border-radius:6px" :preview-src-list="[row.value]" :initial-index="0" :z-index="3000" />
+                <!-- preview-teleported + hide-on-click-modal：预览层挂到 body 且点遮罩即关，
+                     不会像默认 viewer 那样全屏压住后台，点完还能继续操作表格 -->
+                <el-image
+                  :src="row.value"
+                  fit="cover"
+                  class="media-thumb"
+                  :preview-src-list="[row.value]"
+                  :initial-index="0"
+                  preview-teleported
+                  hide-on-click-modal
+                  :z-index="3000"
+                />
               </template>
             </el-table-column>
             <el-table-column :label="t('来源', 'Source')" min-width="140" show-overflow-tooltip>
@@ -589,6 +628,13 @@
             </el-table-column>
             <el-table-column :label="t('时间', 'Time')" width="150">
               <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('操作', 'Actions')" width="80" align="center" fixed="right">
+              <template #default="{ row }">
+                <el-tooltip :content="t('删除该记录', 'Delete this record')" placement="top">
+                  <el-button size="small" type="danger" plain :icon="Delete" @click="deleteMediaLog(row)" />
+                </el-tooltip>
+              </template>
             </el-table-column>
           </el-table>
           <el-pagination
@@ -643,7 +689,7 @@
       <el-dialog
         v-model="plDetailVisible"
         :title="t('使用详情', 'Usage Detail')"
-        width="min(680px, 94vw)"
+        width="min(880px, 94vw)"
         append-to-body
       >
         <div v-if="plDetail" class="pl-detail">
@@ -678,6 +724,12 @@
             <pre class="pl-detail-text">{{ plDetail.result }}</pre>
           </div>
         </div>
+        <template #footer>
+          <el-button @click="plDetailVisible = false">{{ t('关闭', 'Close') }}</el-button>
+          <el-button type="danger" :icon="Delete" @click="deletePlRow(plDetail)">
+            {{ t('删除该记录', 'Delete this record') }}
+          </el-button>
+        </template>
       </el-dialog>
     </main>
 
@@ -1415,6 +1467,7 @@ const plLoading = ref(false)
 const plPage = ref(1)
 const plPerPage = 20
 const plTotal = ref(0)
+const plSelected = ref([])
 const plFilters = ref({ userId: '', category: '' })
 const plDetailVisible = ref(false)
 const plDetail = ref(null)
@@ -1446,6 +1499,75 @@ function applyPlFilters() {
 function viewPlRow(row) {
   plDetail.value = row
   plDetailVisible.value = true
+}
+
+function onPlSelectionChange(rows) {
+  plSelected.value = (rows || []).map(r => r.id)
+}
+
+/** 删除当前页最后一条后回退一页，避免停留在空白页 */
+function syncPageAfterDelete() {
+  if (promptLogs.value.length <= 1 && plPage.value > 1) plPage.value -= 1
+  loadPromptLogs()
+}
+
+// 删除单条提示词记录（带二次确认，误删审计记录无法恢复）
+async function deletePlRow(row) {
+  if (!row) return
+  try {
+    await ElMessageBox.confirm(
+      t(`确定删除该条提示词记录（ID ${row.id}）？删除后不可恢复。`, `Delete prompt log #${row.id}? This cannot be undone.`),
+      t('确认删除', 'Confirm'),
+      { type: 'warning', confirmButtonText: t('删除', 'Delete'), cancelButtonText: t('取消', 'Cancel') }
+    )
+  } catch (e) {
+    return // 用户取消
+  }
+  try {
+    const res = await adminApi.deletePromptToolLog(row.id)
+    if (res.code === 200) {
+      ElMessage.success(t('已删除该记录', 'Record deleted'))
+      // 可能是在详情弹窗里点的，同步关掉，避免停留在已删除记录的详情上
+      if (plDetail.value?.id === row.id) {
+        plDetailVisible.value = false
+        plDetail.value = null
+      }
+      syncPageAfterDelete()
+    } else {
+      ElMessage.warning(res.message || t('删除失败', 'Delete failed'))
+    }
+  } catch (e) {
+    logger.error('删除提示词记录失败', e)
+    ElMessage.error(t('删除失败', 'Delete failed'))
+  }
+}
+
+// 批量删除选中的提示词记录
+async function deletePromptLogs() {
+  if (!plSelected.value.length) return
+  try {
+    await ElMessageBox.confirm(
+      t(`确定删除选中的 ${plSelected.value.length} 条提示词记录？删除后不可恢复。`,
+        `Delete ${plSelected.value.length} selected prompt logs? This cannot be undone.`),
+      t('确认删除', 'Confirm'),
+      { type: 'warning', confirmButtonText: t('删除', 'Delete'), cancelButtonText: t('取消', 'Cancel') }
+    )
+  } catch (e) {
+    return // 用户取消
+  }
+  try {
+    const res = await adminApi.deletePromptToolLogs(plSelected.value)
+    if (res.code === 200) {
+      ElMessage.success(res.message || t('已删除选中记录', 'Selected records deleted'))
+      plSelected.value = []
+      loadPromptLogs()
+    } else {
+      ElMessage.warning(res.message || t('删除失败', 'Delete failed'))
+    }
+  } catch (e) {
+    logger.error('批量删除提示词记录失败', e)
+    ElMessage.error(t('删除失败', 'Delete failed'))
+  }
 }
 
 // ========== 对话素材设置历史 ==========
@@ -1485,12 +1607,49 @@ function onMediaSelectionChange(rows) {
   mediaSelected.value = (rows || []).map(r => r.id)
 }
 
+// 删除单条对话素材记录（带二次确认）
+async function deleteMediaLog(row) {
+  if (!row) return
+  try {
+    await ElMessageBox.confirm(
+      t(`确定删除该条素材记录（ID ${row.id}）？仅删除历史记录，不影响会话中正在生效的素材。`,
+        `Delete media log #${row.id}? Only the history record is removed; the active media is unaffected.`),
+      t('确认删除', 'Confirm'),
+      { type: 'warning', confirmButtonText: t('删除', 'Delete'), cancelButtonText: t('取消', 'Cancel') }
+    )
+  } catch (e) {
+    return // 用户取消
+  }
+  try {
+    const res = await adminApi.deleteConversationMediaLog(row.id)
+    if (res.code === 200) {
+      ElMessage.success(t('已删除该记录', 'Record deleted'))
+      loadMediaLogs()
+    } else {
+      ElMessage.warning(res.message || t('删除失败', 'Delete failed'))
+    }
+  } catch (e) {
+    logger.error('删除对话素材记录失败', e)
+    ElMessage.error(t('删除失败', 'Delete failed'))
+  }
+}
+
 async function deleteMediaLogs() {
   if (!mediaSelected.value.length) return
   try {
+    await ElMessageBox.confirm(
+      t(`确定删除选中的 ${mediaSelected.value.length} 条素材记录？删除后不可恢复。`,
+        `Delete ${mediaSelected.value.length} selected media logs? This cannot be undone.`),
+      t('确认删除', 'Confirm'),
+      { type: 'warning', confirmButtonText: t('删除', 'Delete'), cancelButtonText: t('取消', 'Cancel') }
+    )
+  } catch (e) {
+    return // 用户取消
+  }
+  try {
     const res = await adminApi.deleteConversationMediaLogs(mediaSelected.value)
     if (res.code === 200) {
-      ElMessage.success(t('已删除选中记录', 'Selected records deleted'))
+      ElMessage.success(res.message || t('已删除选中记录', 'Selected records deleted'))
       mediaSelected.value = []
       loadMediaLogs()
     } else {
@@ -2462,6 +2621,40 @@ function onTabChange(name) {
 }
 .pl-muted { color: var(--text-muted, #b9a98f); }
 
+/* 内容列：单行省略，把表格剩余宽度用满 */
+.pl-content-cell {
+  display: block;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary, #6a5d53);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 操作列按钮组 */
+.pl-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: center;
+}
+.pl-actions :deep(.el-button + .el-button) { margin-left: 0; }
+.pl-actions :deep(.el-button--small) { padding: 5px 8px; }
+
+/* 对话素材缩略图 */
+.media-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  cursor: zoom-in;
+}
+.media-value-preview {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--text-muted, #b9a98f);
+}
+
 .pl-pagination {
   margin-top: 14px;
   justify-content: flex-end;
@@ -2470,7 +2663,8 @@ function onTabChange(name) {
 /* 详情对话框：元信息条 */
 .pl-meta-bar {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* 4 项元信息（用户/类型/模型/时间）铺满一行，弹窗加宽后不再左右空旷 */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px 16px;
   margin-bottom: 18px;
   padding: 12px 14px;
@@ -2513,6 +2707,10 @@ function onTabChange(name) {
 }
 .pl-dot.is-brand { background: var(--brand, #b06a2e); }
 .pl-dot.is-warn { background: #d9912b; }
+
+@media (max-width: 900px) {
+  .pl-meta-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 @media (max-width: 560px) {
   .pl-meta-bar { grid-template-columns: 1fr; }

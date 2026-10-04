@@ -28,6 +28,28 @@ def _ensure_upload_dir():
     return upload_dir
 
 
+def save_image_bytes(data, ext, user_id):
+    """把图片字节直接存到上传目录，返回可访问 URL。
+
+    供后端接口在「前端未上传 / 上传失败」时兜底落盘使用（识图图片、改图参考图）。
+    命名与目录规则与 upload_image 完全一致：uuid + 用户 ID，内容不可变 → 可长缓存。
+
+    :param data: 图片字节
+    :param ext: 真实扩展名（由 detect_image_type 得出）
+    :param user_id: 所属用户
+    :return: 形如 /api/upload/image/<name> 的 URL；data 为空时返回 None
+    """
+    if not data:
+        return None
+    ext = (ext or 'jpg').lstrip('.').lower() or 'jpg'
+    upload_dir = _ensure_upload_dir()
+    filename = f"{uuid.uuid4().hex}_{user_id}.{ext}"
+    filepath = os.path.join(upload_dir, filename)
+    with open(filepath, 'wb') as f:
+        f.write(data)
+    return f'/api/upload/image/{filename}'
+
+
 @upload_bp.route('/image', methods=['POST'])
 @jwt_required()
 def upload_image():

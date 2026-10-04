@@ -223,6 +223,13 @@ def _ensure_schema_columns(app):
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE user_settings ADD COLUMN background_cover VARCHAR(20) DEFAULT 'contain'"))
                     app.logger.info('[迁移] 已为 user_settings 增加 background_cover 字段')
+                # 新用户教程引导标记：老库补列时按「已完成」写入（默认 1），
+                # 使教程只对补列之后注册的新用户生效
+                for cname in ('tutorial_seen', 'tutorial_hint_dismissed'):
+                    if cname not in cols:
+                        with db.engine.begin() as conn:
+                            conn.execute(text(f'ALTER TABLE user_settings ADD COLUMN {cname} BOOLEAN DEFAULT 1'))
+                        app.logger.info(f'[迁移] 已为 user_settings 增加 {cname} 字段')
             # conversations.background_cover - 对话独立背景展示方式
             if 'conversations' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('conversations')}

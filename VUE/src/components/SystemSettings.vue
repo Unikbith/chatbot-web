@@ -251,6 +251,18 @@
 
         <!-- 帮助和反馈 -->
         <el-tab-pane :label="t('帮助和反馈', 'Help & Feedback')" name="feedback">
+          <!-- 新用户使用教程：独立分区，位于常用 API 文档之上，随时可重新查看 -->
+          <div class="settings-section">
+            <div class="section-title">{{ t('新用户使用教程', 'Getting Started') }}</div>
+            <p class="section-desc">{{ t('7 步配置好自己的模型并开始畅聊，含操作截图。', 'Set up your own model and start chatting in 7 steps, with screenshots.') }}</p>
+            <div class="tutorial-entry">
+              <el-button type="primary" plain @click="emit('open-tutorial')">
+                <el-icon class="tutorial-entry-icon"><Reading /></el-icon>
+                {{ t('查看使用教程', 'View tutorial') }}
+              </el-button>
+            </div>
+          </div>
+
           <div class="settings-section">
             <div class="section-title">{{ t('常用 API 文档', 'API Documentation') }}</div>
             <p class="section-desc">{{ t('配置模型厂商时，可参考以下官方 API 文档。', 'Refer to the official API docs when configuring providers.') }}</p>
@@ -367,7 +379,7 @@
 import logger from '@/utils/logger';
 import { ref, reactive, computed, watch, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { User, MagicStick, QuestionFilled, CircleCheck } from '@element-plus/icons-vue'
+import { User, MagicStick, QuestionFilled, CircleCheck, Reading } from '@element-plus/icons-vue'
 import { settingsApi, uploadApi, authApi, marketplaceApi, feedbackApi } from '../utils/resAi'
 import { setLocale } from '../i18n'
 import { t } from '../i18n'
@@ -381,7 +393,7 @@ const props = defineProps({
   initialTab: { type: String, default: 'general' },
 })
 
-const emit = defineEmits(['update:modelValue', 'settings-updated', 'user-updated', 'logout'])
+const emit = defineEmits(['update:modelValue', 'settings-updated', 'user-updated', 'logout', 'open-tutorial'])
 
 const visible = computed({
   get: () => props.modelValue,
@@ -1048,6 +1060,14 @@ async function confirmDelete() {
 }
 
 /* 帮助与反馈 */
+.tutorial-entry {
+  margin-top: 10px;
+}
+
+.tutorial-entry-icon {
+  margin-right: 6px;
+}
+
 .help-links {
   display: flex;
   flex-direction: column;

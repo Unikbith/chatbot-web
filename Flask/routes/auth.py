@@ -398,8 +398,8 @@ def register():
     db.session.add(user)
     db.session.flush()  # 获取 user.id
 
-    # 创建设置
-    settings = UserSettings(user_id=user.id)
+    # 创建设置（新用户标记为「未看过教程」：登录后前端会弹出一次使用教程引导）
+    settings = UserSettings(user_id=user.id, tutorial_seen=False, tutorial_hint_dismissed=False)
     db.session.add(settings)
 
     # 创建4个默认系统AI人设

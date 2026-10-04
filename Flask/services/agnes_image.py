@@ -1,6 +1,6 @@
 """Agnes AI 图像生成服务（文生图 / 图生图）
 
-端点：POST {api_base}/images/generations（api_base 默认 https://apihub.agnes-ai.cn/v1）
+端点：POST {api_base}/images/generations（api_base 默认 https://api.agnes-ai.cn/v1）
 - 文生图：仅需 model / prompt / size
 - 图生图：在 extra_body.image 数组中放参考图（公网 URL 或 Data URI Base64）
 - 响应：data[0].url；若请求时返回 base64 则由本服务归一化为 Data URI
@@ -106,6 +106,24 @@ def _data_uri_bytes(value):
         return None
 
 
+def build_image_endpoint(api_url):
+    """由用户填写的 API 地址构造生图端点。
+
+    兼容两种填法（用户两种都可能填）：
+      - 基地址    https://api.agnes-ai.cn/v1              → .../v1/images/generations
+      - 完整端点  https://api.agnes-ai.cn/v1/images/generations → 原样使用
+
+    早期实现无条件拼接 `/images/generations`，用户若填了完整端点就会拼成
+    `.../images/generations/images/generations` → 必然 404，这是「自己的 API 调不通」的根因。
+    """
+    base = (api_url or '').strip().rstrip('/')
+    if not base:
+        return ''
+    if base.endswith('/images/generations'):
+        return base
+    return base + '/images/generations'
+
+
 def generate_image(provider, prompt, model=None, reference_images=None,
                    resolution=None, aspect_ratio=None, quality=None):
     """调用 Agnes 生成图像，返回 (image_url 或 data_uri, error)。"""
@@ -162,7 +180,9 @@ def generate_image(provider, prompt, model=None, reference_images=None,
     if refs:
         payload['extra_body'] = {'image': refs}
 
-    endpoint = provider.api_url.rstrip('/') + '/images/generations'
+    endpoint = build_image_endpoint(provider.api_url)
+    if not endpoint:
+        return None, '未填写 API 地址'
     headers = {
         'Authorization': f'Bearer {provider.api_key}',
         'Content-Type': 'application/json',

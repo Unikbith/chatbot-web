@@ -73,6 +73,12 @@ def update_settings():
     if 'sidebar_collapsed' in data:
         settings.sidebar_collapsed = bool(data['sidebar_collapsed'])
 
+    # 新用户教程引导状态：看过弹窗 / 已点开或关闭侧栏入口后由前端回写
+    if 'tutorial_seen' in data:
+        settings.tutorial_seen = bool(data['tutorial_seen'])
+    if 'tutorial_hint_dismissed' in data:
+        settings.tutorial_hint_dismissed = bool(data['tutorial_hint_dismissed'])
+
     # 数值型设置：交给统一校验（非数值/NaN/Inf → 400）
     for key, attr, lo, hi in _NUMERIC_FIELDS:
         if key in data:

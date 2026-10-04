@@ -63,8 +63,12 @@ const loadOptions = async () => {
   }
 };
 
+// 「填入默认」填入的内容：
+// - 人物设定：填入与 placeholder 完全一致的「安全版」提示词，界面上不暴露后端
+//   DEFAULT_CHARACTER_PROMPT；只有用户一个字都没填时，后端才回落到那份实际提示词。
+// - 生图：沿用后端下发的默认提示词（非敏感，可安全展示）。
 const fillDefault = (cat) => {
-  state[cat].customPrompt = defaultPrompt(cat);
+  state[cat].customPrompt = cat === 'character' ? CHARACTER_PLACEHOLDER : defaultPrompt(cat);
 };
 
 const clearCustom = (cat) => {
@@ -192,7 +196,7 @@ onMounted(() => {
 
           <div class="pt-field">
             <div class="pt-label-row">
-              <label class="pt-label">{{ t('自定义提示词（留空则用默认）', 'Custom prompt (empty = default)') }}</label>
+              <label class="pt-label">{{ t('（建议不输入，生成的人物设定不符合再填入默认）', 'Custom prompt (empty = default)') }}</label>
               <div class="pt-actions">
                 <el-button size="small" text :icon="Plus" @click="fillDefault('character')">
                   {{ t('填入默认', 'Use default') }}
@@ -216,7 +220,7 @@ onMounted(() => {
               v-model="state.character.baseInfo"
               type="textarea"
               :rows="3"
-              :placeholder="t('如：想生成一位冷艳的末世女剑客，穿黑色长风衣\n选择配置的模型后输入基础信息生成，将提示词复制到人物卡中', 'e.g. A cold apocalyptic female swordsman in a black trench coat')"
+              :placeholder="t('如：想生成一位冷艳的末世女剑客，穿黑色长风衣', 'e.g. A cold apocalyptic female swordsman in a black trench coat')"
             />
           </div>
 

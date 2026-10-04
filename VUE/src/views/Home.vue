@@ -18,6 +18,7 @@ import SystemSettings from '../components/SystemSettings.vue'
 import PersonaPanel from '../components/PersonaPanel.vue'
 import ConversationSettings from '../components/ConversationSettings.vue'
 import PersonaMarketplace from '../components/PersonaMarketplace.vue'
+import NewUserTutorialDialog from '../components/NewUserTutorialDialog.vue'
 import ThumbIcon from '../components/ThumbIcon.vue'
 import { identiconDataUrl } from '../utils/identicon'
 
@@ -43,6 +44,8 @@ const settingsInitialTab = ref('general')
 const personaPanelVisible = ref(false)
 const convoSettingsVisible = ref(false)
 const marketplaceVisible = ref(false)
+// 新用户使用教程弹窗（新用户注册后首次登录自动弹出一次）
+const tutorialVisible = ref(false)
 
 // 对话状态
 const currentConv = ref(null)
@@ -74,6 +77,9 @@ const userSettings = reactive({
   frequency_penalty: 0.0,
   presence_penalty: 0.0,
   top_p: 0.95,
+  // 新用户教程引导：默认「已完成」，仅注册接口写入的新账号会返回 false
+  tutorial_seen: true,
+  tutorial_hint_dismissed: true,
 })
 
 // 聊天状态
@@ -92,6 +98,44 @@ const showFreeApiBanner = computed(() =>
 function dismissFreeApiBanner() {
   freeApiBannerDismissed.value = true
   sessionStorage.setItem('free_api_banner_dismissed', '1')
+}
+
+// ========== 新用户使用教程 ==========
+// 只有「注册时未看过教程」的新账号会在首次登录后自动弹出一次；
+// 弹窗关闭后入口落到侧边栏（免费模型提示条下方），点开或点「知道了」即永久消除。
+// 状态存服务端（UserSettings），换设备/换浏览器都不会重复弹。
+const showTutorialHint = computed(() =>
+  isLoggedIn.value
+  && userSettings.tutorial_seen === true
+  && userSettings.tutorial_hint_dismissed === false
+)
+
+// 新用户首次登录：自动弹出教程（仅一次）
+function maybeShowTutorial() {
+  if (isLoggedIn.value && userSettings.tutorial_seen === false) {
+    tutorialVisible.value = true
+  }
+}
+
+// 看过教程（关闭弹窗即视为阅读）：标记完成后侧边栏入口才出现
+function markTutorialSeen() {
+  if (userSettings.tutorial_seen === true) return
+  userSettings.tutorial_seen = true
+  settingsApi.update({ tutorial_seen: true }).catch(e => logger.warn('教程引导状态保存失败', e))
+}
+
+// 消除侧边栏教程入口：点「查看」或「知道了」后不再出现
+function dismissTutorialHint() {
+  if (userSettings.tutorial_hint_dismissed === true) return
+  userSettings.tutorial_hint_dismissed = true
+  settingsApi.update({ tutorial_hint_dismissed: true }).catch(e => logger.warn('教程入口状态保存失败', e))
+}
+
+// 从侧边栏入口 / 系统设置打开教程：同样视为已看过并消除侧栏入口
+function openTutorial() {
+  tutorialVisible.value = true
+  markTutorialSeen()
+  dismissTutorialHint()
 }
 
 // 对话列表
@@ -352,6 +396,8 @@ onMounted(async () => {
       await loadUserInfo()
       await loadAllData()
       await ensureInitialConversation()
+      // 新用户注册后若直接刷新页面，这里兜底再判一次（已看过则不会弹）
+      maybeShowTutorial()
     } catch (e) {
       authModalVisible.value = true
     }
@@ -672,7 +718,17 @@ async function handleLoginSuccess(userData) {
   authModalVisible.value = false
   // 清空旧人设，让 loadPersonas 按新登录用户的性别重新挑默认人物卡
   currentPersona.value = null
+  // 登录/注册响应只有用户信息，不含用户设置：这里补拉一次，
+  // 让主题、语言与新用户教程引导标记（tutorial_seen）立即生效
+  try {
+    await loadUserInfo()
+  } catch (e) {
+    logger.warn('登录后刷新用户信息失败', e)
+  }
   await loadAllData()
+
+  // 新用户注册并登录：自动弹出使用教程（服务端标记保证只弹这一次）
+  maybeShowTutorial()
 
   // 若用户从入口页选择某张卡片后登录，优先以该卡片作为默认对话对象
   const pendingId = pendingLandingPersonaId.value
@@ -898,8 +954,11 @@ async function handleConvoSettingsSaved(payload) {
       :current-persona="currentPersona"
       :free-api-banner="showFreeApiBanner"
       :free-api-name="chatStatus.free_name"
+      :tutorial-hint="showTutorialHint"
       :ai-personas="aiPersonas"
       @dismiss-free-api="dismissFreeApiBanner"
+      @open-tutorial="openTutorial"
+      @dismiss-tutorial="dismissTutorialHint"
       @create="requireLogin(handleNewChat)"
       @select="handleSelectConversation"
       @toggle-pin="handleTogglePin"
@@ -1182,8 +1241,12 @@ async function handleConvoSettingsSaved(payload) {
       :initial-tab="settingsInitialTab"
       @settings-updated="handleSettingsUpdated"
       @user-updated="handleUserUpdated"
+      @open-tutorial="openTutorial"
       @logout="handleLogout"
     />
+
+    <!-- 新用户使用教程：注册后首次登录自动弹出一次，之后从侧边栏/系统设置随时可看 -->
+    <NewUserTutorialDialog v-model="tutorialVisible" @read="markTutorialSeen" />
 
     <!-- 人物卡管理面板 -->
     <PersonaPanel

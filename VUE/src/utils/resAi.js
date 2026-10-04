@@ -241,8 +241,10 @@ const providersApi = {
   async setDefault(id) {
     return resAi.put(`/api/providers/${id}/default`);
   },
+  // 图片生成连接测试：后端会发起一次真实生图请求（可能 10~90s），
+  // 必须单独放宽超时，否则前端会先于后端超时并误报「测试失败」
   async test(id) {
-    return resAi.post(`/api/providers/${id}/test`);
+    return resAi.post(`/api/providers/${id}/test`, null, { timeout: 150000 });
   },
   // 已配置模型管理
   async listModels(providerId) {
@@ -330,19 +332,15 @@ const settingsApi = {
 
 // ========== 文件上传 API ==========
 const uploadApi = {
+  // 走 resAi(axios) 而非裸 fetch：只有 axios 实例挂了 401 自动续期拦截器，
+  // 裸 fetch 在 token 过期时会直接失败（无提示、无续期）→ 上传静默失败 → 图片丢失
   async uploadImage(file) {
     const formData = new FormData();
     formData.append('file', file);
-    const token = tokenStore.getAccess();
-    const response = await fetch(`${baseURL}/api/upload/image`, {
-      method: 'POST',
-      headers: {
-        ...(token && { Authorization: `Bearer ${token}` }),
-      },
-      body: formData,
+    // Content-Type 交给 axios 自动补 multipart 边界，手写会导致后端解析失败
+    return resAi.post('/api/upload/image', formData, {
+      headers: { 'Content-Type': undefined },
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
   },
   getImageUrl(filename) {
     return `${baseURL}/api/upload/image/${filename}`;
@@ -514,12 +512,22 @@ const adminApi = {
     if (category) url += `&category=${category}`;
     return adminReq.get(url);
   },
+  // 提示词记录：单条 / 批量删除
+  async deletePromptToolLog(id) {
+    return adminReq.delete(`/api/admin/prompt-tool-logs/${id}`);
+  },
+  async deletePromptToolLogs(ids = []) {
+    return adminReq.post('/api/admin/prompt-tool-logs/batch-delete', { ids });
+  },
   // 对话素材（背景图/AI头像/用户头像）设置历史：管理员追溯 + 多选删除
   async conversationMediaLogs(page = 1, perPage = 20, userId = '', mediaType = '') {
     let url = `/api/admin/conversation-media-logs?page=${page}&per_page=${perPage}`;
     if (userId) url += `&user_id=${userId}`;
     if (mediaType) url += `&media_type=${mediaType}`;
     return adminReq.get(url);
+  },
+  async deleteConversationMediaLog(id) {
+    return adminReq.delete(`/api/admin/conversation-media-logs/${id}`);
   },
   async deleteConversationMediaLogs(ids = []) {
     return adminReq.post('/api/admin/conversation-media-logs/batch-delete', { ids });

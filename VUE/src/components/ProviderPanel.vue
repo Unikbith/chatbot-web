@@ -197,6 +197,26 @@
             <el-button type="primary" :loading="saving" @click="saveConfig">
               {{ editingId ? t('保存修改', 'Save') : t('创建配置', 'Create') }}
             </el-button>
+            <!-- 图片生成专用连接测试：只有该类型提供（其余类型在下方模型列表里测试） -->
+            <el-tooltip
+              v-if="editingId && activeType === 'image'"
+              :content="t('会发起一次 1K 最小规格的真实生图请求，用于验证地址、Key 与模型是否可用（会消耗少量额度）', 'Sends a minimal 1K real generation request to verify URL, key and model (uses a little quota)')"
+              placement="top"
+            >
+              <el-button
+                :loading="testingImage"
+                @click="testImageConfig"
+              >
+                {{ t('测试连接', 'Test Connection') }}
+              </el-button>
+            </el-tooltip>
+          </div>
+          <div v-if="testingImage" class="form-hint">
+            {{ t('正在发起真实生图请求，请稍候（生图通常需要 10~60 秒）…', 'Sending a real generation request, please wait (10-60s)…') }}
+          </div>
+          <div v-else-if="imageTestMsg" class="form-hint" :class="{ 'is-err': !imageTestOk }">
+            <span v-if="imageTestOk" class="ok-mark">✓</span>
+            {{ imageTestMsg }}
           </div>
         </div>
 
@@ -304,6 +324,10 @@ const form = ref({ name: '', api_key: '', api_url: '', model: '', paramValues: {
 const paramSchema = ref([]) // 厂商专属额外字段（STT/TTS）
 const saving = ref(false)
 const loading = ref(false)
+// 图片生成专用连接测试状态（后端会发起一次最小规格真实生图请求）
+const testingImage = ref(false)
+const imageTestMsg = ref('')
+const imageTestOk = ref(false)
 
 const isAudio = () => activeType.value === 'stt' || activeType.value === 'tts'
 
@@ -424,7 +448,10 @@ async function selectProvider(p) {
   selectedVendorBrand.value = p.brand
   // 已有配置的名字作为「自动填入的当前值」跟踪：未手动改过时切厂商会跟随更新，
   // 手动改过（@input 会清空 autoName）则保留用户自定义名。修复「切到智谱仍显示 deepseek」。
-  autoName.value = res.data.name || ''
+  // 注意用入参 p.name：此前写成未声明的 res（下一行才声明）会抛 TDZ ReferenceError，
+  // 导致整个函数中止、表单永不填充（表现为「点击配置没反应」）。
+  autoName.value = p.name || ''
+  imageTestMsg.value = ''   // 切换配置时清空上一次的测试结论
   try {
     const res = await providersApi.get(p.id)
     if (res.code === 200) {
@@ -477,6 +504,7 @@ function startNew() {
   editingId.value = null
   // 新建状态下名字是空的，交给 selectVendor 自动填并开始跟随厂商
   autoName.value = ''
+  imageTestMsg.value = ''
   form.value = {
     name: '',
     api_key: '',
@@ -680,6 +708,7 @@ function switchType(type) {
   if (type === activeType.value) return
   activeType.value = type
   editingId.value = null
+  imageTestMsg.value = ''
   form.value = { name: '', api_key: '', api_url: '', model: '', paramValues: {} }
   paramSchema.value = []
   configuredModels.value = []
@@ -687,6 +716,31 @@ function switchType(type) {
   fetchError.value = ''
   loadVendors()
   loadProviders()
+}
+
+/* 图片生成专用连接测试：后端会发起一次最小规格的真实生图请求。
+   失败时后端返回的是已脱敏的诊断文案（区分 Key/地址/模型/额度问题），直接展示即可。 */
+async function testImageConfig() {
+  if (!editingId.value) return
+  testingImage.value = true
+  imageTestMsg.value = ''
+  imageTestOk.value = false
+  try {
+    const res = await providersApi.test(editingId.value)
+    imageTestOk.value = res.code === 200
+    imageTestMsg.value = imageTestOk.value
+      ? t('连接正常，地址、Key 与模型均可用', 'Connection OK — URL, key and model all work')
+      : (res.message || t('连接失败，请检查地址与 Key', 'Failed — check URL and key'))
+  } catch (e) {
+    imageTestOk.value = false
+    // 业务错误走 response.data.message（后端已给出诊断），网络错误才退回通用文案
+    imageTestMsg.value = e.response?.data?.message
+      || (e.code === 'ECONNABORTED'
+        ? t('请求超时，请确认生图接口可达或调大超时时间', 'Timed out — check reachability or raise timeout')
+        : t('测试失败，请检查网络与地址是否正确', 'Test failed — check network and URL'))
+  } finally {
+    testingImage.value = false
+  }
 }
 
 function syncDrawerSize() {
@@ -960,6 +1014,8 @@ onUnmounted(() => {
   margin-bottom: 6px;
 }
 .form-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.form-hint.is-err { color: #f56c6c; }
+.form-hint .ok-mark { color: #67c23a; font-weight: 700; margin-right: 2px; }
 .req-tag { margin-left: 6px; height: 16px; line-height: 14px; font-size: 10px; vertical-align: middle; }
 .actions-row { display: flex; gap: 10px; margin-bottom: 0; }
 

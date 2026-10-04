@@ -589,6 +589,55 @@ def list_prompt_tool_logs():
     })
 
 
+@admin_bp.route('/prompt-tool-logs/<int:log_id>', methods=['DELETE'])
+@admin_required
+def delete_prompt_tool_log(log_id):
+    """管理员删除单条提示词工具使用记录。"""
+    rec = PromptToolLog.query.get(log_id)
+    if not rec:
+        return jsonify({'code': 404, 'message': '记录不存在'}), 404
+    db.session.delete(rec)
+    db.session.commit()
+    return jsonify({'code': 200, 'message': '已删除 1 条', 'deleted': 1})
+
+
+@admin_bp.route('/prompt-tool-logs/batch-delete', methods=['POST'])
+@admin_required
+def batch_delete_prompt_tool_logs():
+    """管理员批量删除提示词工具使用记录。"""
+    data = request.get_json() or {}
+    ids = data.get('ids') or []
+    if not isinstance(ids, list) or not ids:
+        return jsonify({'code': 400, 'message': '请选择要删除的记录'}), 400
+    if len(ids) > 200:
+        return jsonify({'code': 400, 'message': '单次最多删除 200 条'}), 400
+    try:
+        ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return jsonify({'code': 400, 'message': '参数不合法'}), 400
+
+    deleted, skipped = [], []
+    for log_id in ids:
+        rec = PromptToolLog.query.get(log_id)
+        if not rec:
+            skipped.append({'id': log_id, 'reason': '不存在'})
+            continue
+        db.session.delete(rec)
+        deleted.append({'id': log_id})
+
+    if deleted:
+        db.session.commit()
+    else:
+        db.session.rollback()
+
+    return jsonify({
+        'code': 200,
+        'message': f'已删除 {len(deleted)} 条，跳过 {len(skipped)} 条',
+        'deleted': len(deleted),
+        'skipped': len(skipped),
+    })
+
+
 @admin_bp.route('/conversation-media-logs', methods=['GET'])
 @admin_required
 def list_conversation_media_logs():
@@ -616,6 +665,22 @@ def list_conversation_media_logs():
             'pages': pagination.pages,
         }
     })
+
+
+@admin_bp.route('/conversation-media-logs/<int:log_id>', methods=['DELETE'])
+@admin_required
+def delete_conversation_media_log(log_id):
+    """管理员删除单条对话素材历史记录。
+
+    只删审计记录本身，不动会话上仍在生效的素材（背景图/头像）——
+    那是另一套数据，误删会让用户界面上的设置凭空消失。
+    """
+    rec = ConversationMediaLog.query.get(log_id)
+    if not rec:
+        return jsonify({'code': 404, 'message': '记录不存在'}), 404
+    db.session.delete(rec)
+    db.session.commit()
+    return jsonify({'code': 200, 'message': '已删除 1 条', 'deleted': 1})
 
 
 @admin_bp.route('/conversation-media-logs/batch-delete', methods=['POST'])
