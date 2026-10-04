@@ -183,6 +183,14 @@
 }
 
 .rtpl .t-topbar-title { font-weight: 700; color: var(--rtpl-accent-strong); }
+/* 顶栏里的地点：与【场景】条同一套语义，避免同一个位置一会儿是时间一会儿是地点 */
+.rtpl .t-topbar-place {
+  font-weight: 700;
+  color: var(--rtpl-place-fg, var(--rtpl-accent-strong));
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
 .rtpl .t-topbar-time { color: var(--rtpl-accent); font-variant-numeric: tabular-nums; }
 .rtpl .t-topbar-note { flex: 1 1 100%; color: var(--rtpl-muted); }
 .rtpl .t-topbar-sep { color: var(--rtpl-border); }
@@ -363,6 +371,46 @@
 /* 长期记忆用更淡的层次，与短期记忆区分开 */
 .rtpl .t-mem-list--long li { color: var(--rtpl-muted); font-size: 0.95em; }
 
+/* ---------- 长期记忆（记忆宫殿）：默认折叠，展开后按行读 ---------- */
+.rtpl .t-mem-sub--long { display: block; }
+
+.rtpl .t-mem-sub--long > .t-mem-sub-h {
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 12px 6px;
+  user-select: none;
+}
+
+.rtpl .t-mem-sub--long > .t-mem-sub-h::-webkit-details-marker { display: none; }
+
+/* 折叠指示：与主折叠块保持同一套观感 */
+.rtpl .t-mem-sub--long > .t-mem-sub-h::before {
+  content: '▸';
+  font-size: 0.85em;
+  color: var(--rtpl-accent);
+}
+
+.rtpl .t-mem-sub--long[open] > .t-mem-sub-h::before { content: '▾'; }
+
+.rtpl .t-mem-list--long li { padding: 6px 0; }
+.rtpl .t-mem-list--long li + li { border-top: 1px solid var(--rtpl-border); }
+
+/* 一条摘要 = 小标题 + 若干行正文；分条展示，避免糊成一坨 */
+.rtpl .t-mem-item-h {
+  display: block;
+  font-weight: 600;
+  color: var(--rtpl-accent-strong);
+  margin-bottom: 3px;
+}
+
+.rtpl .t-mem-item-b { display: block; }
+
+.rtpl .t-mem-line {
+  display: block;
+  color: var(--rtpl-muted);
+  line-height: 1.6;
+}
+
 /* ---------- 开场白变体 ---------- */
 /* 开场白通常只有一两句，用完整输出框的留白会显得很空，这里收紧并弱化 */
 .rtpl.rtpl--greeting {
@@ -398,6 +446,15 @@
 }
 
 .rtpl .t-scene-row.is-place { background: var(--rtpl-place-bg); color: var(--rtpl-place-fg); }
+
+/* 场景条里的一句氛围：弱化，不抢地点与时间 */
+.rtpl .t-scene-row.is-note {
+  background: none;
+  color: var(--rtpl-muted);
+  font-weight: 400;
+  font-size: 12.5px;
+  padding: 1px 2px;
+}
 
 .rtpl .t-ico { flex: none; font-size: 13px; line-height: 1; }
 

@@ -50,13 +50,16 @@ check('变量数量合理（>20）', defined.size > 20, String(defined.size))
 console.log('\n[4] 引擎产出的 class 在骨架里都有规则')
 const SAMPLE = [
   '【场景】23:42|客厅', '【摘要】摘要内容',
+  '【状态条】客厅|23:42|灯还亮着',
   '【面板】用户信息|姓名:甲|年龄:22', '【面板】想法|整行正文',
   '【状态】状态|好感度:99/100【注释】',
   '【记忆】短期记忆|条目一', '【推演】A.【标题】描述',
   '【物品】药:3', '【提醒】注意', '正文。',
 ].join('\n')
-const { parts, options } = renderReplyTemplate(SAMPLE, T)
+// 带上长期记忆：长期记忆（记忆宫殿）那套 class 也要被这条契约覆盖到
+const { parts, options } = renderReplyTemplate(SAMPLE, T, { longTerm: ['- 人物：甲乙\n- 关键事件：一起吃了饭'] })
 check('样例覆盖全部标记', parts.filter(p => p.type === 'html').length >= 8)
+check('长短期记忆都出现', parts.some(p => (p.html || '').includes('t-mem-list--long')))
 check('推演选项被识别', options.length === 1, JSON.stringify(options))
 
 const html = parts.filter(p => p.type === 'html').map(p => p.html).join('')

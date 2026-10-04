@@ -88,8 +88,9 @@ const toHtml = (text) => (props.renderText ? props.renderText(text) : renderPros
 const tpl = computed(() => {
   if (!props.template) return { parts: [], options: [] }
   const { parts, options } = renderReplyTemplate(props.raw, props.template, {
-    // 长期记忆由应用数据（记忆宫殿摘要）补入，AI 只写短期记忆
-    longTerm: props.longTermMemory,
+    // 长期记忆由应用数据（记忆宫殿摘要）补入，AI 只写短期记忆。
+    // 开场白不补：它是这段关系开始之前的话，挂一条"记忆回廊"会很怪。
+    longTerm: props.variant === 'greeting' ? [] : props.longTermMemory,
   })
   return {
     options,

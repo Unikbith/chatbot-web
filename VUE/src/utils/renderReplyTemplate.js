@@ -54,6 +54,9 @@ export function renderReplyTemplate(raw, preset, ctx = {}) {
   const parts = []
   const options = []
   let hasBlock = false
+  // 是否已经渲染过记忆回廊；以及「推荐行动」在第几个 part（补记忆块时要插在它前面）
+  let memoryRendered = false
+  let firstOptionsIdx = -1
 
   if (!text || !tplNames.length) {
     return { parts: text ? [{ type: 'text', text }] : [], options, hasBlock: false }
@@ -137,13 +140,33 @@ export function renderReplyTemplate(raw, preset, ctx = {}) {
     }
     flushText()
     parts.push({ type: 'html', html: rendered.html })
+    if (name === '记忆') memoryRendered = true
     if (rendered.options && rendered.options.length) {
       // 选项文本按出现顺序收集，点击时按索引取回（避免把文案塞进 DOM 属性）
+      if (firstOptionsIdx < 0) firstOptionsIdx = parts.length - 1
       options.push(...rendered.options)
     }
     hasBlock = true
   }
   flushText()
+
+  // 记忆宫殿兜底：长期记忆来自系统数据（对话摘要），不依赖模型写没写【记忆】。
+  // 模型漏写时这里补一块，否则界面上会完全看不到记忆回廊。
+  const longTerm = (ctx && ctx.longTerm) || []
+  if (!memoryRendered && longTerm.length && tplSet.has('记忆') && preset.blocks['记忆']) {
+    let out = null
+    try {
+      out = preset.blocks['记忆']([], ctx)
+    } catch (e) {
+      out = null
+    }
+    if (out && out.html) {
+      // 插在「推荐行动」之前：记忆是回顾，选项是下一步，顺序更符合阅读习惯
+      const at = firstOptionsIdx >= 0 ? firstOptionsIdx : parts.length
+      parts.splice(at, 0, { type: 'html', html: out.html, synthesized: true })
+      hasBlock = true
+    }
+  }
 
   return { parts, options, hasBlock }
 }

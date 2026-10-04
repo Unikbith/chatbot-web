@@ -16,6 +16,7 @@ import step4 from '../assets/tutorial/step4.png'
 import step5 from '../assets/tutorial/step5.png'
 import step6 from '../assets/tutorial/step6.png'
 import step7 from '../assets/tutorial/step7.png'
+import step8 from '../assets/tutorial/step8.png'
 
 export const TUTORIAL_STEPS = [
   {
@@ -70,6 +71,15 @@ export const TUTORIAL_STEPS = [
     desc: '选择人设、打开「神秘」按钮，就可以开始畅聊了（恭喜完成配置）。',
     descEn: 'Pick a persona and turn on the "Mystery" switch, then start chatting.',
     images: [{ src: step7, caption: '' }],
+  },
+  {
+    title: '生图与改图',
+    titleEn: 'Image generation',
+    desc: '聊天框右下角有「生图 / 改图」：输入想生成的内容即可生图，上传一张图再输入要求就是改图。'
+      + '没配置生图模型前有次数限制（每天 5 次，签到可补），配置自己的生图 API 后不再受限。',
+    descEn: 'Use "Generate / Edit" next to the input box: type what you want, or upload an image to edit it. '
+      + 'The shared free channel has a daily limit (5/day, check-in adds more); your own image API has none.',
+    images: [{ src: step8, caption: '' }],
   },
   {
     title: '有建议就告诉我们',

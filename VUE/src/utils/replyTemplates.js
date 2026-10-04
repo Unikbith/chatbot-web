@@ -140,13 +140,104 @@ const ARCHIVE_PROMPT = [
   '要求：数值与你叙述的剧情一致，不要每轮重置；不需要的标记不要硬凑。',
 ].join('\n')
 
+/**
+ * 场景类字段归位：把「地点 / 时间 / 氛围」按**语义**放对位置。
+ *
+ * 为什么不能按位置硬取：
+ *   模型在【场景】里被要求写「时间|地点」，在【状态条】里被要求写「地点|时间|氛围」，
+ *   两个标记的字段顺序本来就是相反的；实测模型经常混着写（有时还两个标记都输出），
+ *   于是同一个位置一会儿是时间、一会儿是地点 —— 界面上就表现为「地点显示错了」。
+ *
+ * 归位规则（先看名字，再看内容，最后才退回声明顺序）：
+ *   1. 形如 `地点:客厅` / `时间:周六 14:20` 的具名字段直接按名字归位；
+ *   2. 剩下没名字的字段按内容猜：像时间的给时间，像地点的给地点，其余算氛围说明；
+ *   3. 都猜不出来时按 fieldOrder 声明的顺序填，保证至少有内容、不丢字。
+ */
+const TIME_HINT = /(\d{1,2}\s*[:：]\s*\d{2}|凌晨|清晨|早上|早晨|上午|中午|午后|下午|傍晚|黄昏|晚上|夜里|深夜|午夜|半夜|Day\s*\d|第[一二三四五六七八九十百\d]+天|周[一二三四五六日天]|星期[一二三四五六日天])/
+const PLACE_HINT = /(楼|层|室|房|厅|馆|店|院|街|路|巷|城|村|岛|山|河|湖|海|港|公园|广场|学校|教室|走廊|楼道|客厅|卧室|厨房|浴室|洗手间|阳台|沙发|床上|床边|车里|车内|门口|窗外|天台|吧台|包厢|营地|车站|机场|咖啡|酒吧|餐厅|食堂|办公室|宿舍|医院|地下|地面|电梯|玄关|地毯)/
+
+const SCENE_KEYS = {
+  place: ['地点', '位置', '所在', '场景'],
+  time: ['时间', '时刻'],
+  note: ['氛围', '环境', '状态', '说明', '光线'],
+}
+
+function sceneKindOf(key) {
+  for (const [kind, keys] of Object.entries(SCENE_KEYS)) {
+    if (keys.includes(key)) return kind
+  }
+  return null
+}
+
+function classifySceneFields(fields, fieldOrder = ['place', 'time', 'note']) {
+  const out = { place: '', time: '', note: '' }
+  const bare = []
+  for (const raw of fields || []) {
+    const s = String(raw == null ? '' : raw).trim()
+    if (!s) continue
+    const m = s.match(/^([^:：]{1,6})[:：]\s*(.*)$/)
+    const kind = m ? sceneKindOf(m[1].trim()) : null
+    if (kind) {
+      if (!out[kind]) out[kind] = m[2].trim()
+      continue
+    }
+    bare.push(s)
+  }
+
+  // 无名值：按内容判类型；同类型已有值就退化成氛围说明，绝不覆盖已有的地点/时间
+  const notes = []
+  for (const s of bare) {
+    const isTime = TIME_HINT.test(s)
+    const isPlace = !isTime && PLACE_HINT.test(s)
+    if (isTime && !out.time) { out.time = s; continue }
+    if (isPlace && !out.place) { out.place = s; continue }
+    notes.push(s)
+  }
+
+  // 兜底：一个都认不出来（生僻写法）时按声明顺序落位，保证内容不丢、位置固定
+  if (!out.place && !out.time && notes.length) {
+    const order = fieldOrder.filter(k => k === 'place' || k === 'time')
+    order.forEach((kind, i) => { if (notes[i]) out[kind] = notes[i] })
+    notes.splice(0, order.length)
+  }
+
+  if (notes.length) out.note = [out.note, ...notes].filter(Boolean).join(' ')
+  return out
+}
+
+/**
+ * 把一条记忆宫殿摘要整理成可读的多行 HTML。
+ *
+ * 摘要正文是分条写的长文（`- 人物身份与关系：…` / `- 关键事件时间线：\n 1. …`），
+ * 直接丢进一个 <li> 会连成一大坨、上下文字段还会串味。这里：
+ *   · 按行拆开，去掉 markdown 的 - * 与列表编号前缀；
+ *   · 第一行当小标题，其余作为正文行；
+ *   · 单行过长时截断（摘要本身在库里保留全文，界面只需要能扫读）。
+ */
+const MEMORY_LINE_MAX = 240
+function formatMemoryEntry(text) {
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map(l => l.replace(/^\s*[-*•·]\s*/, '').replace(/^\s*\d+[.、)]\s*/, '').trim())
+    .filter(Boolean)
+  if (!lines.length) return ''
+  const clip = (s) => (s.length > MEMORY_LINE_MAX ? `${s.slice(0, MEMORY_LINE_MAX)}…` : s)
+  const [head, ...body] = lines
+  return `<span class="t-mem-item-h">${esc(clip(head))}</span>`
+    + (body.length
+      ? `<span class="t-mem-item-b">${body.map(l => `<span class="t-mem-line">${esc(clip(l))}</span>`).join('')}</span>`
+      : '')
+}
+
 /** 各标记的渲染器：输入 body，输出 { html, options } */
 const ARCHIVE_BLOCKS = {
   场景(fields) {
-    const [time = '', place = ''] = fields
+    // 声明顺序：地点 | 时间 | 氛围（两个字段时也按语义自动归位）
+    const { place, time, note } = classifySceneFields(fields, ['place', 'time', 'note'])
     const rows = []
-    if (time) rows.push(`<div class="t-scene-row"><span class="t-ico">${ICONS.场景}</span><span>${esc(time)}</span></div>`)
     if (place) rows.push(`<div class="t-scene-row is-place"><span class="t-ico">${ICONS.地点}</span><span>${esc(place)}</span></div>`)
+    if (time) rows.push(`<div class="t-scene-row"><span class="t-ico">${ICONS.场景}</span><span>${esc(time)}</span></div>`)
+    if (note) rows.push(`<div class="t-scene-row is-note"><span>${esc(note)}</span></div>`)
     return { html: rows.length ? `<div class="t-scene">${rows.join('')}</div>` : '' }
   },
 
@@ -230,13 +321,12 @@ const ARCHIVE_BLOCKS = {
     return { html: `<section class="t-panel${title ? '' : ' t-stats-flat'}">${head}<div class="t-panel-b">${rows}</div></section>` }
   },
 
-  /** 顶部状态条：标题 | 时间 | 一句状态（对齐终端/网咖风格的信息条） */
+  /** 顶部状态条：地点 | 时间 | 一句氛围（与【场景】同一套语义归位，写反了也不会错位） */
   状态条(fields) {
     if (!fields.length) return { html: '' }
-    const [title = '', time = '', ...rest] = fields
-    const note = rest.join(' ')
+    const { place, time, note } = classifySceneFields(fields, ['place', 'time', 'note'])
     const parts = []
-    if (title) parts.push(`<span class="t-topbar-title">${esc(title)}</span>`)
+    if (place) parts.push(`<span class="t-topbar-place"><span class="t-ico">${ICONS.地点}</span>${esc(place)}</span>`)
     if (time) parts.push(`<span class="t-topbar-time">${esc(time)}</span>`)
     if (note) parts.push(`<span class="t-topbar-note">${esc(note)}</span>`)
     return { html: parts.length ? `<div class="t-topbar">${parts.join('<span class="t-topbar-sep">|</span>')}</div>` : '' }
@@ -274,17 +364,29 @@ const ARCHIVE_BLOCKS = {
   /**
    * 记忆回廊：一个总区块，里面分「短期记忆」（AI 输出的条目）
    * 与「长期记忆」（= 应用自己的记忆宫殿摘要，由系统数据补上，AI 不需要写）。
+   *
+   * 关键点：**长期记忆来自系统数据，不依赖模型是否写了【记忆】**。
+   * 之前只有模型写了【记忆】才渲染整块，模型一轮偷懒没写，界面上就完全看不到
+   * 记忆宫殿（而摘要其实一直在库里）—— 现在 fields 为空也能渲染出长期记忆。
    */
   记忆(fields, ctx) {
-    if (!fields.length) return { html: '' }
-    // 首项是标题（模型按规范写「记忆回廊」），其余是短期记忆条目
-    let title = fields[0]
-    let items = fields.slice(1)
-    if (/^短期记忆/.test(title)) {
-      // 容错：模型仍写「短期记忆 (n/m)」时，标题统一显示为记忆回廊
-      title = '记忆回廊'
+    let title = '记忆回廊'
+    let items = []
+    // 首项是标题（模型按规范写「记忆回廊」），其余是短期记忆条目；没有标题时全部当条目
+    if (fields.length) {
+      const first = String(fields[0] || '').trim()
+      if (/^记忆|回廊|宫殿|短期|长期/.test(first) && fields.length > 1) {
+        title = /短期/.test(first) ? '记忆回廊' : first
+        items = fields.slice(1)
+      } else if (/^记忆|回廊|宫殿/.test(first)) {
+        title = first || '记忆回廊'
+        items = fields.slice(1)
+      } else {
+        items = fields.slice()
+      }
     }
     const longTerm = (ctx && ctx.longTerm) || []
+    if (!items.length && !longTerm.length) return { html: '' }
 
     const shortBlock = items.length
       ? `<div class="t-mem-sub">`
@@ -292,11 +394,14 @@ const ARCHIVE_BLOCKS = {
         + `<ol class="t-mem-list">${items.map(it => `<li>${esc(it)}</li>`).join('')}</ol>`
         + `</div>`
       : ''
+    // 长期记忆 = 记忆宫殿摘要。摘要本身是分条写的长文，直接塞进 <li> 会变成一坨，
+    // 这里拆成行渲染，并默认折叠（要看再展开），避免淹没正文。
     const longBlock = longTerm.length
-      ? `<div class="t-mem-sub">`
-        + `<div class="t-mem-sub-h">长期记忆 <em>${longTerm.length}</em></div>`
-        + `<ol class="t-mem-list t-mem-list--long">${longTerm.map(it => `<li>${esc(it)}</li>`).join('')}</ol>`
-        + `</div>`
+      ? `<details class="t-mem-sub t-mem-sub--long">`
+        + `<summary class="t-mem-sub-h">长期记忆（记忆宫殿） <em>${longTerm.length}</em></summary>`
+        + `<ol class="t-mem-list t-mem-list--long">`
+        + longTerm.map(it => `<li>${formatMemoryEntry(it)}</li>`).join('')
+        + `</ol></details>`
       : ''
 
     return {
@@ -628,24 +733,32 @@ export const OUTPUT_LENGTHS = {
 }
 
 export const OUTPUT_LENGTH_LIST = Object.values(OUTPUT_LENGTHS)
-// 默认「长文」：每轮要填状态条 / 三块角色面板 / 全部数值 / 内心 / 推演，短文根本装不下
+// 默认「长文」：每轮要填场景条 / 三块角色面板 / 全部数值 / 内心 / 记忆 / 推演，短文根本装不下
 export const DEFAULT_LENGTH = 'long'
 
-/** 取篇幅要求文本；未知 id 回落默认 */
+/**
+ * 取篇幅要求文本；未知 id 回落默认。
+ *
+ * ⚠️ 已**不用于注入提示词**：注入文本的唯一事实来源是后端 `Flask/reply_spec.py`
+ * （否则新建对话拿不到这份文本，两边还会各写一份逐渐漂移）。
+ * 这里的文本只作为前端侧的对照参考，改注入内容请改后端。
+ */
 export function lengthPrompt(id) {
   const l = OUTPUT_LENGTHS[id] || OUTPUT_LENGTHS[DEFAULT_LENGTH]
   return l ? l.prompt : ''
 }
 
-/** 取协议文本；未知 id 回落到默认 */
+/** 取协议文本；未知 id 回落到默认（同样不再用于注入，见上） */
 export function protocolPrompt(id) {
   const p = OUTPUT_PROTOCOLS[id] || OUTPUT_PROTOCOLS[DEFAULT_PROTOCOL]
   return p ? p.prompt : ''
 }
 
 /**
- * 组合最终注入系统提示词的文本 = 标记词表说明 + 输出结构规范 + 篇幅要求。
- * 前端把它存进会话的 reply_template.prompt，后端原样注入。
+ * 组合注入文本（历史接口，保留仅为兼容旧调用）。
+ *
+ * 🚫 不要用它生成注入内容 —— 会与后端规范形成两份互相冲突的文本。
+ * 需要改模型看到的结构规范，请改 `Flask/reply_spec.py`。
  */
 export function composeTemplatePrompt(preset, protocolId, lengthId) {
   const vocab = preset?.prompt || ''

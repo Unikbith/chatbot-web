@@ -64,8 +64,11 @@ ok('弹窗默认展开免费模型名称', dialog.includes('freeName ||'))
 
 console.log('\n[4] 教程内容与文档一致')
 const stepTitles = [...stepsFile.matchAll(/title:\s*'([^']+)'/g)].map(m => m[1])
-ok('共 8 步', stepTitles.length === 8, `实际 ${stepTitles.length}`)
+ok('共 9 步', stepTitles.length === 9, `实际 ${stepTitles.length}`)
 ok('第 1 步是配置 API', stepTitles[0].includes('API'))
+ok('第 8 步讲生图/改图与次数限制',
+  stepsFile.includes('生图与改图') && /没配置生图模型前有次数限制/.test(stepsFile))
+ok('最后一步是反馈入口', stepTitles[stepTitles.length - 1].includes('建议'))
 ok('教程标题强调必须配置自己的 API', tutorialDialog.includes('一定要配置自己的 API'))
 const step3 = stepsFile.split('title: \'创建并保存 Key\'')[1]?.split('title:')[0] || ''
 ok('第 3 步区分电脑端与手机端（3 张图）',
@@ -77,7 +80,7 @@ ok('文案里没有真人姓名等隐私内容', !/廖祯斌/.test(stepsFile + t
 console.log('\n[5] 教程配图真实存在')
 const assets = join(src, 'assets', 'tutorial')
 for (const f of ['step1.png', 'step2.png', 'step3-pc.png', 'step3-phone1.png', 'step3-phone2.png',
-  'step4.png', 'step5.png', 'step6.png', 'step7.png']) {
+  'step4.png', 'step5.png', 'step6.png', 'step7.png', 'step8.png']) {
   ok(`assets/tutorial/${f}`, existsSync(join(assets, f)))
 }
 ok('教程弹窗支持一步多图', tutorialDialog.includes('v-for="(img, j) in step.images"'))

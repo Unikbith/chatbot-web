@@ -20,8 +20,14 @@ console.log('\n[1] 最恶劣情况：整轮回复没有换行，标记用空格/
   const html = out.parts.filter(p => p.type === 'html').map(p => p.html).join('')
   const textLeft = out.parts.filter(p => p.type === 'text').map(p => p.text).join('')
 
-  check('识别出 5 个构件', out.parts.filter(p => p.type === 'html').length === 5,
+  // 5 个构件来自标记；另有 1 个是系统补出的记忆回廊（模型没写【记忆】，
+  // 但 ctx.longTerm 有摘要 —— 这正是"记忆宫殿必须显示"的兜底行为）
+  check('识别出 5 个标记构件 + 1 个补出的记忆回廊',
+    out.parts.filter(p => p.type === 'html').length === 6,
     JSON.stringify(out.parts.map(p => p.type)))
+  check('补出的记忆块带 synthesized 标记',
+    out.parts.filter(p => p.synthesized).length === 1)
+  check('长期记忆来自 ctx', html.includes('t-mem-list--long') && html.includes('较早对话摘要一'))
   check('无标记原文残留', !/【(面板|状态|内心|推演)】/.test(textLeft), JSON.stringify(textLeft))
   check('状态含强度徽标', html.includes('t-badge') && html.includes('微涨'))
   check('状态含涨跌方向', html.includes('is-up'))
