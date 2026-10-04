@@ -18,6 +18,11 @@ import terminalCss from '../assets/reply-templates/terminal.css?raw'
 import scriptCss from '../assets/reply-templates/script.css?raw'
 import letterCss from '../assets/reply-templates/letter.css?raw'
 import oracleCss from '../assets/reply-templates/oracle.css?raw'
+import blushCss from '../assets/reply-templates/blush.css?raw'
+import moonlightCss from '../assets/reply-templates/moonlight.css?raw'
+import smokeCss from '../assets/reply-templates/smoke.css?raw'
+import whiskeyCss from '../assets/reply-templates/whiskey.css?raw'
+import fateCss from '../assets/reply-templates/fate.css?raw'
 
 const STYLE_ID = 'reply-template-styles'
 
@@ -32,6 +37,11 @@ export const TEMPLATE_CSS = {
   script: scriptCss,
   letter: letterCss,
   oracle: oracleCss,
+  blush: blushCss,
+  moonlight: moonlightCss,
+  smoke: smokeCss,
+  whiskey: whiskeyCss,
+  fate: fateCss,
 }
 
 /**
@@ -47,7 +57,7 @@ export function ensureTemplateStyles() {
   style.setAttribute('data-reply-templates', '1')
   // 骨架在前，主题在后：主题覆盖同级变量时依赖后者靠后
   style.textContent = [baseCss, archiveCss, minimalCss, neonCss, inkCss, terminalCss,
-    scriptCss, letterCss, oracleCss].join('\n')
+    scriptCss, letterCss, oracleCss, blushCss, moonlightCss, smokeCss, whiskeyCss, fateCss].join('\n')
   document.head.appendChild(style)
   return true
 }

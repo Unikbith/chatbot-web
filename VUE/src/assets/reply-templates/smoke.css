@@ -1,0 +1,94 @@
+/* ==========================================================================
+   渲染预设：余温（Afterglow）—— 男性向 · 克制的暧昧
+
+   隐喻：这一轮回复 = 事后的那几分钟，屋里暗着，只亮一点烟头。
+   面向偏爱「低饱和、留白、不必多说」的读者：
+     深炭蓝灰底 + 冷灰字 + 一点微弱的烟橙余火，细发丝边框，几乎不加装饰。
+   与「终端/霓虹」的区别：那两个是赛博科技感；这里是「夜景 + 余烬」，
+   更安静、更克制、更有「成年人不用把话说满」的距离感。
+   ========================================================================== */
+.rtpl.rtpl-smoke {
+  --rtpl-bg: #171a1f;
+  --rtpl-fg: #d6dae0;
+  --rtpl-muted: #8a919c;
+  --rtpl-border: rgba(214, 218, 224, 0.14);
+  --rtpl-accent: #d98957;
+  --rtpl-accent-strong: #e9b189;
+  --rtpl-accent-soft: rgba(217, 137, 87, 0.14);
+  --rtpl-accent-soft-2: rgba(217, 137, 87, 0.06);
+  --rtpl-accent-fg: #171a1f;
+  --rtpl-note: #a8a08f;
+  --rtpl-head-bg: rgba(214, 218, 224, 0.05);
+  --rtpl-bar-bg: rgba(214, 218, 224, 0.12);
+  --rtpl-bar-fill: linear-gradient(90deg, #e9b189, #c9703c);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.03);
+  --rtpl-radius: 6px;
+  --rtpl-radius-sm: 4px;
+  --rtpl-shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 18px 36px -24px rgba(0, 0, 0, 0.9);
+  --rtpl-font: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --rtpl-font-size: 13.5px;
+  --rtpl-line-height: 1.8;
+  --rtpl-indent: 2em;
+  --rtpl-scene-bg: rgba(214, 218, 224, 0.06);
+  --rtpl-scene-fg: #b9c0ca;
+  --rtpl-place-bg: rgba(217, 137, 87, 0.12);
+  --rtpl-place-fg: #e9b189;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #3a3030, #23201e);
+  --rtpl-mem-head-fg: #e9b189;
+  --rtpl-say-fg: #eef0f3;
+  --rtpl-say-weight: 600;
+  --rtpl-bracket-fg: #8a919c;
+  --rtpl-c1: #d98957; --rtpl-c2: #a8a08f; --rtpl-c3: #7fa0a8;
+  --rtpl-c4: #a38f7f; --rtpl-c5: #8a919c; --rtpl-c6: #6f7680;
+
+  position: relative;
+  padding: 16px 16px 14px;
+  background:
+    radial-gradient(90% 70% at 100% 0%, rgba(217, 137, 87, 0.14) 0%, rgba(0, 0, 0, 0) 50%),
+    var(--rtpl-bg);
+}
+
+/* 边缘一点余火：右下角微弱暖光，暗示刚才还没散去的温度 */
+.rtpl.rtpl-smoke::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 60%;
+  height: 40%;
+  background: radial-gradient(80% 80% at 100% 100%, rgba(217, 137, 87, 0.12) 0%, rgba(0, 0, 0, 0) 70%);
+  border-radius: var(--rtpl-radius);
+  pointer-events: none;
+}
+
+.rtpl.rtpl-smoke .t-scene-row {
+  background: rgba(214, 218, 224, 0.06);
+  border-left: 2px solid var(--rtpl-accent);
+  border-radius: 2px;
+  padding: 3px 10px;
+}
+.rtpl.rtpl-smoke .t-scene-row.is-note {
+  background: none;
+  border-left: 0;
+  font-style: italic;
+}
+
+.rtpl.rtpl-smoke .t-panel-h,
+.rtpl.rtpl-smoke .t-fold-h {
+  background: none;
+  border-bottom: 1px solid var(--rtpl-border);
+}
+
+.rtpl.rtpl-smoke .t-inner {
+  border-left: 2px solid var(--rtpl-accent);
+  background: rgba(214, 218, 224, 0.04);
+  border-radius: 2px 6px 6px 2px;
+}
+
+.rtpl.rtpl-smoke .t-opt { border-radius: 4px; }
+.rtpl.rtpl-smoke .t-opt:hover {
+  background: rgba(217, 137, 87, 0.1);
+  border-color: var(--rtpl-accent);
+}
+
+.rtpl.rtpl-smoke .t-item { border-radius: 4px; }

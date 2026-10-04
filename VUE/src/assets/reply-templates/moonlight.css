@@ -1,0 +1,145 @@
+/* ==========================================================================
+   渲染预设：月色（Moonlight）—— 女性向 · 梦幻词汇
+
+   隐喻：这一轮回复 = 月光下、只有两个人知道的那句悄悄话。
+   面向偏爱「静谧、梦幻、被温柔对待」的读者：
+     清冷银蓝纸底 + 淡紫月光 + 一枚右上角的月牙与细碎星点。
+   与「启示（oracle）」的区别：启示是深靛夜空 + 金、偏占卜仪式感；
+   这里是浅色的、冷调的、更安静的「月下私语」，配优雅衬线字。
+   ========================================================================== */
+.rtpl.rtpl-moonlight {
+  --rtpl-bg: #f4f6fd;
+  --rtpl-fg: #3a4267;
+  --rtpl-muted: #7c84a8;
+  --rtpl-border: rgba(124, 132, 168, 0.24);
+  --rtpl-accent: #7c8ce0;
+  --rtpl-accent-strong: #4d5ec0;
+  --rtpl-accent-soft: rgba(124, 140, 224, 0.14);
+  --rtpl-accent-soft-2: rgba(124, 140, 224, 0.06);
+  --rtpl-accent-fg: #ffffff;
+  --rtpl-note: #9a86c8;
+  --rtpl-head-bg: linear-gradient(135deg, rgba(190, 200, 244, 0.45), rgba(190, 200, 244, 0.16));
+  --rtpl-bar-bg: rgba(124, 140, 224, 0.16);
+  --rtpl-bar-fill: linear-gradient(90deg, #b3c0ff, #7c8ce0);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.68);
+  --rtpl-radius: 16px;
+  --rtpl-radius-sm: 12px;
+  --rtpl-shadow: 0 1px 2px rgba(70, 80, 140, 0.05), 0 14px 32px -20px rgba(70, 80, 140, 0.4);
+  --rtpl-font: "Noto Serif SC", "Source Han Serif SC", "Songti SC", Georgia, serif;
+  --rtpl-font-size: 14px;
+  --rtpl-line-height: 1.82;
+  --rtpl-indent: 2em;
+  --rtpl-scene-bg: rgba(124, 140, 224, 0.1);
+  --rtpl-scene-fg: #4d5ec0;
+  --rtpl-place-bg: rgba(154, 134, 200, 0.14);
+  --rtpl-place-fg: #6f5fb0;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #9aa8ee, #6c7fdb);
+  --rtpl-mem-head-fg: #ffffff;
+  --rtpl-say-fg: #3a4267;
+  --rtpl-say-weight: 700;
+  --rtpl-bracket-fg: #7c84a8;
+  --rtpl-c1: #7c8ce0; --rtpl-c2: #9a86c8; --rtpl-c3: #6aa8c8;
+  --rtpl-c4: #8fa86f; --rtpl-c5: #c89a8c; --rtpl-c6: #7c84a8;
+
+  position: relative;
+  padding: 16px 16px 14px;
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgba(216, 222, 250, 0.7) 0%, rgba(255, 255, 255, 0) 52%),
+    radial-gradient(90% 70% at 100% 10%, rgba(190, 180, 238, 0.4) 0%, rgba(255, 255, 255, 0) 50%),
+    var(--rtpl-bg);
+}
+
+/* 月牙：右上角，一个被「夜色圆」吃掉大半的亮圆 */
+.rtpl.rtpl-moonlight::after {
+  content: "";
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #dfe5ff;
+  box-shadow: 8px -6px 0 2px var(--rtpl-bg);
+  opacity: 0.85;
+  pointer-events: none;
+  transform: rotate(-8deg);
+}
+
+/* 细碎星点：用径向小点铺在纸面，量少不喧宾夺主 */
+.rtpl.rtpl-moonlight::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--rtpl-radius);
+  background:
+    radial-gradient(1.6px 1.6px at 78% 24%, rgba(124, 140, 224, 0.35) 50%, rgba(0, 0, 0, 0) 51%),
+    radial-gradient(1.2px 1.2px at 56% 12%, rgba(154, 134, 200, 0.35) 50%, rgba(0, 0, 0, 0) 51%),
+    radial-gradient(1.4px 1.4px at 88% 62%, rgba(124, 140, 224, 0.25) 50%, rgba(0, 0, 0, 0) 51%);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.rtpl.rtpl-moonlight .t-scene-row {
+  background: rgba(190, 200, 244, 0.22);
+  border-radius: 10px;
+  padding: 4px 12px;
+}
+.rtpl.rtpl-moonlight .t-scene-row.is-place { background: rgba(196, 186, 235, 0.22); }
+.rtpl.rtpl-moonlight .t-scene-row.is-note { background: none; font-style: italic; }
+
+.rtpl.rtpl-moonlight .t-panel-h,
+.rtpl.rtpl-moonlight .t-fold-h {
+  background: none;
+  border-bottom: 1px solid var(--rtpl-border);
+}
+
+.rtpl.rtpl-moonlight .t-inner {
+  border-left: 3px solid var(--rtpl-accent);
+  background: rgba(216, 222, 250, 0.4);
+  border-radius: 4px 12px 12px 4px;
+}
+
+.rtpl.rtpl-moonlight .t-opt {
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.5);
+}
+.rtpl.rtpl-moonlight .t-opt:hover {
+  background: rgba(222, 228, 250, 0.75);
+  border-color: var(--rtpl-accent);
+}
+
+.rtpl.rtpl-moonlight .t-item { border-radius: 10px; }
+
+html.dark .rtpl.rtpl-moonlight {
+  --rtpl-bg: #141826;
+  --rtpl-fg: #dde2f5;
+  --rtpl-muted: #929bbf;
+  --rtpl-border: rgba(150, 164, 224, 0.28);
+  --rtpl-accent: #a4b4ff;
+  --rtpl-accent-strong: #c3cdff;
+  --rtpl-accent-soft: rgba(150, 164, 224, 0.16);
+  --rtpl-accent-soft-2: rgba(150, 164, 224, 0.07);
+  --rtpl-note: #b4a6e0;
+  --rtpl-head-bg: rgba(150, 164, 224, 0.1);
+  --rtpl-bar-bg: rgba(150, 164, 224, 0.18);
+  --rtpl-bar-fill: linear-gradient(90deg, #c3cdff, #7b8ce8);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.04);
+  --rtpl-shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 16px 32px -22px rgba(0, 0, 0, 0.9);
+  --rtpl-scene-bg: rgba(150, 164, 224, 0.12);
+  --rtpl-scene-fg: #c3cdff;
+  --rtpl-place-bg: rgba(180, 150, 224, 0.16);
+  --rtpl-place-fg: #cbb6f2;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #6c7fdb, #46559d);
+  --rtpl-mem-head-fg: #eef0ff;
+  --rtpl-say-fg: #f0f3ff;
+  --rtpl-bracket-fg: #929bbf;
+  --rtpl-c1: #a4b4ff; --rtpl-c2: #b4a6e0; --rtpl-c3: #8fc4e0;
+  --rtpl-c4: #a8c48f; --rtpl-c5: #d4b2a4; --rtpl-c6: #929bbf;
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgba(80, 92, 160, 0.35) 0%, rgba(0, 0, 0, 0) 52%),
+    var(--rtpl-bg);
+}
+html.dark .rtpl.rtpl-moonlight::after { background: #cfd6ff; box-shadow: 8px -6px 0 2px #141826; }
+html.dark .rtpl.rtpl-moonlight .t-scene-row { background: rgba(150, 164, 224, 0.12); }
+html.dark .rtpl.rtpl-moonlight .t-opt { background: rgba(255, 255, 255, 0.04); }
+html.dark .rtpl.rtpl-moonlight .t-opt:hover { background: rgba(150, 164, 224, 0.16); }

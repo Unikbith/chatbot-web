@@ -1,0 +1,91 @@
+/* ==========================================================================
+   渲染预设：微醺（Tipsy）—— 男性向 · 成熟暧昧
+
+   隐喻：这一轮回复 = 深夜酒吧的吧台，两个人碰了碰杯，都有点上头。
+   面向偏爱「成熟、有质感、带点酒精的情调」的读者：
+     深棕木质底 + 琥珀金 + 一盏吊灯般的暖光，金色细边与衬线字。
+   与「余温(smoke)」的区别：余温是冷灰 + 烟橙的克制夜；这里是
+   暖棕 + 琥珀金的微醺，更醇厚、更声色。
+   ========================================================================== */
+.rtpl.rtpl-whiskey {
+  --rtpl-bg: #1b1410;
+  --rtpl-fg: #e6d9c3;
+  --rtpl-muted: #a5937e;
+  --rtpl-border: rgba(200, 150, 69, 0.26);
+  --rtpl-accent: #c89645;
+  --rtpl-accent-strong: #e0b56e;
+  --rtpl-accent-soft: rgba(200, 150, 69, 0.16);
+  --rtpl-accent-soft-2: rgba(200, 150, 69, 0.07);
+  --rtpl-accent-fg: #1b1410;
+  --rtpl-note: #b89a6f;
+  --rtpl-head-bg: rgba(200, 150, 69, 0.1);
+  --rtpl-bar-bg: rgba(200, 150, 69, 0.16);
+  --rtpl-bar-fill: linear-gradient(90deg, #e0b56e, #b07e2e);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.035);
+  --rtpl-radius: 8px;
+  --rtpl-radius-sm: 6px;
+  --rtpl-shadow: 0 1px 0 rgba(0, 0, 0, 0.45), 0 18px 36px -22px rgba(0, 0, 0, 0.9);
+  --rtpl-font: "Noto Serif SC", "Georgia", "Songti SC", serif;
+  --rtpl-font-size: 14px;
+  --rtpl-line-height: 1.82;
+  --rtpl-indent: 2em;
+  --rtpl-scene-bg: rgba(200, 150, 69, 0.1);
+  --rtpl-scene-fg: #d8b779;
+  --rtpl-place-bg: rgba(200, 150, 69, 0.14);
+  --rtpl-place-fg: #e0b56e;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #c89645, #7a5320);
+  --rtpl-mem-head-fg: #fdf3e2;
+  --rtpl-say-fg: #f1e7d2;
+  --rtpl-say-weight: 700;
+  --rtpl-bracket-fg: #a5937e;
+  --rtpl-c1: #c89645; --rtpl-c2: #b89a6f; --rtpl-c3: #8fa08a;
+  --rtpl-c4: #b08a6a; --rtpl-c5: #a5937e; --rtpl-c6: #7f8a93;
+
+  position: relative;
+  padding: 16px 16px 14px;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(200, 150, 69, 0.18) 0%, rgba(0, 0, 0, 0) 55%),
+    var(--rtpl-bg);
+}
+
+/* 吊灯光晕：顶部中央一盏暖光，往下晕开 */
+.rtpl.rtpl-whiskey::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 68%;
+  height: 42%;
+  transform: translateX(-50%);
+  background: radial-gradient(60% 60% at 50% 0%, rgba(224, 181, 110, 0.22) 0%, rgba(0, 0, 0, 0) 70%);
+  border-radius: var(--rtpl-radius) var(--rtpl-radius) 0 0;
+  pointer-events: none;
+}
+
+.rtpl.rtpl-whiskey .t-scene-row {
+  background: rgba(200, 150, 69, 0.1);
+  border-radius: 6px;
+  padding: 4px 12px;
+  letter-spacing: 0.03em;
+}
+.rtpl.rtpl-whiskey .t-scene-row.is-note { background: none; font-style: italic; }
+
+.rtpl.rtpl-whiskey .t-panel-h,
+.rtpl.rtpl-whiskey .t-fold-h {
+  background: none;
+  border-bottom: 1px solid var(--rtpl-border);
+}
+
+.rtpl.rtpl-whiskey .t-inner {
+  border-left: 3px solid var(--rtpl-accent);
+  background: rgba(200, 150, 69, 0.08);
+  border-radius: 4px 8px 8px 4px;
+}
+
+.rtpl.rtpl-whiskey .t-opt { border-radius: 6px; }
+.rtpl.rtpl-whiskey .t-opt:hover {
+  background: rgba(200, 150, 69, 0.12);
+  border-color: var(--rtpl-accent);
+}
+
+.rtpl.rtpl-whiskey .t-item { border-radius: 6px; }

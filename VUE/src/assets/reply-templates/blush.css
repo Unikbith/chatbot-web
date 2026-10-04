@@ -1,0 +1,126 @@
+/* ==========================================================================
+   渲染预设：脸红（Blush）—— 女性向 · 心动词汇
+
+   隐喻：这一轮回复 = 一句话让 TA 心跳加速、脸开始发烫。
+   面向偏爱「被宠、被撩、甜而不腻」的读者：
+     奶油蜜桃底 + 腮红粉渐变 + 圆润气泡卡片 + 顶部一道「心跳」脉搏细线。
+   与既有「档案风」的区别：档案风是玫粉调的规整卡片，像一份文档；
+   这里是更软、更暖、更圆的糖果气泡，配幼圆字，把氛围做成「脸红」本身。
+   ========================================================================== */
+.rtpl.rtpl-blush {
+  --rtpl-bg: #fff7f5;
+  --rtpl-fg: #5b3946;
+  --rtpl-muted: #9a7f88;
+  --rtpl-border: rgba(214, 120, 141, 0.22);
+  --rtpl-accent: #e45f80;
+  --rtpl-accent-strong: #c2375f;
+  --rtpl-accent-soft: rgba(228, 95, 128, 0.13);
+  --rtpl-accent-soft-2: rgba(228, 95, 128, 0.06);
+  --rtpl-accent-fg: #ffffff;
+  --rtpl-note: #c98b96;
+  --rtpl-head-bg: linear-gradient(135deg, rgba(247, 190, 206, 0.4), rgba(247, 190, 206, 0.14));
+  --rtpl-bar-bg: rgba(228, 95, 128, 0.16);
+  --rtpl-bar-fill: linear-gradient(90deg, #ffb3c4, #e45f80);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.72);
+  --rtpl-radius: 20px;
+  --rtpl-radius-sm: 14px;
+  --rtpl-shadow: 0 2px 4px rgba(200, 90, 120, 0.06), 0 12px 28px -18px rgba(200, 90, 120, 0.4);
+  --rtpl-font: "Yuanti SC", "YouYuan", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --rtpl-font-size: 14px;
+  --rtpl-line-height: 1.8;
+  --rtpl-indent: 2em;
+  --rtpl-scene-bg: rgba(228, 95, 128, 0.1);
+  --rtpl-scene-fg: #c2375f;
+  --rtpl-place-bg: rgba(255, 176, 190, 0.22);
+  --rtpl-place-fg: #d4567a;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #f2a3b8, #e45f80);
+  --rtpl-mem-head-fg: #ffffff;
+  --rtpl-say-fg: #c2375f;
+  --rtpl-say-weight: 700;
+  --rtpl-bracket-fg: #b48a98;
+  --rtpl-c1: #e45f80; --rtpl-c2: #c98b96; --rtpl-c3: #e8985c;
+  --rtpl-c4: #b98bd0; --rtpl-c5: #7fb5c9; --rtpl-c6: #a5a080;
+
+  position: relative;
+  padding: 16px 16px 14px;
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(255, 200, 214, 0.55) 0%, rgba(255, 255, 255, 0) 55%),
+    radial-gradient(110% 80% at 0% 0%, rgba(255, 226, 232, 0.6) 0%, rgba(255, 255, 255, 0) 50%),
+    var(--rtpl-bg);
+}
+
+/* 顶部：一道「心跳」脉搏细线（静态），那道让人脸红的瞬间 */
+.rtpl.rtpl-blush::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 4px;
+  border-radius: var(--rtpl-radius) var(--rtpl-radius) 0 0;
+  background:
+    repeating-linear-gradient(90deg,
+      #e45f80 0 10px, rgba(255, 255, 255, 0) 10px 22px,
+      #f2a3b8 22px 30px, rgba(255, 255, 255, 0) 30px 44px);
+  opacity: 0.7;
+}
+
+.rtpl.rtpl-blush .t-scene-row {
+  background: rgba(255, 190, 205, 0.28);
+  border-radius: 999px;
+  padding: 4px 12px;
+}
+.rtpl.rtpl-blush .t-scene-row.is-place { background: rgba(255, 150, 170, 0.22); }
+.rtpl.rtpl-blush .t-scene-row.is-note { background: none; }
+
+.rtpl.rtpl-blush .t-panel-h,
+.rtpl.rtpl-blush .t-fold-h {
+  background: none;
+  border-bottom: 1px dashed var(--rtpl-border);
+}
+
+.rtpl.rtpl-blush .t-inner {
+  border-left: 3px solid var(--rtpl-accent);
+  background: rgba(255, 200, 214, 0.22);
+  border-radius: 4px 12px 12px 4px;
+}
+
+.rtpl.rtpl-blush .t-opt { border-radius: 999px; }
+.rtpl.rtpl-blush .t-opt:hover {
+  background: rgba(255, 200, 214, 0.4);
+  border-color: var(--rtpl-accent);
+}
+
+.rtpl.rtpl-blush .t-item { border-radius: 999px; }
+
+html.dark .rtpl.rtpl-blush {
+  --rtpl-bg: #1b1116;
+  --rtpl-fg: #f0dde3;
+  --rtpl-muted: #b79aa3;
+  --rtpl-border: rgba(255, 138, 166, 0.28);
+  --rtpl-accent: #ff8aa6;
+  --rtpl-accent-strong: #ffb3c4;
+  --rtpl-accent-soft: rgba(255, 138, 166, 0.16);
+  --rtpl-accent-soft-2: rgba(255, 138, 166, 0.07);
+  --rtpl-note: #e0a6b4;
+  --rtpl-head-bg: rgba(255, 138, 166, 0.1);
+  --rtpl-bar-bg: rgba(255, 138, 166, 0.18);
+  --rtpl-bar-fill: linear-gradient(90deg, #ffb3c4, #e65f86);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.04);
+  --rtpl-shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 16px 32px -22px rgba(0, 0, 0, 0.9);
+  --rtpl-scene-bg: rgba(255, 138, 166, 0.12);
+  --rtpl-scene-fg: #ffc2d2;
+  --rtpl-place-bg: rgba(255, 138, 166, 0.16);
+  --rtpl-place-fg: #ffa9bf;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #c75a7c, #8f3553);
+  --rtpl-mem-head-fg: #ffeef2;
+  --rtpl-say-fg: #ffe3ea;
+  --rtpl-bracket-fg: #b79aa3;
+  --rtpl-c1: #ff8aa6; --rtpl-c2: #e0a6b4; --rtpl-c3: #e8b078;
+  --rtpl-c4: #c39ae0; --rtpl-c5: #8fbcd1; --rtpl-c6: #b3ad8c;
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(200, 80, 120, 0.3) 0%, rgba(0, 0, 0, 0) 55%),
+    var(--rtpl-bg);
+}
+html.dark .rtpl.rtpl-blush .t-scene-row { background: rgba(255, 138, 166, 0.12); }
+html.dark .rtpl.rtpl-blush .t-opt:hover { background: rgba(255, 138, 166, 0.16); }

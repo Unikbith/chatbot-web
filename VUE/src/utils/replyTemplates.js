@@ -554,6 +554,60 @@ export const TEMPLATE_PRESETS = {
     // 本身就是深色设计：明暗两种环境下观感一致，无需额外写暗色变量覆盖
     darkNative: true,
   },
+
+  // ── 暧昧向 · 五套新预设（男女受众各有侧重）──
+  blush: {
+    id: 'blush',
+    name: '脸红',
+    nameEn: 'Blush',
+    desc: '奶油蜜桃底 · 腮红粉 · 圆润气泡卡片与心跳细线，甜而不腻的心动',
+    descEn: 'Cream-peach with blush pink — bubbly cards and a heartbeat edge',
+    css: '',
+    prompt: ARCHIVE_PROMPT,
+    blocks: ARCHIVE_BLOCKS,
+  },
+  moonlight: {
+    id: 'moonlight',
+    name: '月色',
+    nameEn: 'Moonlight',
+    desc: '银蓝夜色 · 淡紫月光 · 月牙与星点，静谧梦幻的月下私语',
+    descEn: 'Silver-blue night with a crescent moon — hushed, dreamy confessions',
+    css: '',
+    prompt: ARCHIVE_PROMPT,
+    blocks: ARCHIVE_BLOCKS,
+  },
+  smoke: {
+    id: 'smoke',
+    name: '余温',
+    nameEn: 'Afterglow',
+    desc: '炭蓝灰底 · 烟橙余火 · 细发丝边框，事后的片刻、不必说破的克制暧昧',
+    descEn: 'Charcoal with an ember glow — the muted afterglow that needs no words',
+    css: '',
+    prompt: ARCHIVE_PROMPT,
+    blocks: ARCHIVE_BLOCKS,
+    darkNative: true,
+  },
+  whiskey: {
+    id: 'whiskey',
+    name: '微醺',
+    nameEn: 'Tipsy',
+    desc: '深棕木质 · 琥珀金 · 吊灯暖光与衬线字，深夜酒吧里上头的情调',
+    descEn: 'Warm walnut and amber — a late-night bar, pleasantly over the line',
+    css: '',
+    prompt: ARCHIVE_PROMPT,
+    blocks: ARCHIVE_BLOCKS,
+    darkNative: true,
+  },
+  fate: {
+    id: 'fate',
+    name: '红线',
+    nameEn: 'Red String',
+    desc: '暖米纸底 · 玄朱与流金 · 双细线婚书框，一纸誓约与系在指上的红线',
+    descEn: 'Ivory with vermilion and gold — a vow on paper, tied by a red string',
+    css: '',
+    prompt: ARCHIVE_PROMPT,
+    blocks: ARCHIVE_BLOCKS,
+  },
 }
 
 /** 供渲染预设面板按顺序展示 */

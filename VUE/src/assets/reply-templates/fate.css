@@ -1,0 +1,141 @@
+/* ==========================================================================
+   渲染预设：红线（Red String）—— 情侣向 · 姻缘 / 誓言
+
+   隐喻：这一轮回复 = 一封婚书 / 一纸誓约，小指上那根红线打了个结。
+   面向「两人已经是我们」的场面 —— 表白、约定、婚礼、久别重逢：
+     暖米纸底 + 玄朱红 + 流金，双细线边框像一纸郑重其事的婚书。
+   与「信笺(letter)」的区别：信笺是航空信（红蓝斜纹 + 邮戳 + 楷体手书）；
+   这里是玄朱 + 金、双线框、红绳，更庄重、更像「约定」而非「来信」。
+   ========================================================================== */
+.rtpl.rtpl-fate {
+  --rtpl-bg: #fcf6ef;
+  --rtpl-fg: #4a2e2a;
+  --rtpl-muted: #9a8278;
+  --rtpl-border: rgba(189, 58, 46, 0.28);
+  --rtpl-accent: #bd3a2e;
+  --rtpl-accent-strong: #8f2b1f;
+  --rtpl-accent-soft: rgba(189, 58, 46, 0.12);
+  --rtpl-accent-soft-2: rgba(189, 58, 46, 0.05);
+  --rtpl-accent-fg: #ffffff;
+  --rtpl-note: #b27a3c;
+  --rtpl-head-bg: linear-gradient(135deg, rgba(201, 162, 75, 0.24), rgba(189, 58, 46, 0.1));
+  --rtpl-bar-bg: rgba(189, 58, 46, 0.14);
+  --rtpl-bar-fill: linear-gradient(90deg, #d9a55c, #bd3a2e);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.6);
+  --rtpl-radius: 6px;
+  --rtpl-radius-sm: 4px;
+  --rtpl-shadow: 0 1px 0 rgba(120, 60, 40, 0.05), 0 14px 30px -20px rgba(120, 60, 40, 0.4);
+  --rtpl-font: "Kaiti SC", "STKaiti", KaiTi, "Noto Serif SC", "Songti SC", serif;
+  --rtpl-font-size: 14px;
+  --rtpl-line-height: 1.8;
+  --rtpl-indent: 2em;
+  --rtpl-scene-bg: rgba(189, 58, 46, 0.08);
+  --rtpl-scene-fg: #8f2b1f;
+  --rtpl-place-bg: rgba(178, 122, 60, 0.14);
+  --rtpl-place-fg: #9a6428;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #bd3a2e, #8f2b1f);
+  --rtpl-mem-head-fg: #fdf3ec;
+  --rtpl-say-fg: #8f2b1f;
+  --rtpl-say-weight: 700;
+  --rtpl-bracket-fg: #9a8278;
+  --rtpl-c1: #bd3a2e; --rtpl-c2: #b27a3c; --rtpl-c3: #8a7a3f;
+  --rtpl-c4: #a04a5e; --rtpl-c5: #5a7a6a; --rtpl-c6: #9a8278;
+
+  position: relative;
+  padding: 18px 18px 16px;
+  background:
+    radial-gradient(90% 70% at 100% 0%, rgba(201, 162, 75, 0.16) 0%, rgba(255, 255, 255, 0) 50%),
+    var(--rtpl-bg);
+  /* 双细线婚书框：内玄朱、外流金 */
+  border: 1px solid var(--rtpl-accent);
+  box-shadow:
+    inset 0 0 0 1px #c9a24b,
+    inset 0 0 0 4px var(--rtpl-bg),
+    var(--rtpl-shadow);
+}
+
+/* 红绳：左上角垂下的一小段绳影，像打了个结 */
+.rtpl.rtpl-fate::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 0;
+  width: 14px;
+  height: 26px;
+  background:
+    radial-gradient(3px 3px at 50% 6px, rgba(189, 58, 46, 0.55) 50%, rgba(0, 0, 0, 0) 51%),
+    linear-gradient(180deg, rgba(189, 58, 46, 0.5) 0%, rgba(189, 58, 46, 0) 100%);
+  border-radius: 0 0 6px 6px;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.rtpl.rtpl-fate .t-scene-row {
+  background: none;
+  border-left: 2px solid var(--rtpl-accent);
+  border-radius: 2px;
+  padding: 2px 10px;
+  letter-spacing: 0.04em;
+}
+.rtpl.rtpl-fate .t-scene-row.is-note {
+  border-left: 0;
+  font-style: italic;
+}
+
+.rtpl.rtpl-fate .t-panel-h,
+.rtpl.rtpl-fate .t-fold-h {
+  background: none;
+  border-bottom: 1px dashed var(--rtpl-border);
+  letter-spacing: 0.05em;
+}
+
+.rtpl.rtpl-fate .t-inner {
+  border: 0;
+  border-left: 2px solid var(--rtpl-accent);
+  background: none;
+  padding: 4px 0 4px 14px;
+  color: var(--rtpl-accent-strong);
+}
+
+.rtpl.rtpl-fate .t-opt { border-radius: 4px; }
+.rtpl.rtpl-fate .t-opt:hover {
+  background: rgba(189, 58, 46, 0.08);
+  border-color: var(--rtpl-accent);
+}
+
+html.dark .rtpl.rtpl-fate {
+  --rtpl-bg: #1a1210;
+  --rtpl-fg: #ecd9cb;
+  --rtpl-muted: #b09c8e;
+  --rtpl-border: rgba(224, 92, 74, 0.32);
+  --rtpl-accent: #e05c4a;
+  --rtpl-accent-strong: #f08b76;
+  --rtpl-accent-soft: rgba(224, 92, 74, 0.16);
+  --rtpl-accent-soft-2: rgba(224, 92, 74, 0.07);
+  --rtpl-note: #d4a86a;
+  --rtpl-head-bg: rgba(201, 162, 75, 0.12);
+  --rtpl-bar-bg: rgba(224, 92, 74, 0.16);
+  --rtpl-bar-fill: linear-gradient(90deg, #f08b76, #c24a36);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.04);
+  --rtpl-shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 16px 32px -22px rgba(0, 0, 0, 0.9);
+  --rtpl-scene-bg: rgba(224, 92, 74, 0.1);
+  --rtpl-scene-fg: #f08b76;
+  --rtpl-place-bg: rgba(212, 168, 106, 0.14);
+  --rtpl-place-fg: #d4a86a;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #c24a36, #8f2b1f);
+  --rtpl-mem-head-fg: #fdf3ec;
+  --rtpl-say-fg: #f5e5d8;
+  --rtpl-bracket-fg: #b09c8e;
+  --rtpl-c1: #e05c4a; --rtpl-c2: #d4a86a; --rtpl-c3: #a8ae72;
+  --rtpl-c4: #c2708a; --rtpl-c5: #86b0a0; --rtpl-c6: #b09c8e;
+  background:
+    radial-gradient(90% 70% at 100% 0%, rgba(201, 162, 75, 0.14) 0%, rgba(0, 0, 0, 0) 50%),
+    var(--rtpl-bg);
+  box-shadow:
+    inset 0 0 0 1px #c9a24b,
+    inset 0 0 0 4px #1a1210,
+    var(--rtpl-shadow);
+}
+html.dark .rtpl.rtpl-fate .t-scene-row { border-left-color: var(--rtpl-accent); }
+html.dark .rtpl.rtpl-fate .t-opt { background: rgba(255, 255, 255, 0.04); }
+html.dark .rtpl.rtpl-fate .t-opt:hover { background: rgba(224, 92, 74, 0.14); }

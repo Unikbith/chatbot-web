@@ -123,7 +123,7 @@ console.log('\n[5] 每个预设的行为一致（换皮不换骨架）')
     const okOpt = out.options.length === 1
     if (!(okScene && okMem && okOpt)) { allOk = false; detail.push(`${id}:${okScene}/${okMem}/${okOpt}`) }
   }
-  check('8 个预设都能正确处理同一段输入', allOk, detail.join(' '))
+  check(`${Object.keys(TEMPLATE_PRESETS).length} 个预设都能正确处理同一段输入`, allOk, detail.join(' '))
 }
 
 console.log('\n[6] 场景（时间/地点）必须置顶 —— 模型先写正文再补场景也不能错序')
