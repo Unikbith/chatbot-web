@@ -638,10 +638,17 @@ def batch_delete_prompt_tool_logs():
     })
 
 
+MEDIA_LOG_TYPES = (
+    'background', 'ai_avatar', 'user_avatar',           # 对话级设置
+    'profile_background', 'profile_avatar', 'profile_ai_avatar',  # 系统设置
+    'upload',                                            # 聊天发送的图片等上传
+)
+
+
 @admin_bp.route('/conversation-media-logs', methods=['GET'])
 @admin_required
 def list_conversation_media_logs():
-    """对话素材（背景图/AI头像/用户头像）设置历史：按用户、类型筛选。"""
+    """对话素材记录：背景图 / 头像（对话级 + 系统级）/ 上传图片，按用户、类型筛选。"""
     page = max(1, int(request.args.get('page', 1)))
     per_page = min(50, max(1, int(request.args.get('per_page', 20))))
     user_id = request.args.get('user_id', type=int)
@@ -650,7 +657,7 @@ def list_conversation_media_logs():
     q = ConversationMediaLog.query
     if user_id:
         q = q.filter(ConversationMediaLog.user_id == user_id)
-    if media_type in ('background', 'ai_avatar', 'user_avatar'):
+    if media_type in MEDIA_LOG_TYPES:
         q = q.filter(ConversationMediaLog.media_type == media_type)
 
     pagination = q.order_by(ConversationMediaLog.created_at.desc()).paginate(

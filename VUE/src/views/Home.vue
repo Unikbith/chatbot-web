@@ -15,6 +15,7 @@ import Sidebar from '../components/Sidebar.vue'
 import ChatArea from '../components/ChatArea.vue'
 import AuthModal from '../components/AuthModal.vue'
 import ProviderPanel from '../components/ProviderPanel.vue'
+import FreeApiReminderDialog from '../components/FreeApiReminderDialog.vue'
 import SystemSettings from '../components/SystemSettings.vue'
 import PersonaPanel from '../components/PersonaPanel.vue'
 import ConversationSettings from '../components/ConversationSettings.vue'
@@ -86,19 +87,34 @@ const userSettings = reactive({
 // 聊天状态
 const chatStatus = ref({ has_provider: false, is_free: false, free_name: '', provider_name: '' })
 
-// 免费 API 提示条：每次浏览器会话只展示一次、可点“知道了”消除；已配置自有模型的用户不展示。
-// 仅在侧边栏拉出（展开）时渲染在侧边栏内，移动端收起/桌面端折叠时不可见。
-const freeApiBannerDismissed = ref(sessionStorage.getItem('free_api_banner_dismissed') === '1')
+// 免费 API 提示条：仅在侧边栏拉出（展开）时渲染在侧边栏内。
+// 「知道了」只对本次访问有效（内存态），刷新/下次进入仍会出现 ——
+// 没配自己 Key 的用户需要被反复提醒：免费模型有限制且能力弱。
+const freeApiBannerDismissed = ref(false)
 // 是否已配置自有对话模型（任一启用的 chat 配置都视为已配置）
 const hasOwnChatProvider = computed(() =>
   chatConfigs.value.some(p => p.provider_type === 'chat' && p.enabled !== false)
 )
-const showFreeApiBanner = computed(() =>
-  isLoggedIn.value && chatStatus.value.is_free && !hasOwnChatProvider.value && !freeApiBannerDismissed.value
+// 需要提醒的免费用户：正在用共享免费模型、且没有自己的对话模型
+const needsFreeApiReminder = computed(() =>
+  isLoggedIn.value && chatStatus.value.is_free && !hasOwnChatProvider.value
 )
+const showFreeApiBanner = computed(() => needsFreeApiReminder.value && !freeApiBannerDismissed.value)
 function dismissFreeApiBanner() {
   freeApiBannerDismissed.value = true
-  sessionStorage.setItem('free_api_banner_dismissed', '1')
+}
+
+// 免费模型提醒弹窗：每次进入应用（页面加载/登录成功）都提醒一次，
+// 因此状态只放在内存里，不落 sessionStorage，也不写服务端。
+const freeApiReminderVisible = ref(false)
+let freeApiReminderShown = false
+function maybeShowFreeApiReminder() {
+  if (freeApiReminderShown) return
+  if (!needsFreeApiReminder.value) return
+  // 新用户教程弹窗优先：两个弹窗叠在一起会互相遮挡，等教程看完再提醒
+  if (tutorialVisible.value || userSettings.tutorial_seen === false) return
+  freeApiReminderShown = true
+  freeApiReminderVisible.value = true
 }
 
 // ========== 新用户使用教程 ==========
@@ -407,6 +423,8 @@ onMounted(async () => {
       await ensureInitialConversation()
       // 新用户注册后若直接刷新页面，这里兜底再判一次（已看过则不会弹）
       maybeShowTutorial()
+      // 没配置自己 API 的用户：每次进入都提醒一次（弹窗 + 侧栏常驻提示条）
+      maybeShowFreeApiReminder()
     } catch (e) {
       authModalVisible.value = true
     }
@@ -417,6 +435,11 @@ onMounted(async () => {
   // 未登录时首屏不弹登录框：仅在用户进行需要登录的操作（发消息/新对话/角色/设置等）时才提示，避免一进来就打扰
 
   window.addEventListener('auth:expired', handleAuthExpired)
+})
+
+// 教程弹窗关掉之后，才轮到免费模型提醒（避免两个弹窗叠在一起）
+watch(tutorialVisible, (val) => {
+  if (!val) maybeShowFreeApiReminder()
 })
 
 // 打开/关闭模型配置面板后刷新对话配置列表，保证对话内模型选择为最新
@@ -757,6 +780,8 @@ async function handleLoginSuccess(userData) {
 
   // 新用户注册并登录：自动弹出使用教程（服务端标记保证只弹这一次）
   maybeShowTutorial()
+  // 每次登录进入都提醒一次「建议配置自己的 API Key」（仅未配置自有模型的用户）
+  maybeShowFreeApiReminder()
 
   // 若用户从入口页选择某张卡片后登录，优先以该卡片作为默认对话对象
   const pendingId = pendingLandingPersonaId.value
@@ -1287,6 +1312,13 @@ async function handleConvoSettingsSaved(payload) {
 
     <!-- 新用户使用教程：注册后首次登录自动弹出一次，之后从侧边栏/系统设置随时可看 -->
     <NewUserTutorialDialog v-model="tutorialVisible" @read="markTutorialSeen" />
+
+    <!-- 免费模型提醒：未配置自己 API Key 的用户每次进入都会看到一次 -->
+    <FreeApiReminderDialog
+      v-model="freeApiReminderVisible"
+      :free-name="chatStatus.free_name"
+      @configure="providerPanelVisible = true"
+    />
 
     <!-- 人物卡管理面板 -->
     <PersonaPanel

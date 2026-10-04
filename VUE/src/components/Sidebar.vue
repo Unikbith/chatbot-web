@@ -38,10 +38,11 @@
         </el-button>
       </div>
 
-      <!-- 免费 API 提示条：仅在侧边栏展开（拉出）时显示；每次会话只出现一次，可点“知道了”消除 -->
+      <!-- 免费 API 提示条：仅在侧边栏展开（拉出）时显示。
+           「知道了」只对本次访问有效，没配自己 Key 的用户下次进入仍会看到。 -->
       <div v-if="freeApiBanner" class="sidebar-free-banner">
         <span class="sfb-icon"><el-icon><Present /></el-icon></span>
-        <span class="sfb-text">{{ t('当前使用', 'Now using') }} <strong>{{ freeApiName }}</strong>，{{ t('为获得更好体验建议配置自己的 API Key', 'configure your own API Key for a better experience') }}</span>
+        <span class="sfb-text">{{ t('当前使用', 'Now using') }} <strong>{{ freeApiName }}</strong>，{{ t('免费模型限制多、回复容易出戏，建议配置自己的 API Key', 'the free model is rate-limited and weak at roleplay — configure your own API Key') }}</span>
         <div class="sfb-actions">
           <el-button size="small" type="primary" link @click="openProvider">
             {{ t('去配置', 'Configure') }}

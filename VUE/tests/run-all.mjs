@@ -29,6 +29,7 @@ const jobs = [
   ['template-css.test.mjs', true],
   ['template-presets.test.mjs', true],
   ['e2e-render.test.mjs', true],
+  ['onboarding.test.mjs', true],
 ]
 jobs.push(['sanitize.test.mjs', hasJsdom])
 jobs.push(['prose.test.mjs', hasJsdom])

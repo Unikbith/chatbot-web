@@ -12,7 +12,8 @@ from flask import Flask, jsonify, request
 from sqlalchemy import inspect, text
 from config import config
 from extensions import db, jwt, cors, migrate
-from models import User, ModelProvider, PersonaTemplate, UserSettings, Conversation
+from models import (User, ModelProvider, PersonaTemplate, UserSettings, Conversation,
+                    ConversationMediaLog)
 from routes import (
     auth_bp, chat_bp, audio_bp, provider_bp,
     conversation_bp, settings_bp, persona_bp, upload_bp,
@@ -162,6 +163,37 @@ def _assert_production_secrets(app):
             )
 
 
+def _migrate_media_log_conversation_id_nullable(app):
+    """把 conversation_media_logs.conversation_id 从 NOT NULL 改为可空。
+
+    素材记录现在还要承载系统设置的头像/背景、聊天时上传的图片，
+    这些都没有归属对话。SQLite 不支持直接修改列约束，用「建新表→搬数据→换名」完成，
+    整体放在一个事务里，任何一步失败都会回滚，不会丢审计数据。
+    """
+    try:
+        cols = inspect(db.engine).get_columns('conversation_media_logs')
+        cid = next((c for c in cols if c['name'] == 'conversation_id'), None)
+        if cid is None or cid.get('nullable', True):
+            return
+        # 索引名在 SQLite 里是库级唯一的：表改名后旧索引仍占着原名字，
+        # 必须显式删掉，否则新表建索引时会报 "index ... already exists"
+        index_names = [ix['name'] for ix in inspect(db.engine).get_indexes('conversation_media_logs')
+                       if ix.get('name')]
+        with db.engine.begin() as conn:
+            conn.execute(text('ALTER TABLE conversation_media_logs RENAME TO conversation_media_logs_old'))
+            for name in index_names:
+                conn.execute(text(f'DROP INDEX IF EXISTS "{name}"'))
+            ConversationMediaLog.__table__.create(conn)
+            conn.execute(text(
+                'INSERT INTO conversation_media_logs (id, user_id, conversation_id, media_type, value, created_at) '
+                'SELECT id, user_id, conversation_id, media_type, value, created_at FROM conversation_media_logs_old'
+            ))
+            conn.execute(text('DROP TABLE conversation_media_logs_old'))
+        app.logger.info('[迁移] conversation_media_logs.conversation_id 已允许为空')
+    except Exception as e:
+        app.logger.warning('[迁移] conversation_media_logs 结构调整跳过: %s', e)
+
+
 def _ensure_schema_columns(app):
     """轻量级 schema 迁移：为已存在的表补齐新增的字段（避免手工重建库）。
 
@@ -178,6 +210,11 @@ def _ensure_schema_columns(app):
             if 'conversation_media_logs' not in inspector.get_table_names():
                 db.create_all()
                 app.logger.info('[迁移] 已创建 conversation_media_logs 表')
+            else:
+                # 素材记录扩展为「全部图片素材」后，系统设置的头像/背景、聊天时上传的图片
+                # 都不属于任何对话，conversation_id 必须允许为空。
+                # SQLite 无法用 ALTER 去掉 NOT NULL，只能重建表并搬移数据（DDL 在事务内，失败会整体回滚）。
+                _migrate_media_log_conversation_id_nullable(app)
             # conversation_summaries — 记忆宫殿：对话滚动摘要的每次压缩记录
             if 'conversation_summaries' not in inspector.get_table_names():
                 db.create_all()

@@ -23,6 +23,7 @@ from services.markdown_streamer import (
 )
 from services.upload_guard import check_upload, detect_image_type, MAX_IMAGE_SIZE
 from services.rate_limit import rate_limit
+from services.media_log import log_media
 from routes.upload import save_image_bytes
 
 chat_bp = Blueprint('chat', __name__, url_prefix='/api/chat')
@@ -1272,6 +1273,12 @@ def vision_chat():
         except Exception as e:
             current_app.logger.warning('识图图片落盘失败 user=%s: %s', user_id, e)
 
+    # 对话素材记录：识图兜底落盘的图片也属于「聊天时发的图片」，
+    # 前端上传成功的那条记录由 /api/upload/image 负责，这里只补后端兜底的一侧
+    if stored_image_url and not raw_image_url:
+        log_media(user_id, 'upload', stored_image_url,
+                  conversation_id=conv.id if conv else None)
+
     # 立即持久化识图的用户消息，避免生成过程中切换对话丢失（与普通聊天一致）
     if conv:
         last_stored_user = Message.query.filter_by(
@@ -1399,6 +1406,16 @@ def list_models():
 
     models, error = AIService.list_models(provider)
     if error:
+        # Key 失效是最常见的一种「接口异常」：直接把上游 401 原文抛给用户既看不懂、
+        # 又会把请求 ID 之类的噪音显示在界面上，这里统一翻译成可执行的提示。
+        # 注意必须用 400 而不是 401：前端拦截器把 401 当作「登录态失效」会清 token 并踢回登录页，
+        # 而这里的问题完全出在用户填的第三方 Key 上，与本站登录态无关。
+        low = str(error).lower()
+        if '401' in low or 'invalid' in low or 'unauthorized' in low or 'authentication' in low:
+            return jsonify({
+                'code': 400,
+                'message': f'配置「{provider.name}」的 API Key 无效或已过期，请在「模型配置」里重新填写后再试',
+            }), 400
         return jsonify({'code': 500, 'message': f'获取模型列表失败: {error}'}), 500
 
     return jsonify({

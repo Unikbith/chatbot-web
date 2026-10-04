@@ -9,7 +9,7 @@
     @close="handleClose"
   >
     <p class="tutorial-intro">
-      {{ t('跟着 7 步配置好自己的模型，就能开始畅聊；点图片可放大查看。', 'Follow these 7 steps to set up your own model and start chatting. Click an image to zoom in.') }}
+      {{ t('一定要配置自己的 API，不然只能跟免费模型聊 —— 它又慢又呆、限制多。跟着下面几步走完就能畅聊；点图片可放大查看。', 'Use your own API — the free model is slow and restricted. Follow the steps below; click an image to zoom in.') }}
     </p>
 
     <div class="tutorial-steps">
@@ -21,16 +21,20 @@
             <div class="ts-desc">{{ t(step.desc, step.descEn) }}</div>
           </div>
         </div>
-        <el-image
-          class="ts-image"
-          :src="step.image"
-          :preview-src-list="imageList"
-          :initial-index="i"
-          :alt="t(step.title, step.titleEn)"
-          fit="contain"
-          preview-teleported
-          hide-on-click-modal
-        />
+        <!-- 一步可以有多张图（如第 3 步区分电脑端 / 手机端） -->
+        <div v-for="(img, j) in step.images" :key="j" class="ts-figure">
+          <div v-if="img.caption" class="ts-caption">{{ img.caption }}</div>
+          <el-image
+            class="ts-image"
+            :src="img.src"
+            :preview-src-list="imageList"
+            :initial-index="imageIndexOf(i, j)"
+            :alt="t(step.title, step.titleEn)"
+            fit="contain"
+            preview-teleported
+            hide-on-click-modal
+          />
+        </div>
       </div>
     </div>
 
@@ -54,8 +58,19 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'read'])
 
 const steps = TUTORIAL_STEPS
-// 大图预览：把 7 张配图交给同一个 viewer，点任意一张即可左右翻看
-const imageList = TUTORIAL_STEPS.map(s => s.image)
+
+// 大图预览：把所有配图摊平给同一个 viewer（一步多图时也能左右翻看）；
+// 同时记下每张图在摊平数组里的下标，供 initial-index 定位。
+const flatImages = []
+const indexMap = new Map()
+TUTORIAL_STEPS.forEach((s, i) => {
+  (s.images || []).forEach((img, j) => {
+    indexMap.set(`${i}-${j}`, flatImages.length)
+    flatImages.push(img.src)
+  })
+})
+const imageList = flatImages
+const imageIndexOf = (i, j) => indexMap.get(`${i}-${j}`) ?? 0
 
 const visible = computed({
   get: () => props.modelValue,
@@ -90,6 +105,20 @@ function handleClose() {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* 一步多图时的分组与说明文字 */
+.ts-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ts-caption {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand);
+  padding-left: 2px;
 }
 
 .ts-head {

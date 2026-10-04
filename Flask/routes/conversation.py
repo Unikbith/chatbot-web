@@ -5,10 +5,11 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
 from models import (Conversation, Message, ModelProvider, PersonaTemplate,
                     local_now, ConversationMediaLog, ConversationSummary)
+from services.media_log import log_media
 
 
 def _log_media_if_changed(user_id, conv_id, data, old_bg, old_ai, old_user):
-    """若背景图/AI头像/用户头像本次设置非空且与已存值不同，写入历史。"""
+    """若背景图/AI头像/用户头像本次设置非空且与已存值不同，写入素材记录。"""
     pairs = [
         ('background', 'background_image', old_bg),
         ('ai_avatar', 'ai_avatar', old_ai),
@@ -18,15 +19,9 @@ def _log_media_if_changed(user_id, conv_id, data, old_bg, old_ai, old_user):
         new_val = data.get(key)
         if not isinstance(new_val, str):
             continue
-        new_val = new_val.strip()
-        if not new_val:
+        if old_val and old_val.strip() == new_val.strip():
             continue
-        if old_val and old_val == new_val:
-            continue
-        db.session.add(ConversationMediaLog(
-            user_id=user_id, conversation_id=conv_id,
-            media_type=media_type, value=new_val,
-        ))
+        log_media(user_id, media_type, new_val, conversation_id=conv_id)
 from services.markdown_streamer import render_markdown
 from datetime import datetime, timedelta
 

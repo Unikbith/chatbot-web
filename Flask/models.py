@@ -749,24 +749,31 @@ class PromptToolLog(db.Model):
 
 
 class ConversationMediaLog(db.Model):
-    """对话素材（背景图 / AI 头像 / 用户头像）设置历史。
+    """对话素材（背景图 / 头像 / 上传图片）使用记录。
 
-    每个对话可独立设置背景图、AI 头像、用户头像。用户在前端「清除」时，
-    后端按保留语义不真正置空（见 conversation.update_conversation），因此这些素材
-    始终有值；本表记录每一次「设置/变更」的历史，供管理员在后台追溯与按需清理。
+    两类来源：
+      · 对话级：每个对话可独立设置背景图、AI 头像、用户头像（conversation_id 有值）；
+      · 全局级：系统设置里的头像与背景、聊天时上传的图片（conversation_id 为空）。
+    管理员在后台「对话素材记录」里追溯与清理。
+
     只在设置非空值且较上次有变化时落库，避免重复保存刷屏。
     """
     __tablename__ = 'conversation_media_logs'
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
-    conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False, index=True)
-    # background=背景图 / ai_avatar=AI 头像 / user_avatar=用户头像
+    # 允许为空：系统设置里的头像/背景、聊天上传的图片不属于某个具体对话
+    conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=True, index=True)
+    # background=背景图 / ai_avatar=AI头像 / user_avatar=用户头像
+    # profile_avatar=资料头像 / profile_ai_avatar=通用AI头像 / profile_background=通用背景图
+    # upload=上传图片（聊天发送的图片等）
     media_type = db.Column(db.String(20), nullable=False, index=True)
     value = db.Column(db.Text)                 # data-URI 或 URL
     created_at = db.Column(db.DateTime, default=local_now, index=True)
 
     user = db.relationship('User', backref='conversation_media_logs')
+    # 系统级/上传级记录不挂对话，因此这里是可选关系（conversation 可能为 None）
+    conversation = db.relationship('Conversation', backref='media_logs')
 
     def to_dict(self):
         return {
@@ -775,11 +782,16 @@ class ConversationMediaLog(db.Model):
             'username': self.user.username if self.user else None,
             'email': self.user.email if self.user else None,
             'conversation_id': self.conversation_id,
+            'conversation_title': self.conversation.title if self.conversation else None,
             'media_type': self.media_type,
             'media_type_label': {
-                'background': '背景图',
-                'ai_avatar': 'AI 头像',
-                'user_avatar': '用户头像',
+                'background': '对话背景图',
+                'ai_avatar': '对话AI头像',
+                'user_avatar': '对话用户头像',
+                'profile_background': '系统背景图',
+                'profile_avatar': '系统用户头像',
+                'profile_ai_avatar': '系统AI头像',
+                'upload': '上传图片',
             }.get(self.media_type, self.media_type),
             'value': self.value,
             'created_at': self.created_at.isoformat() if self.created_at else None,

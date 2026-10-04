@@ -5,6 +5,7 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
 from models import UserSettings, User
+from services.media_log import log_media
 
 settings_bp = Blueprint('settings', __name__, url_prefix='/api/settings')
 
@@ -67,7 +68,11 @@ def update_settings():
     if 'language' in data:
         settings.language = data['language']
     if 'background_image' in data:
-        settings.background_image = data['background_image'] or None
+        new_bg = data['background_image'] or None
+        # 系统设置里的背景图不属于任何对话，conversation_id 留空
+        if new_bg and new_bg != settings.background_image:
+            log_media(user_id, 'profile_background', new_bg)
+        settings.background_image = new_bg
     if 'background_cover' in data:
         settings.background_cover = data['background_cover'] or 'contain'
     if 'sidebar_collapsed' in data:
@@ -121,10 +126,16 @@ def update_profile():
         return jsonify({'code': 400, 'message': '邮箱注册后不可修改'}), 400
     
     if 'avatar' in data:
-        user.avatar = data['avatar'] or None
+        new_avatar = data['avatar'] or None
+        if new_avatar and new_avatar != user.avatar:
+            log_media(user_id, 'profile_avatar', new_avatar)
+        user.avatar = new_avatar
 
     if 'ai_avatar' in data:
-        user.ai_avatar = data['ai_avatar'] or None
+        new_ai_avatar = data['ai_avatar'] or None
+        if new_ai_avatar and new_ai_avatar != user.ai_avatar:
+            log_media(user_id, 'profile_ai_avatar', new_ai_avatar)
+        user.ai_avatar = new_ai_avatar
 
     if 'gender' in data:
         g = (data['gender'] or '').strip()

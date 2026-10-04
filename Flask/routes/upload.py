@@ -4,6 +4,8 @@ import uuid
 from flask import Blueprint, request, jsonify, send_from_directory, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from services.upload_guard import detect_image_type, MAX_IMAGE_SIZE
+from services.media_log import log_media
+from extensions import db
 
 upload_bp = Blueprint('upload', __name__, url_prefix='/api/upload')
 
@@ -86,12 +88,20 @@ def upload_image():
     
     with open(filepath, 'wb') as f:
         f.write(data)
-    
+
+    url = f'/api/upload/image/{filename}'
+
+    # 对话素材记录：聊天时发送的图片、头像、背景图最终都走过这个上传接口，
+    # 因此这里统一留一条痕迹，管理员在后台能看到用户上传过哪些图。
+    # 注意：这里只记录「上传」这一事实，后续用作头像/背景时还会各自再记一条带语义的记录。
+    log_media(user_id, 'upload', url)
+    db.session.commit()
+
     return jsonify({
         'code': 200,
         'message': '上传成功',
         'data': {
-            'url': f'/api/upload/image/{filename}',
+            'url': url,
             'filename': filename,
             'size': len(data)
         }

@@ -117,7 +117,7 @@
         </div>
 
         <div class="form-card">
-          <el-form-item label="AI 提示词">
+          <el-form-item label="AI扮演角色设定">
             <el-input
               v-model="form.system_prompt"
               type="textarea"
@@ -129,7 +129,7 @@
             />
           </el-form-item>
           <!-- 玩家侧设定：与 AI 提示词同卡绑定，换卡即换整套角色关系 -->
-          <el-form-item label="人物提示词">
+          <el-form-item label="玩家设定">
             <el-input
               v-model="form.user_prompt"
               type="textarea"

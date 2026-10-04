@@ -44,6 +44,8 @@
 - 未单独配置图片 API 时，回退到内置免费 Key
 - 免费用户有每日额度，签到可补充；超过后可自行在「模型配置 - 图片生成」中配置 API Key
 - 参考图与生成结果自动写入对话记录
+- **失败原因可执行**：「连接测试成功但生不了图」的典型原因是图片配置处于**未启用**状态，
+  此时会提示去打开启用开关；共享免费通道不可用时会明确提示改用自有 Key，而不是笼统的「请稍后重试」
 
 ### 提示词工具
 - 一键生成人物设定提示词与图片提示词（文生图 / 图生图）
@@ -63,6 +65,11 @@
 - 独立管理后台（管理员登录、用户与对话审计、广场内容管理）
 - 云端对话存档，本地存储兼容模式
 - 帮助与反馈：内置帮助文档，可提交反馈并留联系方式
+- **新用户教程**：侧边栏常驻入口，注册后首次登录自动弹出一次；
+  内容与《新用户使用教程》一致（配置 API → 获取 Key → 拉模型 → 建人物卡 → 提示词工具 → 开始畅聊 → 反馈）
+- **免费模型提醒**：未配置自有 API 的用户**每次进入都会提醒一次**（弹窗 + 侧边栏常驻提示条），
+  说明共享免费模型（GLM-4-Flash）限制多、回复容易出戏，建议换成自己的 API Key；
+  已配置自己模型的用户不再打扰
 
 ### 个性化设置
 - 自定义头像和背景（背景支持「完全可见 / 覆盖背景」两种展示方式）
@@ -100,6 +107,7 @@ chatbot-web/
 │       ├── email_service.py      # 邮件发送
 │       ├── html_sanitize.py      # 输出 HTML 消毒
 │       ├── markdown_streamer.py  # 流式渲染
+│       ├── media_log.py          # 对话素材记录统一写入口
 │       ├── rate_limit.py         # 接口限流
 │       ├── ssrf.py               # SSRF 校验
 │       ├── upload_guard.py       # 上传文件校验
@@ -121,6 +129,8 @@ chatbot-web/
         │   ├── AuthModal.vue            # 登录/注册
         │   ├── ChatArea.vue             # 聊天区（含识图与生图链路）
         │   ├── ConversationSettings.vue # 会话设置（记忆宫殿等）
+        │   ├── FreeApiReminderDialog.vue # 免费模型提醒（未配置 API 的用户每次进入提醒）
+        │   ├── NewUserTutorialDialog.vue # 新用户使用教程
         │   ├── PromptToolPanel.vue      # 提示词工具
         │   ├── PersonaPanel.vue         # 人物卡与世界书面板
         │   ├── PersonaMarketplace.vue   # 人设广场
@@ -408,6 +418,18 @@ SENDER_NAME=心语
 | GET | `/api/admin/conversation-media-logs` | 对话素材记录 |
 | DELETE | `/api/admin/conversation-media-logs/:log_id` | 删除单条素材记录 |
 | POST | `/api/admin/conversation-media-logs/batch-delete` | 批量删除素材记录 |
+
+**对话素材记录**覆盖用户所有图片素材（按类型可筛，系统级素材显示为「系统」而非对话标题）：
+
+| media_type | 含义 | 归属 |
+| --- | --- | --- |
+| `background` / `ai_avatar` / `user_avatar` | 对话设置里的背景图 / AI 头像 / 用户头像 | 具体对话 |
+| `profile_background` / `profile_avatar` / `profile_ai_avatar` | 系统设置里的背景图 / 用户头像 / AI 头像 | 系统 |
+| `upload` | 一切经 `/api/upload/image` 上传的图片（聊天发送的图片、识图兜底落盘等） | 系统或所属对话 |
+
+同一用户同一类型下重复提交完全相同的图片不会重复记录；记录与素材本身分离，
+管理员删除记录不会影响用户界面上正在生效的头像或背景。
+
 
 ## 支持的 API 类型
 

@@ -593,9 +593,13 @@
               class="filter-select"
               @change="applyMediaFilters"
             >
-              <el-option :label="t('背景图', 'Background')" value="background" />
-              <el-option :label="t('AI 头像', 'AI Avatar')" value="ai_avatar" />
-              <el-option :label="t('用户头像', 'User Avatar')" value="user_avatar" />
+              <el-option :label="t('对话背景图', 'Conv Background')" value="background" />
+              <el-option :label="t('对话AI头像', 'Conv AI Avatar')" value="ai_avatar" />
+              <el-option :label="t('对话用户头像', 'Conv User Avatar')" value="user_avatar" />
+              <el-option :label="t('系统背景图', 'System Background')" value="profile_background" />
+              <el-option :label="t('系统用户头像', 'System User Avatar')" value="profile_avatar" />
+              <el-option :label="t('系统AI头像', 'System AI Avatar')" value="profile_ai_avatar" />
+              <el-option :label="t('上传图片', 'Uploaded Image')" value="upload" />
             </el-select>
           </div>
 
@@ -603,8 +607,14 @@
             <el-table-column type="selection" width="44" />
             <el-table-column prop="id" label="ID" width="60" align="center" />
             <el-table-column prop="username" :label="t('用户', 'User')" width="100" show-overflow-tooltip />
-            <el-table-column prop="conversation_id" :label="t('对话ID', 'Conv ID')" width="90" align="center" />
-            <el-table-column prop="media_type_label" :label="t('类型', 'Type')" width="90" align="center" />
+            <el-table-column :label="t('归属', 'Scope')" width="130" show-overflow-tooltip>
+              <template #default="{ row }">
+                <!-- 系统级素材（系统设置的头像/背景、聊天上传的图片）没有归属对话 -->
+                <span v-if="!row.conversation_id" class="media-scope-global">{{ t('系统', 'System') }}</span>
+                <span v-else>{{ row.conversation_title || `#${row.conversation_id}` }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="media_type_label" :label="t('类型', 'Type')" width="110" align="center" />
             <el-table-column :label="t('预览', 'Preview')" width="64" align="center">
               <template #default="{ row }">
                 <!-- preview-teleported + hide-on-click-modal：预览层挂到 body 且点遮罩即关，
@@ -2653,6 +2663,15 @@ function onTabChange(name) {
   font-family: var(--font-mono, monospace);
   font-size: 12px;
   color: var(--text-muted, #b9a98f);
+}
+/* 系统级素材：不归属任何对话，用弱化标签区分于具体对话标题 */
+.media-scope-global {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 9px;
+  font-size: 12px;
+  color: var(--text-muted, #b9a98f);
+  background: rgba(255, 255, 255, .07);
 }
 
 .pl-pagination {
