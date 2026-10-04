@@ -7,7 +7,7 @@ from extensions import db
 from models import (
     PersonaMarketplace, MarketplaceVote, MarketplaceComment,
     CommentLike, DailyCheckIn, ImageUsage, User,
-    MarketplaceAdopt, local_now,
+    MarketplaceAdopt, MarketplaceWorldbookEntry, local_now,
 )
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
@@ -26,6 +26,52 @@ PUB_PROMPT_MIN = 100
 PUB_PROMPT_SOFT_MAX = 10000
 PUB_PROMPT_MAX = 50000
 PUB_GREETING_MAX = 100
+# 玩家设定（「你是谁」）与人物卡上的同名上限一致：可留空，留空则采用者自行补
+PUB_USER_PROMPT_MAX = 4000
+# 世界书条目（可选）：整卡最多带这么多条，单条正文上限与人物卡世界书一致
+PUB_WORLDBOOK_MAX = 20
+PUB_WB_CONTENT_MAX = 4000
+PUB_WB_TITLE_MAX = 200
+PUB_WB_KEYWORDS_MAX = 500
+
+
+def _clean_worldbook(raw):
+    """把前端提交的世界书条目洗成可入库的列表。
+
+    世界书是**可选**的：不是列表就当没填；正文完全为空的条目直接跳过
+    （只有标题的空壳条目没有任何意义，与其报错不如忽略）。
+    """
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw[:PUB_WORLDBOOK_MAX]:
+        if not isinstance(item, dict):
+            continue
+        content = (item.get('content') or '').strip()
+        if not content:
+            continue
+        out.append({
+            'title': (item.get('title') or '').strip()[:PUB_WB_TITLE_MAX],
+            'keywords': (item.get('keywords') or '').strip()[:PUB_WB_KEYWORDS_MAX],
+            'content': content[:PUB_WB_CONTENT_MAX],
+            'always_on': bool(item.get('always_on')),
+            # 分享出去的条目一律启用；对方采用后可在自己的世界书里单独停用
+            'enabled': True,
+            'weight': int(item.get('weight') or 0),
+        })
+    return out
+
+
+def _replace_marketplace_worldbook(persona, entries):
+    """整表替换某张广场卡片的世界书条目（条目少，直接删旧插新最省心）。
+
+    必须走关系（clear + append）而不是 `query.delete()` 批量删：
+    批量删除不会同步会话里已加载的子对象，会留下「库里已删、会话里还在」的幽灵对象，
+    下一次 commit 时 SQLAlchemy 计算主键会拿到 None 直接抛 AttributeError。
+    """
+    persona.worldbook.clear()          # cascade='all, delete-orphan' → 旧条目一并删除
+    for e in entries:
+        persona.worldbook.append(MarketplaceWorldbookEntry(**e))
 
 
 # ── 确定性假名生成 ──────────────────────────────────────────────
@@ -507,6 +553,7 @@ def list_marketplace():
     comment_counts = {}
     user_votes = {}
     adopted_ids = set()
+    wb_counts = {}
     if page_ids:
         # 1) 评论数一次性聚合
         rows = (
@@ -518,6 +565,18 @@ def list_marketplace():
             .all()
         )
         comment_counts = {pid: cnt for pid, cnt in rows}
+
+        # 1b) 世界书条数一次性聚合（卡片上要显示「带设定」标记）
+        wb_rows = (
+            db.session.query(
+                MarketplaceWorldbookEntry.persona_id,
+                func.count(MarketplaceWorldbookEntry.id),
+            )
+            .filter(MarketplaceWorldbookEntry.persona_id.in_(page_ids))
+            .group_by(MarketplaceWorldbookEntry.persona_id)
+            .all()
+        )
+        wb_counts = {pid: cnt for pid, cnt in wb_rows}
 
         # 2) 当前用户在本页卡片的投票一次性取回
         votes = MarketplaceVote.query.filter(
@@ -546,7 +605,8 @@ def list_marketplace():
     items = []
     is_admin = _is_admin()
     for p in page_items:
-        d = p.to_dict(comment_count=comment_counts.get(p.id, 0))
+        d = p.to_dict(comment_count=comment_counts.get(p.id, 0),
+                      worldbook_count=wb_counts.get(p.id, 0))
         d['comment_count'] = comment_counts.get(p.id, 0)
         d['user_vote'] = user_votes.get(p.id)
         d['is_adopted'] = p.id in adopted_ids
@@ -596,11 +656,16 @@ def publish_persona():
     greeting = (data.get('greeting') or '').strip()
     avatar = data.get('avatar')
     gender = (data.get('gender') or '').strip()
+    # 玩家设定与世界书都是**可选**：不填也能发布（采用者可在自己那边补）
+    user_prompt = (data.get('user_prompt') or '').strip()
+    worldbook = _clean_worldbook(data.get('worldbook'))
     if gender and len(gender) > 20:
         return jsonify({'code': 400, 'message': '性别自定义内容过长（最多20字）'}), 400
 
     if not name or not description or not system_prompt or not greeting or not avatar:
         return jsonify({'code': 400, 'message': '请按规范填写'}), 400
+    if len(user_prompt) > PUB_USER_PROMPT_MAX:
+        return jsonify({'code': 400, 'message': f'玩家设定最多 {PUB_USER_PROMPT_MAX} 字'}), 400
     # 字数上限与「人物卡」保持一致：名称/描述/开场白 1000，
     # 系统提示词软上限 10000，超出部分兜底到硬上限 50000
     if len(name) > PUB_NAME_MAX:
@@ -627,10 +692,15 @@ def publish_persona():
         system_prompt=system_prompt,
         greeting=greeting,
         gender=gender or None,
+        user_prompt=user_prompt or None,
     )
     db.session.add(persona)
+    db.session.flush()          # 先拿到 id 才能挂世界书条目
+    if worldbook:
+        _replace_marketplace_worldbook(persona, worldbook)
     db.session.commit()
-    return jsonify({'code': 200, 'message': '发布成功', 'data': persona.to_dict()})
+    return jsonify({'code': 200, 'message': '发布成功',
+                    'data': persona.to_dict(include_prompt=True)})
 
 
 # ── 投票 ────────────────────────────────────────────────────────
@@ -754,8 +824,29 @@ def adopt_persona(pid):
     adopt = MarketplaceAdopt(persona_id=pid, user_id=user_id, template_id=tp.id)
     db.session.add(adopt)
 
+    # 卡片自带世界书时一并带过来：复制成「采用者自己名下」的条目，
+    # 之后他可以自由增删改，改的也只是自己这份，不影响广场原卡。
+    from models import WorldBookEntry
+    adopted_entries = 0
+    for e in (persona.worldbook or []):
+        if not (e.content or '').strip():
+            continue
+        db.session.add(WorldBookEntry(
+            user_id=user_id,
+            persona_id=tp.id,
+            title=e.title or '',
+            keywords=e.keywords or '',
+            content=e.content or '',
+            always_on=bool(e.always_on),
+            enabled=bool(e.enabled),
+            weight=e.weight or 0,
+        ))
+        adopted_entries += 1
+
     db.session.commit()
-    return jsonify({'code': 200, 'message': '已添加到我的角色', 'data': tp.to_dict()})
+    data = tp.to_dict()
+    data['worldbook_count'] = adopted_entries
+    return jsonify({'code': 200, 'message': '已添加到我的角色', 'data': data})
 
 
 # ── 删除（仅创建者） ────────────────────────────────────────────
@@ -783,6 +874,9 @@ def update_persona(pid):
     greeting = data.get('greeting')
     avatar = data.get('avatar')
     gender = data.get('gender')
+    # 玩家设定与世界书均为可选；未提交的字段保持原值（PATCH 语义）
+    user_prompt = data.get('user_prompt')
+    worldbook = data.get('worldbook')
 
     if name is not None:
         name = name.strip()
@@ -813,9 +907,18 @@ def update_persona(pid):
         if len(gender) > 20:
             return jsonify({'code': 400, 'message': '性别自定义内容过长（最多20字）'}), 400
         persona.gender = gender or None
+    if user_prompt is not None:
+        user_prompt = user_prompt.strip()
+        if len(user_prompt) > PUB_USER_PROMPT_MAX:
+            return jsonify({'code': 400, 'message': f'玩家设定最多 {PUB_USER_PROMPT_MAX} 字'}), 400
+        persona.user_prompt = user_prompt or None
+    if worldbook is not None:
+        # 提交了就整表替换（含提交空数组＝清空所有条目）
+        _replace_marketplace_worldbook(persona, _clean_worldbook(worldbook))
 
     db.session.commit()
-    return jsonify({'code': 200, 'message': '已保存', 'data': persona.to_dict()})
+    return jsonify({'code': 200, 'message': '已保存',
+                    'data': persona.to_dict(include_prompt=True)})
 
 
 @marketplace_bp.route('/<int:pid>', methods=['DELETE'])

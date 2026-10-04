@@ -45,10 +45,9 @@
           {{ t('我的配置', 'My Configs') }}
         </div>
 
-        <!-- 图片生成：明确告诉用户「生图实际用的是哪条配置」。
-             这条提示是为了消灭最容易踩的坑：配好 Key、测试连接也成功，
-             却因为列表里的小开关没拨而以为配置没生效。 -->
-        <div v-if="activeType === 'image'" class="image-usage-hint" :class="imageUsage.tone">
+        <!-- 图片生成：明确告诉用户「生图实际用的是哪条配置」；
+             没有可用文案（例如配置存在但开关未打开）时整行不渲染 -->
+        <div v-if="activeType === 'image' && imageUsage.text" class="image-usage-hint" :class="imageUsage.tone">
           {{ imageUsage.text }}
         </div>
 
@@ -341,6 +340,8 @@ const isAudio = () => activeType.value === 'stt' || activeType.value === 'tts'
 
 // 图片生成当前实际会用哪条配置 —— 与后端 _get_image_provider 的优先级保持一致：
 // 打开启用的配置优先，其次任意配置，最后才落到共享免费通道。
+// 注意：不再提示「配置没启用」——有配置就会用配置，这属于内部实现细节，
+// 摆在界面上只会让人以为出了问题（用户明确要求去掉这段文案）。
 const imageUsage = computed(() => {
   const list = providers.value || []
   if (!list.length) {
@@ -355,14 +356,11 @@ const imageUsage = computed(() => {
   if (enabled.length) {
     return {
       tone: 'is-ok',
-      text: t(`生图使用配置「${pick.name}」（已启用）`, `Generating with "${pick.name}" (enabled)`),
+      text: t(`生图使用配置「${pick.name}」`, `Generating with "${pick.name}"`),
     }
   }
-  return {
-    tone: 'is-warn',
-    text: t(`生图使用配置「${pick.name}」：它没有启用，但有配置就会优先用配置。启用开关只在你有多个图片配置、需要挑选时才有意义`,
-      `Generating with "${pick.name}" (not enabled). A configured image API is used even when disabled; the switch only picks among multiple configs`),
-  }
+  // 有配置但都没打启用开关：按"配置优先"的规则照样会用它，不必打扰用户
+  return { tone: 'is-ok', text: '' }
 })
 
 // ── 帮助引导：当前 Tab 对应的厂商 API 文档 ─────────────────────
@@ -894,11 +892,6 @@ onUnmounted(() => {
   color: #6ee7a8;
   background: rgba(110, 231, 168, 0.08);
   border-color: rgba(110, 231, 168, 0.22);
-}
-.image-usage-hint.is-warn {
-  color: #f0b463;
-  background: rgba(240, 180, 99, 0.08);
-  border-color: rgba(240, 180, 99, 0.24);
 }
 .image-usage-hint.is-free {
   color: var(--text-muted);

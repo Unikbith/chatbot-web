@@ -107,6 +107,14 @@
                 >
                   <el-icon><ChatLineRound /></el-icon> {{ formatCount(item.comment_count || 0) }}
                 </span>
+                <!-- 带世界书的卡片打个标记：一眼看出这张卡随卡分享了设定 -->
+                <span
+                  v-if="item.worldbook_count > 0"
+                  class="card-stat wb"
+                  :title="t(`随卡带 ${item.worldbook_count} 条世界书设定`, `Ships with ${item.worldbook_count} worldbook entries`)"
+                >
+                  <el-icon><Notebook /></el-icon> {{ item.worldbook_count }}
+                </span>
               </div>
               <span v-if="item.is_adopted" class="card-adopted-tag">{{ t('已添加', 'Added') }}</span>
             </div>
@@ -222,6 +230,30 @@
           <div v-if="detailData.greeting" class="dr-section">
             <div class="dr-label">{{ t('开场白', 'Greeting') }}</div>
             <div class="dr-box greeting-box">{{ detailData.greeting }}</div>
+          </div>
+
+          <!-- 与人物卡对齐：玩家设定（你是谁）与世界书（按需注入的设定） -->
+          <div v-if="detailData.user_prompt" class="dr-section">
+            <div class="dr-label">{{ t('玩家设定', 'Player Setup') }}</div>
+            <div class="dr-box">{{ detailData.user_prompt }}</div>
+          </div>
+
+          <div v-if="detailData.worldbook && detailData.worldbook.length" class="dr-section">
+            <div class="dr-label">
+              {{ t('世界书', 'Worldbook') }} ({{ detailData.worldbook.length }})
+            </div>
+            <div class="dr-wb-list">
+              <div v-for="(e, i) in detailData.worldbook" :key="i" class="dr-wb-item">
+                <div class="dr-wb-head">
+                  <span class="dr-wb-title">{{ e.title || t('未命名条目', 'Untitled') }}</span>
+                  <span class="dr-wb-tag">{{ e.always_on ? t('常驻', 'Always') : t('按需', 'On demand') }}</span>
+                </div>
+                <div v-if="e.keywords" class="dr-wb-kw">
+                  {{ t('触发词', 'Keywords') }}：{{ e.keywords }}
+                </div>
+                <div class="dr-box dr-wb-content">{{ e.content }}</div>
+              </div>
+            </div>
           </div>
 
           <!-- 评论区 -->
@@ -367,6 +399,24 @@
             :placeholder="t('至少 100 字，描述性格、说话方式、背景设定等', 'At least 100 characters — personality, speech style, background…')"
           />
         </el-form-item>
+        <!-- 玩家设定（可选）：与人物卡上的同名项一致，别人采用后就知道「自己是谁」 -->
+        <el-form-item :label="t('玩家设定（可选）', 'Player Setup (optional)')">
+          <el-input
+            v-model="publishForm.user_prompt"
+            type="textarea"
+            :rows="4"
+            maxlength="4000"
+            resize="none"
+            :placeholder="t('这张卡里「你是谁」：姓名、年龄、身份、与角色的关系、性格外貌等。留空则采用者自己补。', 'Who you are in this card. Leave empty and the adopter fills it in.')"
+          />
+          <div class="mk-field-hint">
+            {{ t('不填也能发布 —— 采用这张卡的人可以自己补上自己的身份。', 'Optional — adopters can fill in their own identity later.') }}
+          </div>
+        </el-form-item>
+        <!-- 世界书（可选）：随卡片分享的按需注入设定 -->
+        <el-form-item :label="t('世界书（可选）', 'Worldbook (optional)')">
+          <MarketplaceWorldbookEditor v-model="publishForm.worldbook" />
+        </el-form-item>
         <el-form-item :label="t('开场白', 'Greeting')" required>
           <el-input
             v-model="publishForm.greeting"
@@ -430,6 +480,14 @@
         <el-form-item :label="t('人设提示词', 'Character Prompt')" required>
           <el-input v-model="editForm.system_prompt" type="textarea" :rows="6" maxlength="50000" resize="none" />
         </el-form-item>
+        <!-- 与人物卡对齐：玩家设定 + 世界书，均为可选 -->
+        <el-form-item :label="t('玩家设定（可选）', 'Player Setup (optional)')">
+          <el-input v-model="editForm.user_prompt" type="textarea" :rows="4" maxlength="4000" resize="none"
+            :placeholder="t('这张卡里「你是谁」。留空则采用者自己补。', 'Who you are in this card. Optional.')" />
+        </el-form-item>
+        <el-form-item :label="t('世界书（可选）', 'Worldbook (optional)')">
+          <MarketplaceWorldbookEditor v-model="editForm.worldbook" />
+        </el-form-item>
         <el-form-item :label="t('开场白', 'Greeting')" required>
           <el-input v-model="editForm.greeting" type="textarea" :rows="3" maxlength="100" resize="none" />
         </el-form-item>
@@ -465,10 +523,11 @@
 import logger from '@/utils/logger';
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Sunny, Search, ZoomIn, ChatLineRound } from '@element-plus/icons-vue'
+import { Plus, Sunny, Search, ZoomIn, ChatLineRound, Notebook } from '@element-plus/icons-vue'
 import { marketplaceApi, uploadApi } from '../utils/resAi'
 import { t } from '../i18n'
 import ThumbIcon from './ThumbIcon.vue'
+import MarketplaceWorldbookEditor from './MarketplaceWorldbookEditor.vue'
 import { identiconDataUrl } from '../utils/identicon'
 
 // 千位 k 计数：>= 1000 显示为 1k / 1.5k / 12k / 123k / 1.2m（百万）
@@ -568,6 +627,8 @@ const editSaving = ref(false)
 const editForm = reactive({
   name: '', description: '', gender: '', genderCustom: '',
   system_prompt: '', greeting: '', avatar: '',
+  // 与人物卡对齐：玩家设定与世界书都是可选
+  user_prompt: '', worldbook: [],
 })
 
 // 从详情打开编辑：把当前值填入表单。原「其他」类型需还原成"其他 + 文本"，
@@ -585,6 +646,14 @@ function openEditDialog() {
     system_prompt: d.system_prompt || '',
     greeting: d.greeting || '',
     avatar: d.avatar || '',
+    user_prompt: d.user_prompt || '',
+    // 深拷贝：编辑时改条目不能直接改到详情数据上（取消编辑应保持原样）
+    worldbook: (d.worldbook || []).map(e => ({
+      title: e.title || '',
+      keywords: e.keywords || '',
+      content: e.content || '',
+      always_on: !!e.always_on,
+    })),
   })
   showEditDialog.value = true
 }
@@ -614,6 +683,9 @@ async function handleSaveEdit() {
       system_prompt: editForm.system_prompt.trim(),
       greeting: editForm.greeting.trim(),
       avatar: editForm.avatar,
+      // 玩家设定与世界书可选：空值照常提交（提交即代表"用当前内容覆盖"）
+      user_prompt: editForm.user_prompt.trim(),
+      worldbook: cleanWorldbook(editForm.worldbook),
     })
     if (res.code === 200) {
       ElMessage.success(t('已保存', 'Saved'))
@@ -664,7 +736,22 @@ const publishForm = reactive({
   avatar: '',
   gender: '',        // 男 / 女 / 自定义
   genderCustom: '',  // 「其他」模式下用户填写的类型文本
+  // 玩家设定与世界书：与人物卡一致，都可留空
+  user_prompt: '',
+  worldbook: [],
 })
+
+// 提交前把世界书条目洗一遍：正文为空的整条丢掉（后端也会丢，这里先过滤少一次往返）
+function cleanWorldbook(entries) {
+  return (entries || [])
+    .filter(e => (e.content || '').trim())
+    .map(e => ({
+      title: (e.title || '').trim(),
+      keywords: (e.keywords || '').trim(),
+      content: (e.content || '').trim(),
+      always_on: !!e.always_on,
+    }))
+}
 
 // 实际提交的类型值：「其他」模式下取用户输入（留空则回落到「其他」）
 // 提交给后端的性别值：选「其他」时取自由输入，其余取预设值。
@@ -951,11 +1038,17 @@ async function handlePublish() {
       greeting: publishForm.greeting.trim(),
       avatar: publishForm.avatar,
       gender: effectiveGender(),
+      // 可选字段：留空就是不带（采用者之后可自行补）
+      user_prompt: publishForm.user_prompt.trim(),
+      worldbook: cleanWorldbook(publishForm.worldbook),
     })
     if (res.code === 200) {
       ElMessage.success(t('发布成功', 'Published'))
       showPublishDialog.value = false
-      Object.assign(publishForm, { name: '', description: '', system_prompt: '', greeting: '', avatar: '', gender: '', genderCustom: '' })
+      Object.assign(publishForm, {
+        name: '', description: '', system_prompt: '', greeting: '', avatar: '',
+        gender: '', genderCustom: '', user_prompt: '', worldbook: [],
+      })
       loadList()
       // 新卡片可能带来新的自定义性别，刷新下拉选项
       loadCustomGenders()
@@ -1449,6 +1542,60 @@ function formatDate(ts) {
   justify-content: space-between;
 }
 
+/* ===== 详情里的世界书条目 ===== */
+.dr-wb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dr-wb-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dr-wb-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dr-wb-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dr-wb-tag {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  color: var(--text-muted);
+  background: var(--surface-hover);
+  border: 1px solid var(--border-color);
+}
+
+.dr-wb-kw {
+  font-size: 12px;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+/* 条目正文比人设提示词次要，收紧内边距与字号 */
+.dr-wb-content {
+  padding: 9px 11px;
+  font-size: 12.5px;
+}
+
+/* 表单里的辅助说明（玩家设定 / 世界书都是可选字段） */
+.mk-field-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
 .dr-prompt-toggle {
   background: none;
   border: none;
@@ -1474,6 +1621,16 @@ function formatDate(ts) {
   cursor: default;
   pointer-events: none;
   color: var(--text-muted);
+}
+
+/* 带世界书的卡片标记：用品牌色描边，与点赞/评论的静默样式区分开 */
+.card-stat.wb {
+  cursor: default;
+  pointer-events: none;
+  color: var(--brand, var(--text-secondary));
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  padding: 0 6px;
 }
 
 .greeting-box {

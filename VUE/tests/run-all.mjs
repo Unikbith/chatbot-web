@@ -31,6 +31,7 @@ const jobs = [
   ['e2e-render.test.mjs', true],
   ['structure-stability.test.mjs', true],
   ['onboarding.test.mjs', true],
+  ['ui-regressions.test.mjs', true],
 ]
 jobs.push(['sanitize.test.mjs', hasJsdom])
 jobs.push(['prose.test.mjs', hasJsdom])

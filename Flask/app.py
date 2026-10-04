@@ -223,6 +223,10 @@ def _ensure_schema_columns(app):
             if 'worldbook_entries' not in inspector.get_table_names():
                 db.create_all()
                 app.logger.info('[迁移] 已创建 worldbook_entries 表')
+            # marketplace_worldbook_entries — 广场卡片随卡分享的世界书条目
+            if 'marketplace_worldbook_entries' not in inspector.get_table_names():
+                db.create_all()
+                app.logger.info('[迁移] 已创建 marketplace_worldbook_entries 表')
             # messages.prompt_tokens / completion_tokens - 单条回复的 token 用量
             if 'messages' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('messages')}

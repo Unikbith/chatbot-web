@@ -871,24 +871,31 @@ async function confirmDelete() {
   font-variant-numeric: tabular-nums;
 }
 
-/* 头像区域（明显位置，用户/AI 单独设置） */
+/* 头像区域（明显位置，用户/AI 单独设置）
+   抽屉宽度上限 500px，减掉内外边距后内容区只有 ~420px：
+   两块并排时每块只剩 ~198px，而「头像 60 + 间距 + 更换/清除 两个按钮 ~104」
+   装不下 —— 表现为按钮溢出、文字换行、整块被压变形。
+   改为自动换行网格：装得下就并排，装不下各自独占一行，永远不会挤。 */
 .avatar-section .avatar-row {
-  display: flex;
-  gap: 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
 }
 
 .avatar-block {
-  flex: 1;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 16px;
+  gap: 14px;
+  padding: 14px 16px;
+  min-width: 0;              /* 允许内部文字省略，而不是把整块撑破 */
   border: 1px solid var(--border-color);
   border-radius: 10px;
   background: var(--surface);
 }
 
 .avatar-meta {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -898,18 +905,36 @@ async function confirmDelete() {
 .avatar-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* el-upload 默认是块级 div：会让两个按钮的高度与基线对不齐 */
+.avatar-actions :deep(.el-upload) {
+  display: inline-flex;
+  align-items: center;
 }
 
 .avatar-label {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .avatar-preview {
   border: 2px solid var(--border-color);
-  flex-shrink: 0;
+  flex: none;
+}
+
+/* 头像一定是正圆：不管原图是长图还是方图，都按等比裁切，不被拉变形 */
+.avatar-preview :deep(img) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
 }
 
 .ai-avatar {
@@ -995,7 +1020,7 @@ async function confirmDelete() {
     width: 100%;
   }
   .avatar-section .avatar-row {
-    flex-direction: column;
+    grid-template-columns: 1fr;
     gap: 12px;
   }
   .avatar-block {

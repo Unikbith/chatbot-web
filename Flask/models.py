@@ -563,9 +563,13 @@ class PersonaMarketplace(db.Model):
     author = db.relationship('User', backref='marketplace_personas')
     comments = db.relationship('MarketplaceComment', backref='persona_card', lazy='dynamic',
                                cascade='all, delete-orphan', order_by='MarketplaceComment.created_at.desc()')
+    # 随卡片一起分享的世界书条目（可选）；删卡时一并删除
+    worldbook = db.relationship('MarketplaceWorldbookEntry', backref='marketplace_card',
+                                lazy='select', cascade='all, delete-orphan',
+                                order_by='MarketplaceWorldbookEntry.id')
 
-    def to_dict(self, include_prompt=False, comment_count=None):
-        """序列化。comment_count 可由调用方预先批量聚合传入，
+    def to_dict(self, include_prompt=False, comment_count=None, worldbook_count=None):
+        """序列化。comment_count / worldbook_count 可由调用方预先批量聚合传入，
         避免逐卡片执行 count() 造成 N+1 查询。
 
         can_edit 需调用方传入当前请求者是否为管理员（或卡片作者），
@@ -587,12 +591,53 @@ class PersonaMarketplace(db.Model):
                 comment_count if comment_count is not None
                 else (self.comments.count() if self.comments else 0)
             ),
+            # 列表页只要条数（卡片上打个小标记），详情页才带完整条目
+            'worldbook_count': (
+                worldbook_count if worldbook_count is not None
+                else (len(self.worldbook) if include_prompt else 0)
+            ),
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
         if include_prompt:
             data['system_prompt'] = self.system_prompt
             data['user_prompt'] = self.user_prompt
+            # 世界书只在详情/编辑场景下发（列表页带上会让响应体积翻好几倍）
+            data['worldbook'] = [e.to_dict() for e in (self.worldbook or [])]
         return data
+
+
+class MarketplaceWorldbookEntry(db.Model):
+    """人设广场卡片的世界书条目（发布卡片时随卡分享）。
+
+    为什么不直接复用 WorldBookEntry：
+        那张表是「用户自己的角色设定」，其中 persona_id 为空代表**全局条目**
+        （注入到该用户的所有角色）。广场条目混进去会被当成全局设定，
+        污染采用者自己的所有对话 —— 因此单独建表，
+        采用（adopt）时再复制成对方自己名下的 WorldBookEntry。
+    """
+    __tablename__ = 'marketplace_worldbook_entries'
+
+    id = db.Column(db.Integer, primary_key=True)
+    persona_id = db.Column(db.Integer, db.ForeignKey('persona_marketplace.id'),
+                           nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=False, default='')
+    keywords = db.Column(db.Text, nullable=False, default='')
+    content = db.Column(db.Text, nullable=False, default='')
+    always_on = db.Column(db.Boolean, default=False)
+    enabled = db.Column(db.Boolean, default=True)
+    weight = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=local_now)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title or '',
+            'keywords': self.keywords or '',
+            'content': self.content or '',
+            'always_on': bool(self.always_on),
+            'enabled': bool(self.enabled),
+            'weight': self.weight or 0,
+        }
 
 
 class MarketplaceVote(db.Model):
