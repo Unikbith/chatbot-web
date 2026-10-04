@@ -1,0 +1,71 @@
+/* 渲染预设：暖榻（Bedside）
+   米白 + 暖橘床头灯，像深夜卧室里只开着一盏灯；
+   居家、贴近、私密感强，适合慢节奏的日常与亲密戏。 */
+.rtpl.rtpl-amber {
+  --rtpl-bg: linear-gradient(180deg, #fffaf3 0%, #fdf1e2 55%, #f9e8d6 100%);
+  --rtpl-fg: #4a3a2a;
+  --rtpl-muted: #b09a80;
+  --rtpl-border: rgba(206, 156, 96, 0.26);
+  --rtpl-accent: #cd8a46;
+  --rtpl-accent-strong: #a5661f;
+  --rtpl-accent-soft: rgba(205, 138, 70, 0.12);
+  --rtpl-accent-soft-2: rgba(205, 138, 70, 0.06);
+  --rtpl-note: #b07a3a;
+  --rtpl-head-bg: linear-gradient(135deg, rgba(205, 138, 70, 0.15), rgba(255, 200, 140, 0.07));
+  --rtpl-bar-bg: rgba(205, 138, 70, 0.16);
+  --rtpl-bar-fill: linear-gradient(90deg, #f0c08a, #cd8a46);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.64);
+  --rtpl-radius: 16px;
+  --rtpl-radius-sm: 12px;
+  --rtpl-shadow: 0 1px 2px rgba(160, 110, 60, 0.06), 0 16px 40px -28px rgba(160, 110, 60, 0.5);
+  --rtpl-font-size: 14px;
+  --rtpl-line-height: 1.96;
+  --rtpl-scene-bg: rgba(205, 138, 70, 0.11);
+  --rtpl-scene-fg: #a5661f;
+  --rtpl-place-bg: rgba(150, 180, 140, 0.14);
+  --rtpl-place-fg: #557a48;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #e0a860, #b5762c);
+  --rtpl-mem-head-fg: #fffaf2;
+  --rtpl-say-fg: #a5661f;
+  --rtpl-say-weight: 600;
+  --rtpl-bracket-fg: #a89478;
+  --rtpl-c1: #cd8a46; --rtpl-c2: #d98a6a; --rtpl-c3: #b5906a;
+  --rtpl-c4: #c98a8a; --rtpl-c5: #dbb06a; --rtpl-c6: #8aa8a0;
+  --rtpl-indent: 2em;
+}
+
+/* 暖灯氛围：灯光从左上洒下，对白被照得暖一点 */
+.rtpl.rtpl-amber .rtpl-prose { color: #4a3a2a; }
+.rtpl.rtpl-amber .rtpl-say { text-shadow: 0 1px 0 rgba(255, 240, 220, 0.6); }
+.rtpl.rtpl-amber .t-inner {
+  border-left: 2px solid rgba(205, 138, 70, 0.45);
+  background: linear-gradient(90deg, rgba(205, 138, 70, 0.11), transparent);
+  color: #a5661f;
+}
+
+html.dark .rtpl.rtpl-amber {
+  --rtpl-bg: linear-gradient(180deg, #241d16 0%, #1e1812 55%, #191410 100%);
+  --rtpl-fg: #f0e4d6;
+  --rtpl-muted: #a08d78;
+  --rtpl-border: rgba(230, 170, 100, 0.26);
+  --rtpl-accent: #e8b06a;
+  --rtpl-accent-strong: #f5cf96;
+  --rtpl-accent-soft: rgba(232, 176, 106, 0.15);
+  --rtpl-accent-soft-2: rgba(232, 176, 106, 0.075);
+  --rtpl-note: #e3bd8a;
+  --rtpl-head-bg: linear-gradient(135deg, rgba(232, 176, 106, 0.19), rgba(255, 200, 140, 0.08));
+  --rtpl-bar-bg: rgba(232, 176, 106, 0.19);
+  --rtpl-bar-fill: linear-gradient(90deg, #f5cf96, #cd8a46);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.035);
+  --rtpl-shadow: 0 0 0 1px rgba(232, 176, 106, 0.06), 0 18px 44px -28px rgba(0, 0, 0, 0.85);
+  --rtpl-scene-bg: rgba(232, 176, 106, 0.15);
+  --rtpl-scene-fg: #f5cf96;
+  --rtpl-place-bg: rgba(140, 190, 150, 0.15);
+  --rtpl-place-fg: #9ad8a8;
+  --rtpl-say-fg: #f5cf96;
+  --rtpl-bracket-fg: #ab9a84;
+  --rtpl-c1: #e8b06a; --rtpl-c2: #e09a7a; --rtpl-c3: #c9a88a;
+  --rtpl-c4: #e09a9a; --rtpl-c5: #f0cf8a; --rtpl-c6: #96c0b0;
+}
+html.dark .rtpl.rtpl-amber .rtpl-prose { color: #f0e4d6; }
+html.dark .rtpl.rtpl-amber .t-inner { color: #f5cf96; }

@@ -1,0 +1,56 @@
+/* 渲染预设：极简（Minimal）
+   无彩色、细线、去阴影 —— 让内容本身说话，适合正剧向/长篇阅读。 */
+.rtpl.rtpl-minimal {
+  --rtpl-bg: #ffffff;
+  --rtpl-fg: #2f2f2f;
+  --rtpl-muted: #9a9a9a;
+  --rtpl-border: rgba(0, 0, 0, 0.1);
+  --rtpl-accent: #4a4a4a;
+  --rtpl-accent-strong: #1f1f1f;
+  --rtpl-accent-soft: rgba(0, 0, 0, 0.05);
+  --rtpl-accent-soft-2: rgba(0, 0, 0, 0.03);
+  --rtpl-note: #8a8a8a;
+  --rtpl-head-bg: rgba(0, 0, 0, 0.035);
+  --rtpl-bar-bg: rgba(0, 0, 0, 0.08);
+  --rtpl-bar-fill: linear-gradient(90deg, #9a9a9a, #4a4a4a);
+  --rtpl-panel-bg: transparent;
+  --rtpl-radius: 8px;
+  --rtpl-radius-sm: 6px;
+  --rtpl-shadow: none;
+  --rtpl-font-size: 14px;
+  --rtpl-line-height: 1.9;
+  --rtpl-scene-bg: rgba(0, 0, 0, 0.035);
+  --rtpl-scene-fg: #4a4a4a;
+  --rtpl-place-bg: rgba(0, 0, 0, 0.035);
+  --rtpl-place-fg: #4a4a4a;
+  --rtpl-mem-head-bg: rgba(0, 0, 0, 0.06);
+  --rtpl-mem-head-fg: #1f1f1f;
+  --rtpl-indent: 2em;
+  /* 极简：对白重黑、描写中灰，靠字重与明度区分而非颜色 */
+  --rtpl-say-fg: #111111;
+  --rtpl-say-weight: 700;
+  --rtpl-bracket-fg: #a0a0a0;
+}
+
+/* 极简：对白不缩进，描写缩进——用留白做视觉分区 */
+.rtpl.rtpl-minimal .rtpl-prose p.rtpl-say-line { margin-bottom: 9px; }
+
+html.dark .rtpl.rtpl-minimal {
+  --rtpl-bg: #1c1c1c;
+  --rtpl-fg: #e2e2e2;
+  --rtpl-muted: #8a8a8a;
+  --rtpl-border: rgba(255, 255, 255, 0.12);
+  --rtpl-accent: #c8c8c8;
+  --rtpl-accent-strong: #f0f0f0;
+  --rtpl-accent-soft: rgba(255, 255, 255, 0.07);
+  --rtpl-accent-soft-2: rgba(255, 255, 255, 0.04);
+  --rtpl-note: #a8a8a8;
+  --rtpl-head-bg: rgba(255, 255, 255, 0.06);
+  --rtpl-bar-bg: rgba(255, 255, 255, 0.12);
+  --rtpl-scene-bg: rgba(255, 255, 255, 0.06);
+  --rtpl-scene-fg: #d8d8d8;
+  --rtpl-place-bg: rgba(255, 255, 255, 0.06);
+  --rtpl-place-fg: #d8d8d8;
+  --rtpl-mem-head-bg: rgba(255, 255, 255, 0.09);
+  --rtpl-mem-head-fg: #f0f0f0;
+}

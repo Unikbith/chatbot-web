@@ -1,0 +1,48 @@
+/* 渲染预设：霓虹（Neon）
+   深底 + 青紫发光、等宽点缀 —— 赛博/科幻向。 */
+.rtpl.rtpl-neon {
+  --rtpl-bg: radial-gradient(120% 120% at 0% 0%, #101a2e 0%, #0a0f1c 60%, #080b14 100%);
+  --rtpl-fg: #cfe6ff;
+  --rtpl-muted: #6f8bb0;
+  --rtpl-border: rgba(84, 226, 255, 0.3);
+  --rtpl-accent: #54e2ff;
+  --rtpl-accent-strong: #8ef1ff;
+  --rtpl-accent-soft: rgba(84, 226, 255, 0.14);
+  --rtpl-accent-soft-2: rgba(84, 226, 255, 0.07);
+  --rtpl-note: #b28cff;
+  --rtpl-head-bg: linear-gradient(135deg, rgba(84, 226, 255, 0.18), rgba(178, 140, 255, 0.1));
+  --rtpl-bar-bg: rgba(84, 226, 255, 0.16);
+  --rtpl-bar-fill: linear-gradient(90deg, #54e2ff, #b28cff);
+  --rtpl-panel-bg: rgba(84, 226, 255, 0.04);
+  --rtpl-radius: 6px;
+  --rtpl-radius-sm: 4px;
+  --rtpl-shadow: 0 0 0 1px rgba(84, 226, 255, 0.08), 0 0 24px -8px rgba(84, 226, 255, 0.45);
+  --rtpl-font-size: 13.5px;
+  --rtpl-line-height: 1.72;
+  --rtpl-scene-bg: rgba(84, 226, 255, 0.12);
+  --rtpl-scene-fg: #8ef1ff;
+  --rtpl-place-bg: rgba(178, 140, 255, 0.16);
+  --rtpl-place-fg: #cbb4ff;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #2ad4ff, #7b5cff);
+  --rtpl-mem-head-fg: #05121c;
+  --rtpl-indent: 0;
+  /* 对白：青光加粗；括号内容：紫色斜体 */
+  --rtpl-say-fg: #9af3ff;
+  --rtpl-say-weight: 700;
+  --rtpl-bracket-fg: #b28cff;
+}
+
+/* 霓虹风：对白带发光，像终端里被高亮的台词 */
+.rtpl.rtpl-neon .rtpl-say {
+  text-shadow: 0 0 10px rgba(84, 226, 255, 0.6);
+}
+.rtpl.rtpl-neon .rtpl-prose { letter-spacing: 0.02em; }
+
+/* 霓虹风的科技感：标题与数值带发光，正文不缩进 */
+.rtpl.rtpl-neon .t-panel-h,
+.rtpl.rtpl-neon .t-num,
+.rtpl.rtpl-neon .t-opt-t {
+  text-shadow: 0 0 12px rgba(84, 226, 255, 0.55);
+}
+
+.rtpl.rtpl-neon .t-mem-list li::marker { color: #54e2ff; }

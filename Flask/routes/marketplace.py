@@ -117,7 +117,7 @@ def ensure_system_cards():
         return
 
     from models import PersonaTemplate  # noqa: F401  (保持依赖显式)
-    from routes.auth import _PERSONA_PROMPTS, _DEFAULT_AVATARS, _PRESET_GENDERS
+    from routes.auth import _PERSONA_PROMPTS, _DEFAULT_AVATARS, _PRESET_GENDERS, DEFAULT_USER_PROMPT
 
     names = list(_PERSONA_PROMPTS.keys())
     cards = {
@@ -141,6 +141,7 @@ def ensure_system_cards():
                     avatar=_DEFAULT_AVATARS.get(name),
                     system_prompt=info.get('system_prompt') or '',
                     greeting=info.get('greeting') or '',
+                    user_prompt=DEFAULT_USER_PROMPT,
                     gender=_PRESET_GENDERS.get(name),
                 )
             )
@@ -152,6 +153,8 @@ def ensure_system_cards():
             card.description = info.get('description') or card.description
             if not card.gender:
                 card.gender = _PRESET_GENDERS.get(name)
+            if not (card.user_prompt or '').strip():
+                card.user_prompt = DEFAULT_USER_PROMPT
             dirty = True
     if dirty:
         db.session.commit()
@@ -167,7 +170,7 @@ def ensure_system_adopts(user_id):
     注意：只处理用户自己的默认人物卡（is_default），用户自行创建的同名卡片不参与。
     """
     from models import PersonaTemplate
-    from routes.auth import _PERSONA_PROMPTS, _DEFAULT_AVATARS
+    from routes.auth import _PERSONA_PROMPTS, _DEFAULT_AVATARS, DEFAULT_USER_PROMPT
 
     names = list(_PERSONA_PROMPTS.keys())
     cards = {
@@ -740,6 +743,8 @@ def adopt_persona(pid):
         avatar=persona.avatar,
         system_prompt=persona.system_prompt,
         greeting=persona.greeting,
+        # 补全玩家侧设定：卡片自带就沿用，没有则补一份通用模板
+        user_prompt=(persona.user_prompt or '').strip() or DEFAULT_USER_PROMPT,
         is_default=False,
         persona_type='ai',
     )

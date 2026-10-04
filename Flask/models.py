@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, date
 from werkzeug.security import generate_password_hash, check_password_hash
 from extensions import db
+from rich_marker import RICH_MESSAGE_ENABLED
 import json
 
 
@@ -154,7 +155,11 @@ class PersonaTemplate(db.Model):
     name = db.Column(db.String(1000), nullable=False)  # 角色名，如 "加藤惠"
     description = db.Column(db.String(1000), nullable=True)  # 简介
     avatar = db.Column(db.String(500), nullable=True)  # 角色头像
-    system_prompt = db.Column(db.Text, nullable=False)  # 系统提示词
+    system_prompt = db.Column(db.Text, nullable=False)  # 系统提示词（界面称「AI 提示词」）
+    # 玩家（用户）侧的人物设定，界面称「人物提示词」。
+    # 与 AI 提示词同属一张卡：写卡时把「玩家是谁」和「AI 是谁」一起定好，
+    # 换卡即换整场戏的角色关系，不需要再去别处单独配一遍用户人设。
+    user_prompt = db.Column(db.Text, nullable=True)
     greeting = db.Column(db.Text, nullable=True)  # 开场问候语
     is_default = db.Column(db.Boolean, default=False)  # 是否为默认角色
     persona_type = db.Column(db.String(10), default='ai')  # ai / user
@@ -169,6 +174,7 @@ class PersonaTemplate(db.Model):
             'description': self.description,
             'avatar': self.avatar,
             'system_prompt': self.system_prompt,
+            'user_prompt': self.user_prompt,
             'greeting': self.greeting,
             'is_default': self.is_default,
             'persona_type': self.persona_type or 'ai',
@@ -333,6 +339,20 @@ class Conversation(db.Model):
     # 默认关闭 —— 那段兜底词有几千 token，默认带上会显著抬高每轮输入成本，
     # 只有在「AI 生成不出想要的内容」时才由用户自行打开。
     append_prompt_enabled = db.Column(db.Boolean, default=False, nullable=True)
+    # 界面标记（富消息）：开启后把「【状态】【进度】【选项】」等标记约定接在系统提示词后，
+    # 模型输出的标记由前端 RichMessage.vue 渲染成状态栏/进展条/可点选项。
+    # 默认值跟随全局开关 RICH_MESSAGE_ENABLED（见 rich_marker.py）：
+    # 这样新建对话的初始状态与 .env 一致，且「会话设置」里显示的开关不会与实际行为不符。
+    # 用户可在会话设置里单独覆盖（写入显式 True/False）。
+    rich_marker_enabled = db.Column(
+        db.Boolean, default=lambda: RICH_MESSAGE_ENABLED, nullable=True
+    )
+    # 回复渲染模板（JSON 文本）：决定这个话题的回复"长什么样"。
+    # 形如 {"preset":"archive","name":"档案风","prompt":"…标记说明…"}：
+    #   · prompt 由后端拼进系统提示词，保证「模板词表」与「前端渲染」天然对齐；
+    #   · 版式（CSS/骨架）由前端按 preset 解析，换模板即换风格。
+    # 为空表示不使用模板，走内置的基础标注渲染。
+    reply_template = db.Column(db.Text, nullable=True)
     deleted_at = db.Column(db.DateTime, nullable=True)
     settings = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=local_now)
@@ -366,6 +386,8 @@ class Conversation(db.Model):
             'summary': self.summary,
             'summary_upto_id': self.summary_upto_id,
             'append_prompt_enabled': bool(self.append_prompt_enabled),
+            'rich_marker_enabled': bool(self.rich_marker_enabled),
+            'reply_template': self.reply_template,
             'persona_name': self.persona.name if self.persona else None,
             'persona_avatar': self.persona.avatar if self.persona else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -515,6 +537,9 @@ class PersonaMarketplace(db.Model):
     # 若将来迁 MySQL 需改为 LONGTEXT（VARCHAR/TEXT 上限 65535 字节存不下 5 万汉字）
     system_prompt = db.Column(db.Text, nullable=False)
     greeting = db.Column(db.Text, nullable=True)
+    # 玩家侧设定（与人物卡上的「人物提示词」同一含义）：
+    # 发布卡片时一并带上，别人采用后就知道了「自己是谁」，不必再手动补。
+    user_prompt = db.Column(db.Text, nullable=True)
     # 人物卡性别：男 / 女 / 自定义文本（非男非女在筛选里统一归入「非二元」）
     gender = db.Column(db.String(20), nullable=True)
     likes = db.Column(db.Integer, default=0)
@@ -566,6 +591,7 @@ class PersonaMarketplace(db.Model):
         }
         if include_prompt:
             data['system_prompt'] = self.system_prompt
+            data['user_prompt'] = self.user_prompt
         return data
 
 

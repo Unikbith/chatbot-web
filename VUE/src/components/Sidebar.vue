@@ -52,19 +52,17 @@
         </div>
       </div>
 
-      <!-- 新用户教程入口：位于免费模型提示条下方；新用户看过引导弹窗后出现，
-           点「查看」打开教程即永久消失（与免费提示条同款交互） -->
-      <div v-if="tutorialHint" class="sidebar-tutorial-banner">
+      <!-- 使用教程：常驻入口，固定在「开启新对话」之上。
+           原来只在「新用户尚未点开」时出现，老用户与看过的用户就再也找不到；
+           教程本就是要随时回看的东西，因此改为常驻。 -->
+      <div class="sidebar-tutorial-banner">
         <span class="stb-icon"><el-icon><Reading /></el-icon></span>
         <span class="stb-text" @click="emit('open-tutorial')">
-          {{ t('新用户使用教程', 'Getting Started') }}
+          {{ t('使用教程', 'Getting Started') }}
         </span>
         <div class="stb-actions">
           <el-button size="small" type="primary" link @click="emit('open-tutorial')">
             {{ t('查看', 'View') }}
-          </el-button>
-          <el-button size="small" text @click="emit('dismiss-tutorial')">
-            {{ t('知道了', 'Got it') }}
           </el-button>
         </div>
       </div>

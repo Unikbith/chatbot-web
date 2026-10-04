@@ -60,7 +60,68 @@
           </div>
         </section>
 
-        <!-- 记忆宫殿（滚动摘要）：紧随人物设定——两者共同决定 AI "记住什么" -->
+        <!-- 界面标记（富消息）：总开关。开启后 AI 才会输出标记，聊天页才会渲染成面板 -->
+        <section class="cv-panel">
+          <header class="cv-panel__head">
+            <span class="cv-tick" aria-hidden="true"></span>
+            <h3 class="cv-panel__title">{{ t('界面标记', 'Rich Markers') }}</h3>
+          </header>
+          <div class="cv-toggle">
+            <div class="cv-toggle__text">
+              <span class="cv-toggle__label">{{ t('让 AI 输出状态、内心与选项', 'Let the AI output status, inner voice and choices') }}</span>
+              <span class="cv-toggle__hint">{{ t('关闭后回复只有正文', 'Off = plain text only') }}</span>
+            </div>
+            <el-switch v-model="form.rich_marker_enabled" />
+          </div>
+
+          <!-- 回复渲染模板：界面标记的子选项，关闭总开关时整块隐藏。
+               用「按钮 + 预设面板」而不是下拉框：预设要靠预览才选得准 -->
+          <div v-if="form.rich_marker_enabled" class="cv-sub">
+            <div class="cv-toggle">
+              <div class="cv-toggle__text">
+                <span class="cv-toggle__label">{{ t('回复外观', 'Appearance') }}</span>
+                <span class="cv-toggle__hint">{{ t('选配色与版式，可预览', 'Pick a theme, preview inside') }}</span>
+              </div>
+              <el-button size="small" class="tpl-open-btn" @click="openTemplatePanel">
+                {{ currentTemplateName }}
+              </el-button>
+            </div>
+
+            <!-- 提示词增强：把每轮该输出哪些构件的要求接进系统提示词 -->
+            <div class="cv-toggle cv-toggle--sub">
+              <div class="cv-toggle__text">
+                <span class="cv-toggle__label">{{ t('提示词增强', 'Prompt Boost') }}</span>
+                <span class="cv-toggle__hint">{{ t('每轮自动带上状态、面板、内心、选项', 'Adds panels every turn') }}</span>
+              </div>
+              <el-switch v-model="form.prompt_enhance" />
+            </div>
+
+            <!-- 回复长度：决定每轮正文写多长 -->
+            <div class="cv-toggle cv-toggle--sub">
+              <div class="cv-toggle__text">
+                <span class="cv-toggle__label">{{ t('回复长度', 'Reply length') }}</span>
+                <span class="cv-toggle__hint">{{ currentLengthDesc }}</span>
+              </div>
+              <el-select v-model="form.reply_length_id" size="small" class="tpl-select">
+                <el-option
+                  v-for="l in LENGTH_OPTIONS"
+                  :key="l.id"
+                  :value="l.id"
+                  :label="t(l.name, l.nameEn)"
+                />
+              </el-select>
+            </div>
+          </div>
+        </section>
+
+        <!-- 渲染预设面板（实时预览 + 选择） -->
+        <ReplyTemplatePanel
+          ref="templatePanelRef"
+          v-model="form.reply_template_id"
+        />
+
+        <!-- 记忆宫殿（滚动摘要）：沿用旧名，但不再提供查看入口 ——
+             压缩结果现在直接显示在聊天框的「记忆回廊」里（长期记忆区） -->
         <section class="cv-panel">
           <header class="cv-panel__head">
             <span class="cv-tick" aria-hidden="true"></span>
@@ -69,15 +130,12 @@
           <div class="cv-toggle">
             <div class="cv-toggle__text">
               <span class="cv-toggle__label">{{ t('每 N 轮压缩一次', 'Compress every N rounds') }}</span>
-              <span class="cv-toggle__hint">{{ t('把较早对话压成一条摘要：既防止遗忘，又减少输入 token', 'Condense older chat into one summary: keeps memory, cuts input tokens') }}</span>
+              <span class="cv-toggle__hint">{{ t('把较早对话压成一条摘要：既防止遗忘，又减少输入 token；压缩结果在聊天框的「记忆回廊」里查看', 'Condense older chat into one summary: keeps memory, cuts input tokens. View the result in the Memory Corridor inside the chat') }}</span>
             </div>
             <el-select v-model="form.summary_threshold" size="small" class="mp-select">
               <el-option v-for="n in 20" :key="n" :value="n" :label="`${n} ${t('轮', 'rounds')}`" />
             </el-select>
           </div>
-          <el-button class="mp-open" size="small" :icon="MagicStick" :disabled="!conversation" @click="openMemory">
-            {{ t('打开记忆宫殿', 'Open Memory Palace') }}
-          </el-button>
         </section>
 
         <!-- 头像：AI / 用户可分别设置，仅当前对话生效 -->
@@ -259,37 +317,7 @@
     </template>
   </el-drawer>
 
-  <!-- 记忆宫殿：查看历次压缩摘要 -->
-  <el-dialog
-    v-model="memoryOpen"
-    :title="t('记忆宫殿', 'Memory Palace')"
-    width="min(560px, 92%)"
-    class="mp-dialog"
-    append-to-body
-  >
-    <div v-if="memoryLoading" class="mp-empty">{{ t('加载中…', 'Loading…') }}</div>
-    <div v-else-if="!memoryData || !memoryData.items.length" class="mp-empty">
-      {{ t('暂无压缩记录。聊天达到设定轮数后会自动生成第一条摘要。', 'No compression yet — the first summary appears once the chat reaches the set number of rounds.') }}
-    </div>
-    <template v-else>
-      <div class="mp-stat">
-        <span class="mp-stat__num">{{ memoryData.compress_count }}</span>
-        <span class="mp-stat__unit">{{ t('次压缩', 'compressions') }}</span>
-        <span class="mp-stat__dot">·</span>
-        <span class="mp-stat__unit">{{ t('每', 'every') }} {{ memoryData.threshold }} {{ t('轮触发', 'rounds') }}</span>
-      </div>
-      <div class="mp-list">
-        <article v-for="item in memoryData.items" :key="item.id" class="mp-item">
-          <header class="mp-item__head">
-            <span class="mp-seq">#{{ item.seq }}</span>
-            <span class="mp-meta">{{ t('压缩', 'merged') }} {{ item.message_count }} {{ t('条消息', 'msgs') }}</span>
-            <span class="mp-time">{{ formatTime(item.created_at) }}</span>
-          </header>
-          <div class="mp-item__body">{{ item.content }}</div>
-        </article>
-      </div>
-    </template>
-  </el-dialog>
+  <!-- 记忆宫殿的查看入口已移除：压缩结果直接显示在聊天框的「记忆回廊」里 -->
 </template>
 
 <script setup>
@@ -297,7 +325,12 @@ import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { MagicStick, User, QuestionFilled } from '@element-plus/icons-vue'
 import { uploadApi, conversationApi } from '../utils/resAi'
+import {
+  TEMPLATE_PRESETS, DEFAULT_PROTOCOL, DEFAULT_LENGTH, OUTPUT_LENGTH_LIST,
+  DEFAULT_TEMPLATE_ID,
+} from '../utils/replyTemplates'
 import { t } from '../i18n'
+import ReplyTemplatePanel from './ReplyTemplatePanel.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -312,6 +345,83 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'save'])
 
+// 渲染模板：用独立面板（带实时预览）选择，而不是下拉框
+const templatePanelRef = ref(null)
+
+/** 按钮上显示的当前预设名 */
+const currentTemplateName = computed(() => {
+  const p = TEMPLATE_PRESETS[form.reply_template_id] || TEMPLATE_PRESETS[DEFAULT_TEMPLATE_ID]
+  return p ? t(p.name, p.nameEn) : t('档案风', 'Archive')
+})
+
+function openTemplatePanel() {
+  templatePanelRef.value?.open()
+}
+
+// 回复长度三档
+const LENGTH_OPTIONS = OUTPUT_LENGTH_LIST
+const currentLengthDesc = computed(() => {
+  const l = LENGTH_OPTIONS.find(x => x.id === form.reply_length_id)
+    || LENGTH_OPTIONS.find(x => x.id === DEFAULT_LENGTH)
+  return l ? t(l.desc, l.descEn) : ''
+})
+
+/** 从会话存的模板 JSON 里取出预设 id；没存过则用默认预设 */
+function readTemplateId(raw) {
+  if (!raw) return DEFAULT_TEMPLATE_ID
+  try {
+    const data = typeof raw === 'string' ? JSON.parse(raw) : raw
+    const id = data && data.preset ? String(data.preset) : ''
+    return TEMPLATE_PRESETS[id] ? id : DEFAULT_TEMPLATE_ID
+  } catch (e) {
+    return DEFAULT_TEMPLATE_ID
+  }
+}
+
+/** 取回「提示词增强」开关：老数据没有该字段时默认开启 */
+function readPromptEnhance(raw) {
+  if (!raw) return true
+  try {
+    const data = typeof raw === 'string' ? JSON.parse(raw) : raw
+    return data && data.enhance === false ? false : true
+  } catch (e) {
+    return true
+  }
+}
+
+/** 取回回复长度；没存过则用默认档 */
+function readLengthId(raw) {
+  if (!raw) return DEFAULT_LENGTH
+  try {
+    const data = typeof raw === 'string' ? JSON.parse(raw) : raw
+    const id = data && data.length ? String(data.length) : ''
+    return OUTPUT_LENGTH_LIST.some(l => l.id === id) ? id : DEFAULT_LENGTH
+  } catch (e) {
+    return DEFAULT_LENGTH
+  }
+}
+
+/**
+ * 生成要落库的模板 JSON —— **只存选择项**，不存提示词正文。
+ *
+ * 提示词正文（标记词表 + 输出结构 + 篇幅要求）由后端 reply_spec 统一组合：
+ * 之前正文存在会话里，新建对话还没有这份数据时就退回了旧提示词，
+ * 表现为"开了增强却没内容、样式也没套上"。改由后端组合后，
+ * 新建对话与历史对话的注入内容一致，也不会出现前后端两份文本漂移。
+ */
+function buildReplyTemplate() {
+  const id = TEMPLATE_PRESETS[form.reply_template_id] ? form.reply_template_id : DEFAULT_TEMPLATE_ID
+  const preset = TEMPLATE_PRESETS[id]
+  if (!preset) return null
+  return JSON.stringify({
+    preset: preset.id,
+    name: preset.name,
+    protocol: DEFAULT_PROTOCOL,
+    length: form.reply_length_id || DEFAULT_LENGTH,
+    enhance: form.prompt_enhance !== false,
+  })
+}
+
 // 仅列出已启用（enabled）的模型配置供当前对话选择
 const form = reactive({
   persona_id: null, ai_avatar: null, user_avatar: null,
@@ -320,43 +430,14 @@ const form = reactive({
   auto_play_voice: false,
   summary_threshold: 10,
   append_prompt_enabled: false,
+  rich_marker_enabled: false,
+  // 回复渲染模板：默认使用档案风（不再有"不使用"这一档）
+  reply_template_id: 'archive',
+  // 提示词增强：默认开启，把「每轮输出结构」接进系统提示词
+  prompt_enhance: true,
+  // 回复长度：short / medium / long
+  reply_length_id: 'medium',
 })
-
-// 记忆宫殿：历次压缩摘要
-const memoryOpen = ref(false)
-const memoryLoading = ref(false)
-const memoryData = ref(null)
-
-async function openMemory() {
-  const convId = props.conversation && props.conversation.id
-  if (!convId) return
-  memoryOpen.value = true
-  memoryLoading.value = true
-  memoryData.value = null
-  try {
-    const res = await conversationApi.summaries(convId)
-    if (res.code === 200) {
-      memoryData.value = res.data
-    } else {
-      ElMessage.warning(res.message || t('加载失败', 'Load failed'))
-    }
-  } catch (e) {
-    ElMessage.error(t('加载失败', 'Load failed'))
-  } finally {
-    memoryLoading.value = false
-  }
-}
-
-function formatTime(iso) {
-  if (!iso) return ''
-  try {
-    const d = new Date(iso)
-    const p = (n) => String(n).padStart(2, '0')
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
-  } catch (e) {
-    return ''
-  }
-}
 
 // 参数微调的量表定义：模板用 v-for 渲染，避免三段结构重复
 const paramDefs = computed(() => ([
@@ -393,6 +474,10 @@ function resetForm() {
   form.auto_play_voice = !!conv.auto_play_voice
   form.summary_threshold = (conv.summary_threshold != null && conv.summary_threshold !== '') ? Number(conv.summary_threshold) : 10
   form.append_prompt_enabled = !!conv.append_prompt_enabled
+  form.rich_marker_enabled = !!conv.rich_marker_enabled
+  form.reply_template_id = readTemplateId(conv.reply_template)
+  form.prompt_enhance = readPromptEnhance(conv.reply_template)
+  form.reply_length_id = readLengthId(conv.reply_template)
   // 让本轮回填引起的 watch 在同一微任务里被忽略，下一轮才恢复自动保存
   nextTick(() => { suppressAuto = false })
 }
@@ -469,6 +554,8 @@ function buildPayload() {
     auto_play_voice: !!form.auto_play_voice,
     summary_threshold: Number(form.summary_threshold) || 10,
     append_prompt_enabled: !!form.append_prompt_enabled,
+    rich_marker_enabled: !!form.rich_marker_enabled,
+    reply_template: buildReplyTemplate(),
   }
 }
 
@@ -765,7 +852,20 @@ watch(form, () => {
 
 /* ---------- 记忆宫殿（抽屉内） ---------- */
 .mp-select { width: 108px; flex-shrink: 0; }
-.mp-open { margin-top: 12px; width: 100%; min-height: 36px; }
+/* 渲染模板：按钮展示当前预设名，点开进入带预览的预设面板 */
+.tpl-open-btn { flex-shrink: 0; max-width: 180px; }
+/* 子选项：缩进 + 左侧刻度，表明它隶属于上面的开关 */
+.cv-sub {
+  margin-top: 10px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-color);
+}
+/* 二级子项：详略紧跟在模板选择下面，再多缩进一层表示从属关系 */
+.cv-toggle--sub {
+  margin-top: 10px;
+  padding-left: 10px;
+  border-left: 2px dashed var(--border-color);
+}
 
 /* 参数说明小问号：与系统设置保持一致 */
 .help-icon {
@@ -781,70 +881,5 @@ watch(form, () => {
   align-items: center;
   justify-content: flex-end;
   width: 100%;
-}
-</style>
-
-<style>
-/* 记忆宫殿弹窗：append-to-body，scoped 不生效，故用全局样式 */
-.mp-dialog .mp-empty {
-  padding: 24px 4px;
-  text-align: center;
-  font-size: 13px;
-  color: var(--text-secondary, #6b5b4a);
-}
-.mp-dialog .mp-stat {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin-bottom: 14px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border-color, #e6ddd4);
-}
-.mp-dialog .mp-stat__num {
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--brand, #b06a2e);
-  font-variant-numeric: tabular-nums;
-}
-.mp-dialog .mp-stat__unit { font-size: 12px; color: var(--text-secondary, #6b5b4a); }
-.mp-dialog .mp-stat__dot { color: var(--text-muted, #9c8b7a); }
-.mp-dialog .mp-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-height: 52vh;
-  overflow-y: auto;
-}
-.mp-dialog .mp-item {
-  padding: 12px 14px;
-  border: 1px solid var(--border-color, #e6ddd4);
-  border-radius: 10px;
-  background: var(--surface-hover, #faf7f4);
-}
-.mp-dialog .mp-item__head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-.mp-dialog .mp-seq {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--brand, #b06a2e);
-  font-variant-numeric: tabular-nums;
-}
-.mp-dialog .mp-meta { font-size: 11px; color: var(--text-secondary, #6b5b4a); }
-.mp-dialog .mp-time {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--text-muted, #9c8b7a);
-  font-variant-numeric: tabular-nums;
-}
-.mp-dialog .mp-item__body {
-  font-size: 13px;
-  line-height: 1.75;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--text-primary, #2a2522);
 }
 </style>

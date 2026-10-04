@@ -1,0 +1,99 @@
+/* 渲染预设：档案风（Archive）· 柔美暧昧
+   低饱和玫粉、柔和渐变、略带暖意的阴影；标签与数值都收着说，
+   让信息面板不抢戏，观感偏"夜里开着台灯说话"的那种氛围。
+   结构见 _base.css，这里只覆盖变量与少量专属装饰。 */
+.rtpl.rtpl-archive {
+  --rtpl-bg: linear-gradient(180deg, #fffdfe 0%, #fdf2f6 55%, #fbeaf0 100%);
+  --rtpl-fg: #4a3a41;
+  --rtpl-muted: #b79aa6;
+  --rtpl-border: rgba(214, 108, 148, 0.22);
+  --rtpl-accent: #d76a94;
+  --rtpl-accent-strong: #b8436e;
+  --rtpl-accent-soft: rgba(215, 106, 148, 0.1);
+  --rtpl-accent-soft-2: rgba(215, 106, 148, 0.05);
+  --rtpl-note: #c47f9c;
+  --rtpl-head-bg: linear-gradient(135deg, rgba(215, 106, 148, 0.13), rgba(215, 106, 148, 0.05));
+  --rtpl-bar-bg: rgba(215, 106, 148, 0.14);
+  --rtpl-bar-fill: linear-gradient(90deg, #f4a7c4, #d76a94);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.62);
+  --rtpl-radius: 18px;
+  --rtpl-radius-sm: 13px;
+  --rtpl-shadow: 0 1px 2px rgba(180, 90, 130, 0.05), 0 14px 34px -22px rgba(180, 90, 130, 0.5);
+  --rtpl-font-size: 14px;
+  --rtpl-line-height: 1.92;
+  --rtpl-scene-bg: rgba(215, 106, 148, 0.09);
+  --rtpl-scene-fg: #b8436e;
+  --rtpl-place-bg: rgba(120, 178, 140, 0.12);
+  --rtpl-place-fg: #39795a;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #f08bb0, #c2436f);
+  --rtpl-mem-head-fg: #fff8fb;
+  --rtpl-bar-w: 72px;
+  --rtpl-indent: 2em;
+  /* 对白：柔玫红加粗；括号里的心理与动作：雾紫灰斜体 */
+  --rtpl-say-fg: #b8436e;
+  --rtpl-say-weight: 600;
+  --rtpl-bracket-fg: #ab8fa0;
+  /* 六色标签：同为低饱和暖调，避免刺眼 */
+  --rtpl-c1: #e2739b;
+  --rtpl-c2: #d98aa8;
+  --rtpl-c3: #b98ac9;
+  --rtpl-c4: #e08a76;
+  --rtpl-c5: #d9a05f;
+  --rtpl-c6: #8fa8c9;
+}
+
+/* 档案风：对白两侧留一点呼吸，视觉上独立成行 */
+.rtpl.rtpl-archive .rtpl-say { padding: 0 1px; }
+.rtpl.rtpl-archive .rtpl-prose p.rtpl-say-line { margin-bottom: 9px; }
+
+/* 括号里的心理与动作：淡淡一层底，像舞台指示 */
+.rtpl.rtpl-archive .rtpl-bracket {
+  background: linear-gradient(90deg, rgba(215, 106, 148, 0.06), transparent 92%);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+/* 卡片标题下加一道柔光分隔，弱化"表格感" */
+.rtpl.rtpl-archive .t-panel-h {
+  border-bottom: 1px solid rgba(215, 106, 148, 0.12);
+  letter-spacing: 0.02em;
+}
+
+/* 内心独白：留白 + 左侧柔线，克制而暧昧 */
+.rtpl.rtpl-archive .t-inner {
+  border-left: 2px solid rgba(215, 106, 148, 0.45);
+  background: linear-gradient(90deg, rgba(215, 106, 148, 0.08), rgba(215, 106, 148, 0.02));
+  color: #8c4a68;
+  letter-spacing: 0.02em;
+}
+
+html.dark .rtpl.rtpl-archive {
+  --rtpl-bg: linear-gradient(180deg, #241a20 0%, #1f161c 60%, #1c1419 100%);
+  --rtpl-fg: #ecdde4;
+  --rtpl-muted: #9d8792;
+  --rtpl-border: rgba(240, 130, 170, 0.26);
+  --rtpl-accent: #f08bb0;
+  --rtpl-accent-strong: #f8b3cb;
+  --rtpl-accent-soft: rgba(240, 139, 176, 0.16);
+  --rtpl-accent-soft-2: rgba(240, 139, 176, 0.08);
+  --rtpl-note: #e5a8c1;
+  --rtpl-head-bg: linear-gradient(135deg, rgba(240, 139, 176, 0.2), rgba(240, 139, 176, 0.08));
+  --rtpl-bar-bg: rgba(240, 139, 176, 0.2);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.035);
+  --rtpl-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 14px 34px -24px rgba(0, 0, 0, 0.8);
+  --rtpl-scene-bg: rgba(240, 139, 176, 0.14);
+  --rtpl-scene-fg: #f8b3cb;
+  --rtpl-place-bg: rgba(120, 200, 160, 0.16);
+  --rtpl-place-fg: #93dbb4;
+  --rtpl-say-fg: #f8b3cb;
+  --rtpl-bracket-fg: #c2a8b6;
+  --rtpl-c1: #f08bb0;
+  --rtpl-c2: #e8a3bd;
+  --rtpl-c3: #c9a6e0;
+  --rtpl-c4: #f0a08c;
+  --rtpl-c5: #e8bd7a;
+  --rtpl-c6: #a6bce0;
+  --rtpl-inner-fg: #e5b9cd;
+}
+
+html.dark .rtpl.rtpl-archive .t-inner { color: #e5b9cd; }

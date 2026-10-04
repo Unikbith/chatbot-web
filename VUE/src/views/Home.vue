@@ -9,6 +9,7 @@ import {
 import { applyTheme, bindSystemThemeListener } from '../utils/theme'
 import { tokenStore } from '../utils/tokenStore'
 import { t, setLocale } from '../i18n'
+import { resolveTemplate } from '../utils/replyTemplates'
 
 import Sidebar from '../components/Sidebar.vue'
 import ChatArea from '../components/ChatArea.vue'
@@ -176,6 +177,14 @@ const effectiveAiAvatar = computed(() => {
 })
 // 对话独立：AI 回复自动播报
 const autoPlayVoice = computed(() => !!currentConv.value?.auto_play_voice)
+
+// 对话选定的回复渲染模板：决定 AI 回复"长什么样"（版式由模板 CSS 决定，可随时换）。
+// 受「界面标记」总开关约束：开关关闭时不启用模板，与后端注入逻辑保持一致
+// （关掉开关 = 不注入任何标记约定，前端自然也不该按模板渲染）。
+const replyTemplate = computed(() => {
+  if (!currentConv.value?.rich_marker_enabled) return null
+  return resolveTemplate(currentConv.value?.reply_template)
+})
 
 // 对话独立背景 > 通用背景
 const effectiveBackground = computed(() => currentConv.value?.background_image || userSettings.background_image || null)
@@ -626,6 +635,24 @@ async function _doCreateConversation(personaId, forceDelete = false) {
   }
 }
 
+// 长期记忆（记忆宫殿摘要）：在聊天框的「记忆回廊」里展示，
+// 因此随对话切换与回复结束刷新，不需要再单独打开一个查看弹窗。
+const longTermMemory = ref([])
+
+async function loadLongTermMemory() {
+  if (!currentConvId.value) { longTermMemory.value = []; return }
+  try {
+    const res = await conversationApi.summaries(currentConvId.value)
+    if (res.code === 200) {
+      // 取最近几条即可：更早的摘要已并入后续摘要，全列出来反而冗长
+      const items = res.data.items || []
+      longTermMemory.value = items.slice(-3).map(it => it.content).filter(Boolean)
+    }
+  } catch (e) {
+    logger.warn('加载长期记忆失败', e)
+  }
+}
+
 async function handleSelectConversation(convId) {
   if (!convId || convId === currentConvId.value) return
   try {
@@ -643,6 +670,7 @@ async function handleSelectConversation(convId) {
 
       const msgList = data.messages || []
       chatAreaRef.value?.setMessages(msgList)
+      loadLongTermMemory()
     }
   } catch (e) {
     ElMessage.error(t('加载对话失败', 'Failed to load conversation'))
@@ -901,6 +929,15 @@ async function handleConvoSettingsSaved(payload) {
       // 提示词兜底：关闭时不再把后端写死的追加提示词拼到人物设定后面
       ...(payload.append_prompt_enabled != null
         ? { append_prompt_enabled: !!payload.append_prompt_enabled }
+        : {}),
+      // 界面标记（富消息）：不使用模板时的通用标记开关
+      ...(payload.rich_marker_enabled != null
+        ? { rich_marker_enabled: !!payload.rich_marker_enabled }
+        : {}),
+      // 回复渲染模板：JSON 文本；null 表示不使用模板（走内置基础渲染）。
+      // 注意这里是显式字段白名单，新增字段必须一并转发，否则前端选了也存不进去。
+      ...(payload.reply_template !== undefined
+        ? { reply_template: payload.reply_template }
         : {}),
     }
     const res = await conversationApi.update(currentConvId.value, update)
@@ -1208,6 +1245,9 @@ async function handleConvoSettingsSaved(payload) {
       :ai-avatar="effectiveAiAvatar"
       :message-opacity="effectiveOpacity"
       :auto-play-voice="autoPlayVoice"
+      :reply-template="replyTemplate"
+      :long-term-memory="longTermMemory"
+      @reply-done="loadLongTermMemory"
       :is-free-api="chatStatus.is_free"
       :logged-in="isLoggedIn"
       :persona-greeting="currentPersona?.greeting || ''"

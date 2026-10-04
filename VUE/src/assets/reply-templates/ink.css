@@ -1,0 +1,67 @@
+/* 渲染预设：和纸（Ink）
+   米纸底、墨色字、衬线体 —— 古风/年代向，也适合长篇沉浸阅读。 */
+.rtpl.rtpl-ink {
+  --rtpl-bg: linear-gradient(180deg, #fbf7ee 0%, #f5eee1 100%);
+  --rtpl-fg: #2b2620;
+  --rtpl-muted: #8c8172;
+  --rtpl-border: rgba(120, 100, 70, 0.28);
+  --rtpl-accent: #8a6a3b;
+  --rtpl-accent-strong: #5f4826;
+  --rtpl-accent-soft: rgba(138, 106, 59, 0.13);
+  --rtpl-accent-soft-2: rgba(138, 106, 59, 0.06);
+  --rtpl-note: #96794c;
+  --rtpl-head-bg: rgba(138, 106, 59, 0.12);
+  --rtpl-bar-bg: rgba(138, 106, 59, 0.16);
+  --rtpl-bar-fill: linear-gradient(90deg, #b89a6a, #8a6a3b);
+  --rtpl-panel-bg: rgba(255, 253, 248, 0.6);
+  --rtpl-radius: 4px;
+  --rtpl-radius-sm: 3px;
+  --rtpl-shadow: 0 1px 0 rgba(120, 100, 70, 0.08);
+  --rtpl-font: "Songti SC", "SimSun", "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+  --rtpl-font-size: 14.5px;
+  --rtpl-line-height: 2;
+  --rtpl-scene-bg: rgba(138, 106, 59, 0.1);
+  --rtpl-scene-fg: #6b5433;
+  --rtpl-place-bg: rgba(138, 106, 59, 0.1);
+  --rtpl-place-fg: #6b5433;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #a98a58, #7a5c30);
+  --rtpl-mem-head-fg: #fdf8ee;
+  --rtpl-indent: 2em;
+  /* 和纸：对白用浓墨加粗，括号内容淡墨小字，接近话本排版 */
+  --rtpl-say-fg: #3a2f20;
+  --rtpl-say-weight: 700;
+  --rtpl-bracket-fg: #9a8b73;
+}
+
+/* 和纸风：对白字号略大，像话本里的「白」 */
+.rtpl.rtpl-ink .rtpl-say { font-size: 1.02em; letter-spacing: 0.02em; }
+.rtpl.rtpl-ink .rtpl-bracket { font-size: 0.95em; }
+
+/* 和纸风：印章式标签（方形而非胶囊），更贴合古籍排版 */
+.rtpl.rtpl-ink .t-k {
+  border-radius: 3px;
+  font-family: "Songti SC", "SimSun", serif;
+}
+
+.rtpl.rtpl-ink .t-item { border-radius: 3px; }
+
+html.dark .rtpl.rtpl-ink {
+  --rtpl-bg: linear-gradient(180deg, #221f1a 0%, #1a1814 100%);
+  --rtpl-fg: #e6ddcc;
+  --rtpl-muted: #9c8f79;
+  --rtpl-border: rgba(200, 175, 130, 0.3);
+  --rtpl-accent: #c8a86a;
+  --rtpl-accent-strong: #e0c48c;
+  --rtpl-accent-soft: rgba(200, 168, 106, 0.16);
+  --rtpl-accent-soft-2: rgba(200, 168, 106, 0.08);
+  --rtpl-note: #cbb083;
+  --rtpl-head-bg: rgba(200, 168, 106, 0.14);
+  --rtpl-bar-bg: rgba(200, 168, 106, 0.2);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.03);
+  --rtpl-scene-bg: rgba(200, 168, 106, 0.14);
+  --rtpl-scene-fg: #e0c48c;
+  --rtpl-place-bg: rgba(200, 168, 106, 0.14);
+  --rtpl-place-fg: #e0c48c;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #8a6a3b, #6b5230);
+  --rtpl-mem-head-fg: #f6efe2;
+}

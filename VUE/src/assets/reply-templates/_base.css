@@ -1,0 +1,598 @@
+/* ==========================================================================
+   回复渲染模板 · 结构骨架（_base.css）
+
+   架构说明（重要）：
+     · 本文件只定义**结构与默认变量**，不写具体配色；
+     · 每个主题预设（archive.css / minimal.css / neon.css / ink.css …）
+       只需要覆盖一组 CSS 变量，即可换出完全不同的风格；
+     · 因此「新增一个渲染预设」= 新增一个小 CSS 文件 + 在
+       utils/replyTemplates.js 登记一条定义，无需改动任何组件代码。
+
+   两条硬性约束：
+     1. 所有选择器必须以 `.rtpl` 开头 —— 本文件是全局样式，
+        不加前缀会把 .t-* 这类短类名泄漏到全站。
+     2. 骨架 class 由 renderReplyTemplate 生成，AI 只提供数据、不写 HTML。
+   ========================================================================== */
+
+.rtpl {
+  /* ---------- 可被主题覆盖的变量（默认值） ---------- */
+  --rtpl-bg: #ffffff;
+  --rtpl-fg: #333333;
+  --rtpl-muted: #8a8a8a;
+  --rtpl-border: rgba(0, 0, 0, 0.12);
+  --rtpl-accent: #b06a2e;
+  --rtpl-accent-strong: #8a4f1d;
+  --rtpl-accent-soft: rgba(176, 106, 46, 0.12);
+  --rtpl-accent-soft-2: rgba(176, 106, 46, 0.06);
+  --rtpl-accent-fg: #ffffff;
+  --rtpl-note: #a9815a;
+  --rtpl-head-bg: linear-gradient(135deg, rgba(176, 106, 46, 0.14), rgba(176, 106, 46, 0.07));
+  --rtpl-bar-bg: rgba(176, 106, 46, 0.15);
+  --rtpl-bar-fill: linear-gradient(90deg, #d99a5b, #b06a2e);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.7);
+  --rtpl-radius: 14px;
+  --rtpl-radius-sm: 10px;
+  --rtpl-shadow: 0 1px 2px rgba(60, 40, 25, 0.05), 0 8px 24px -16px rgba(60, 40, 25, 0.35);
+  --rtpl-font: inherit;
+  --rtpl-font-size: 13.5px;
+  --rtpl-line-height: 1.78;
+  --rtpl-indent: 2em;          /* 正文首行缩进；设 0 即取消 */
+  --rtpl-scene-bg: rgba(176, 106, 46, 0.09);
+  --rtpl-scene-fg: #8a4f1d;
+  --rtpl-place-bg: rgba(46, 160, 96, 0.11);
+  --rtpl-place-fg: #1b7a45;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #d99a5b, #b06a2e);
+  --rtpl-mem-head-fg: #ffffff;
+  /* 内容类型区分：对白 / 括号内容的颜色与粗细，各预设可覆盖 */
+  --rtpl-say-fg: var(--rtpl-accent-strong);
+  --rtpl-say-weight: 600;
+  --rtpl-bracket-fg: var(--rtpl-muted);
+
+  /* ---------- 整个输出框 ---------- */
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--rtpl-radius);
+  border: 1px solid var(--rtpl-border);
+  background: var(--rtpl-bg);
+  box-shadow: var(--rtpl-shadow);
+  color: var(--rtpl-fg);
+  font-family: var(--rtpl-font);
+  font-size: var(--rtpl-font-size);
+  line-height: var(--rtpl-line-height);
+  letter-spacing: 0.01em;
+  word-break: break-word;
+}
+
+/* ---------- 正文（Markdown 渲染结果） ---------- */
+.rtpl .rtpl-prose p {
+  margin: 0 0 10px;
+  text-indent: var(--rtpl-indent);
+}
+
+.rtpl .rtpl-prose p:last-child { margin-bottom: 0; }
+
+.rtpl .rtpl-prose h1,
+.rtpl .rtpl-prose h2,
+.rtpl .rtpl-prose h3,
+.rtpl .rtpl-prose h4 {
+  margin: 14px 0 8px;
+  font-size: calc(var(--rtpl-font-size) + 1px);
+  font-weight: 700;
+  color: var(--rtpl-accent-strong);
+  text-indent: 0;
+}
+
+.rtpl .rtpl-prose strong,
+.rtpl .rtpl-prose b { color: var(--rtpl-accent-strong); font-weight: 700; }
+
+.rtpl .rtpl-prose em,
+.rtpl .rtpl-prose i { color: var(--rtpl-note); }
+
+.rtpl .rtpl-prose blockquote {
+  margin: 10px 0;
+  padding: 6px 12px;
+  border-left: 3px solid var(--rtpl-accent);
+  background: var(--rtpl-accent-soft-2);
+  border-radius: 0 8px 8px 0;
+  color: var(--rtpl-muted);
+}
+
+.rtpl .rtpl-prose ul,
+.rtpl .rtpl-prose ol { margin: 8px 0; padding-left: 22px; }
+
+.rtpl .rtpl-prose li { margin: 3px 0; }
+
+.rtpl .rtpl-prose li::marker { color: var(--rtpl-accent); font-weight: 700; }
+
+.rtpl .rtpl-prose code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--rtpl-accent-soft);
+  color: var(--rtpl-accent-strong);
+  font-size: 0.92em;
+}
+
+.rtpl .rtpl-prose pre {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: var(--rtpl-radius-sm);
+  background: var(--rtpl-accent-soft-2);
+  overflow-x: auto;
+}
+
+.rtpl .rtpl-prose pre code { background: none; padding: 0; }
+
+.rtpl .rtpl-prose hr {
+  margin: 14px 0;
+  border: none;
+  border-top: 1px dashed var(--rtpl-border);
+}
+
+.rtpl .rtpl-prose a { color: var(--rtpl-accent-strong); text-decoration: underline; }
+
+.rtpl .rtpl-prose img { max-width: 100%; border-radius: var(--rtpl-radius-sm); }
+
+.rtpl .rtpl-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 0.96em;
+}
+
+.rtpl .rtpl-prose th,
+.rtpl .rtpl-prose td {
+  padding: 6px 9px;
+  border: 1px solid var(--rtpl-border);
+  text-align: left;
+}
+
+.rtpl .rtpl-prose th {
+  background: var(--rtpl-accent-soft);
+  color: var(--rtpl-accent-strong);
+  font-weight: 700;
+}
+
+/* ---------- 内容类型区分：对白 / 心理动作 / 叙述描写 ----------
+   renderProse 会在渲染后打上这些 class，模板可分别为它们设计表现 */
+.rtpl-say {
+  color: var(--rtpl-say-fg, var(--rtpl-accent-strong));
+  font-weight: var(--rtpl-say-weight, 600);
+}
+
+.rtpl-bracket {
+  color: var(--rtpl-bracket-fg, var(--rtpl-muted));
+  font-style: italic;
+}
+
+/* 以对白开头的段落取消首行缩进：引号本身已有视觉边界，再缩进会显得别扭 */
+.rtpl .rtpl-prose p.rtpl-say-line { text-indent: 0; }
+
+/* ---------- 顶部状态条 ---------- */
+.rtpl .t-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border-radius: var(--rtpl-radius-sm);
+  background: var(--rtpl-head-bg);
+  border: 1px solid var(--rtpl-border);
+  font-size: 0.95em;
+}
+
+.rtpl .t-topbar-title { font-weight: 700; color: var(--rtpl-accent-strong); }
+.rtpl .t-topbar-time { color: var(--rtpl-accent); font-variant-numeric: tabular-nums; }
+.rtpl .t-topbar-note { flex: 1 1 100%; color: var(--rtpl-muted); }
+.rtpl .t-topbar-sep { color: var(--rtpl-border); }
+
+/* ---------- 终端式模块表 ---------- */
+.rtpl .t-modules { display: flex; flex-direction: column; gap: 5px; }
+
+.rtpl .t-module {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 11px;
+  border-radius: var(--rtpl-radius-sm);
+  border: 1px solid var(--rtpl-border);
+  background: var(--rtpl-accent-soft-2);
+  color: var(--rtpl-fg);
+}
+
+.rtpl .t-module-caret { flex: none; color: var(--rtpl-accent); font-weight: 700; }
+.rtpl .t-module-name { flex: 1; min-width: 0; font-weight: 600; }
+.rtpl .t-module-ico { flex: none; }
+.rtpl .t-module-badge {
+  flex: none;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--rtpl-accent-soft);
+  color: var(--rtpl-accent-strong);
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 内心独白 ---------- */
+.rtpl .t-inner {
+  padding: 9px 12px;
+  border-radius: var(--rtpl-radius-sm);
+  border: 1px solid var(--rtpl-border);
+  border-left: 3px solid var(--rtpl-accent);
+  background: var(--rtpl-accent-soft-2);
+  color: var(--rtpl-accent-strong);
+  font-style: italic;
+  line-height: 1.75;
+}
+
+.rtpl .t-inner-text { white-space: pre-wrap; }
+
+/* ---------- 数值变化（旧值 → 新值） ---------- */
+.rtpl .t-delta { display: inline-flex; align-items: baseline; gap: 2px; }
+
+.rtpl .t-delta-from { color: var(--rtpl-muted); font-weight: 500; }
+.rtpl .t-delta-arrow { color: var(--rtpl-muted); margin: 0 1px; }
+.rtpl .t-delta-to { font-weight: 700; }
+.rtpl .t-delta.is-up .t-delta-to { color: var(--rtpl-up, #3fae72); }
+.rtpl .t-delta.is-down .t-delta-to { color: var(--rtpl-down, #d9483b); }
+.rtpl .t-delta.is-flat .t-delta-to { color: var(--rtpl-accent); }
+
+/* 强度徽标：标出该项本轮的变化幅度或当前程度（微涨 / 骤降 / 临界 …） */
+.rtpl .t-badge {
+  flex: none;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 0.82em;
+  font-weight: 600;
+  line-height: 1.5;
+  background: var(--rtpl-accent-soft);
+  color: var(--rtpl-accent-strong);
+  border: 1px solid var(--rtpl-border);
+}
+
+.rtpl .t-badge.is-up { color: var(--rtpl-up, #3fae72); border-color: currentColor; }
+.rtpl .t-badge.is-down { color: var(--rtpl-down, #d9483b); border-color: currentColor; }
+.rtpl .t-badge.is-flat { color: var(--rtpl-muted); }
+
+/* ---------- 标签自动配色：引擎按顺序轮换 c1..c6 ---------- */
+.rtpl .t-k.c1 { background: color-mix(in srgb, var(--rtpl-c1, var(--rtpl-accent)) 18%, transparent); color: var(--rtpl-c1, var(--rtpl-accent-strong)); }
+.rtpl .t-k.c2 { background: color-mix(in srgb, var(--rtpl-c2, var(--rtpl-accent)) 18%, transparent); color: var(--rtpl-c2, var(--rtpl-accent-strong)); }
+.rtpl .t-k.c3 { background: color-mix(in srgb, var(--rtpl-c3, var(--rtpl-accent)) 18%, transparent); color: var(--rtpl-c3, var(--rtpl-accent-strong)); }
+.rtpl .t-k.c4 { background: color-mix(in srgb, var(--rtpl-c4, var(--rtpl-accent)) 18%, transparent); color: var(--rtpl-c4, var(--rtpl-accent-strong)); }
+.rtpl .t-k.c5 { background: color-mix(in srgb, var(--rtpl-c5, var(--rtpl-accent)) 18%, transparent); color: var(--rtpl-c5, var(--rtpl-accent-strong)); }
+.rtpl .t-k.c6 { background: color-mix(in srgb, var(--rtpl-c6, var(--rtpl-accent)) 18%, transparent); color: var(--rtpl-c6, var(--rtpl-accent-strong)); }
+
+/* 兼容不支持 color-mix 的旧浏览器：退回单色，不影响可读性 */
+@supports not (background: color-mix(in srgb, red 10%, transparent)) {
+  .rtpl .t-k.c1, .rtpl .t-k.c2, .rtpl .t-k.c3,
+  .rtpl .t-k.c4, .rtpl .t-k.c5, .rtpl .t-k.c6 {
+    background: var(--rtpl-accent-soft);
+    color: var(--rtpl-accent-strong);
+  }
+}
+
+/* ---------- 可折叠区块（推荐行动 / 记忆）----------
+   用原生 <details>/<summary> 实现：不需要任何 JS，
+   在 v-html 渲染出来的内容里同样能点开点收。 */
+.rtpl .t-fold { border: 1px solid var(--rtpl-border); border-radius: var(--rtpl-radius-sm); overflow: hidden; }
+
+.rtpl .t-fold > summary { list-style: none; cursor: pointer; user-select: none; }
+.rtpl .t-fold > summary::-webkit-details-marker { display: none; }
+
+.rtpl .t-fold-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  background: var(--rtpl-head-bg);
+  color: var(--rtpl-accent-strong);
+  font-weight: 700;
+  font-size: calc(var(--rtpl-font-size) + 0.5px);
+}
+
+.rtpl .t-fold-t { flex: 1; min-width: 0; }
+
+/* 折叠时也能看到"里面有多少条"：不用展开就知道信息量 */
+.rtpl .t-fold-count {
+  flex: none;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--rtpl-accent-soft);
+  color: var(--rtpl-accent);
+  font-size: 0.8em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 折叠指示箭头：展开朝下、收起朝右 */
+.rtpl .t-fold-arrow {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.15s;
+}
+
+.rtpl .t-fold[open] .t-fold-arrow { transform: rotate(90deg); }
+
+.rtpl .t-fold > .t-opts { padding: 8px 10px 10px; }
+.rtpl .t-fold > .t-mem-list { margin: 0; padding: 8px 12px 10px 30px; }
+
+/* 折叠面板内的填充容器（面板原本自带外框，折叠后由 details 提供外框） */
+.rtpl .t-panel-fill { background: var(--rtpl-panel-bg); }
+.rtpl .t-fold--panel > .t-panel-fill { background: var(--rtpl-panel-bg); }
+
+/* 记忆回廊折叠块的标题沿用记忆的渐变配色 */
+.rtpl .t-fold--mem > .t-mem-h { background: var(--rtpl-mem-head-bg); color: var(--rtpl-mem-head-fg); }
+
+/* ---------- 记忆回廊：长期 + 短期 ---------- */
+.rtpl .t-mem-body { padding: 4px 0 2px; background: var(--rtpl-panel-bg); }
+
+.rtpl .t-mem-sub + .t-mem-sub { border-top: 1px dashed var(--rtpl-border); }
+
+.rtpl .t-mem-sub-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px 2px;
+  font-size: 0.9em;
+  font-weight: 700;
+  color: var(--rtpl-accent-strong);
+  letter-spacing: 0.02em;
+}
+
+.rtpl .t-mem-sub-h em {
+  font-style: normal;
+  font-weight: 600;
+  font-size: 0.88em;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--rtpl-accent-soft);
+  color: var(--rtpl-accent);
+}
+
+.rtpl .t-mem-list { margin: 0; padding: 6px 12px 8px 30px; }
+
+.rtpl .t-mem-list li { color: var(--rtpl-fg); padding: 2px 0; }
+
+.rtpl .t-mem-list li::marker { color: var(--rtpl-accent); font-weight: 700; }
+
+/* 长期记忆用更淡的层次，与短期记忆区分开 */
+.rtpl .t-mem-list--long li { color: var(--rtpl-muted); font-size: 0.95em; }
+
+/* ---------- 开场白变体 ---------- */
+/* 开场白通常只有一两句，用完整输出框的留白会显得很空，这里收紧并弱化 */
+.rtpl.rtpl--greeting {
+  padding: 12px 14px;
+  gap: 8px;
+  box-shadow: none;
+  background: var(--rtpl-accent-soft-2);
+}
+
+.rtpl.rtpl--greeting .rtpl-prose {
+  text-align: center;
+  font-size: 0.98em;
+  color: var(--rtpl-accent-strong);
+}
+
+.rtpl.rtpl--greeting .rtpl-prose p { text-indent: 0; margin: 0; }
+
+/* ---------- 场景条 ---------- */
+.rtpl .t-scene { display: flex; flex-direction: column; gap: 5px; }
+
+.rtpl .t-scene-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: 8px;
+  background: var(--rtpl-scene-bg);
+  color: var(--rtpl-scene-fg);
+  font-weight: 600;
+  font-size: 13px;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.rtpl .t-scene-row.is-place { background: var(--rtpl-place-bg); color: var(--rtpl-place-fg); }
+
+.rtpl .t-ico { flex: none; font-size: 13px; line-height: 1; }
+
+/* ---------- 摘要 ---------- */
+.rtpl .t-sum {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: var(--rtpl-radius-sm);
+  background: var(--rtpl-head-bg);
+  border: 1px solid var(--rtpl-border);
+  color: var(--rtpl-accent-strong);
+}
+
+.rtpl .t-sum .t-ico { margin-top: 3px; }
+
+/* ---------- 卡片 ---------- */
+.rtpl .t-panel {
+  border: 1px solid var(--rtpl-border);
+  border-radius: var(--rtpl-radius-sm);
+  overflow: hidden;
+  background: var(--rtpl-panel-bg);
+}
+
+.rtpl .t-panel-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  background: var(--rtpl-head-bg);
+  color: var(--rtpl-accent-strong);
+  font-weight: 700;
+  font-size: calc(var(--rtpl-font-size) + 0.5px);
+}
+
+.rtpl .t-panel-b { padding: 4px 12px 8px; }
+
+/* ---------- 键值行 ---------- */
+.rtpl .t-row { display: flex; align-items: flex-start; gap: 9px; padding: 6px 0; }
+
+.rtpl .t-row + .t-row { border-top: 1px dashed var(--rtpl-border); }
+
+.rtpl .t-k {
+  flex: none;
+  min-width: 52px;
+  padding: 1px 9px;
+  border-radius: 999px;
+  background: var(--rtpl-accent-soft);
+  color: var(--rtpl-accent-strong);
+  font-size: 0.93em;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.rtpl .t-v { flex: 1; min-width: 0; color: var(--rtpl-fg); }
+
+.rtpl .t-row-text .t-v { color: var(--rtpl-fg); opacity: 0.92; }
+
+/* ---------- 数值行 ----------
+   排布：标签胶囊 + 数值 + 迷你进度条 同处一行，注释另起一行。
+   此前进度条宽度 100% 会撑满整张卡片、又和注释挤在一行，
+   视觉上像一条横穿的装饰线，是"违和感"的主要来源。 */
+.rtpl .t-stat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+}
+
+.rtpl .t-stat + .t-stat { border-top: 1px dashed var(--rtpl-border); }
+
+.rtpl .t-num {
+  font-weight: 700;
+  color: var(--rtpl-accent);
+  font-size: calc(var(--rtpl-font-size) + 0.5px);
+  /* 等宽数字：多行数值右对齐时不会左右跳动 */
+  font-variant-numeric: tabular-nums;
+}
+
+.rtpl .t-num i {
+  font-style: normal;
+  font-size: 0.85em;
+  color: var(--rtpl-muted);
+  font-weight: 500;
+}
+
+.rtpl .t-note {
+  flex: 1 1 100%;
+  margin-top: -2px;
+  color: var(--rtpl-note);
+  font-size: 0.9em;
+  font-style: italic;
+}
+
+/* 迷你进度条：固定宽度、紧跟数值，只在有「当前/上限」时出现 */
+.rtpl .t-bar {
+  flex: none;
+  width: var(--rtpl-bar-w, 64px);
+  height: 4px;
+  border-radius: 2px;
+  background: var(--rtpl-bar-bg);
+  overflow: hidden;
+}
+
+.rtpl .t-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--rtpl-bar-fill);
+}
+
+/* ---------- 记忆档案 ---------- */
+.rtpl .t-mem {
+  border: 1px solid var(--rtpl-border);
+  border-radius: var(--rtpl-radius-sm);
+  overflow: hidden;
+}
+
+.rtpl .t-mem-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  color: var(--rtpl-mem-head-fg);
+  font-weight: 700;
+  font-size: calc(var(--rtpl-font-size) + 0.5px);
+  background: var(--rtpl-mem-head-bg);
+}
+
+.rtpl .t-mem-list {
+  margin: 0;
+  padding: 8px 12px 10px 30px;
+  background: var(--rtpl-panel-bg);
+}
+
+.rtpl .t-mem-list li { color: var(--rtpl-fg); padding: 3px 0; }
+
+.rtpl .t-mem-list li::marker { color: var(--rtpl-accent); font-weight: 700; }
+
+/* ---------- 推演选项 ---------- */
+.rtpl .t-opts { display: flex; flex-direction: column; gap: 6px; }
+
+.rtpl .t-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  text-align: left;
+  font: inherit;
+  font-size: inherit;
+  background: var(--rtpl-bg);
+  border: 1px solid var(--rtpl-border);
+  border-radius: var(--rtpl-radius-sm);
+  color: var(--rtpl-fg);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.rtpl .t-opt:hover { background: var(--rtpl-accent-soft); border-color: var(--rtpl-accent); }
+
+.rtpl .t-opt-k { flex: none; color: var(--rtpl-accent-strong); font-weight: 700; }
+
+/* 选项正文容器：撑满剩余宽度，长文案才能正常换行而不是溢出按钮 */
+.rtpl .t-opt-body { flex: 1; min-width: 0; }
+
+.rtpl .t-opt-t { color: var(--rtpl-accent); font-weight: 700; }
+.rtpl .t-opt-d { color: var(--rtpl-fg); opacity: 0.92; }
+
+/* ---------- 物品 / 提醒 ---------- */
+.rtpl .t-items { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.rtpl .t-item {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.93em;
+  background: var(--rtpl-accent-soft);
+  border: 1px solid var(--rtpl-border);
+  color: var(--rtpl-accent-strong);
+}
+
+.rtpl .t-item b { color: var(--rtpl-accent); margin-left: 3px; }
+
+.rtpl .t-alert {
+  display: flex;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: var(--rtpl-radius-sm);
+  background: var(--rtpl-accent-soft-2);
+  border: 1px solid var(--rtpl-border);
+  color: var(--rtpl-accent-strong);
+}
+
+/* 块级容器：模板分支下每个块独占一行 */
+.rtpl-block { min-width: 0; }

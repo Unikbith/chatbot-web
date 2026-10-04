@@ -12,7 +12,7 @@ from flask import Flask, jsonify, request
 from sqlalchemy import inspect, text
 from config import config
 from extensions import db, jwt, cors, migrate
-from models import User, ModelProvider, PersonaTemplate, UserSettings
+from models import User, ModelProvider, PersonaTemplate, UserSettings, Conversation
 from routes import (
     auth_bp, chat_bp, audio_bp, provider_bp,
     conversation_bp, settings_bp, persona_bp, upload_bp,
@@ -75,6 +75,13 @@ def create_app(config_name=None):
     # 健康检查
     @app.route('/api/health')
     def health_check():
+        # rich_message_enabled：全局默认开关（.env 的 RICH_MESSAGE_ENABLED）。
+        # 单个对话以自身的 rich_marker_enabled 为准（可在「会话设置 → 界面标记」里改）。
+        try:
+            from rich_marker import RICH_MESSAGE_ENABLED as rich_global
+            rich_enabled = bool(rich_global)
+        except Exception:
+            rich_enabled = False
         return jsonify({
             'code': 200,
             'message': 'OK',
@@ -82,6 +89,7 @@ def create_app(config_name=None):
                 'status': 'running',
                 'version': '4.0.0',
                 'free_api_enabled': app.config.get('FREE_API_ENABLED', False),
+                'rich_message_enabled': rich_enabled,
             }
         })
 
@@ -249,6 +257,10 @@ def _ensure_schema_columns(app):
                     'summary_upto_id': 'INTEGER',
                     # 提示词兜底开关
                     'append_prompt_enabled': 'BOOLEAN',
+                    # 界面标记（富消息）开关
+                    'rich_marker_enabled': 'BOOLEAN',
+                    # 回复渲染模板（JSON 文本）
+                    'reply_template': 'TEXT',
                 }
                 for cname, ctype in conv_add.items():
                     if cname not in cols:
@@ -279,6 +291,11 @@ def _ensure_schema_columns(app):
                     with db.engine.begin() as conn:
                         conn.execute(text('ALTER TABLE persona_marketplace ADD COLUMN gender VARCHAR(20)'))
                     app.logger.info('[迁移] 已为 persona_marketplace 增加 gender 字段')
+                # user_prompt - 玩家侧设定：随卡片一起发布，采用后即知道「自己是谁」
+                if 'user_prompt' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text('ALTER TABLE persona_marketplace ADD COLUMN user_prompt TEXT'))
+                    app.logger.info('[迁移] 已为 persona_marketplace 增加 user_prompt 字段')
             # image_usage.is_remaining_semantics - 免费生图次数语义迁移标记
             if 'image_usage' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('image_usage')}
@@ -293,6 +310,11 @@ def _ensure_schema_columns(app):
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE persona_templates ADD COLUMN persona_type VARCHAR(10) DEFAULT 'ai'"))
                     app.logger.info('[迁移] 已为 persona_templates 增加 persona_type 字段')
+                # persona_templates.user_prompt - 玩家侧人物设定（与 AI 提示词同卡绑定）
+                if 'user_prompt' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text('ALTER TABLE persona_templates ADD COLUMN user_prompt TEXT'))
+                    app.logger.info('[迁移] 已为 persona_templates 增加 user_prompt 字段')
                 # 系统内置人物卡已改为「普通人物卡」，不再区分系统/用户，移除废弃字段
                 if 'is_system' in cols:
                     with db.engine.begin() as conn:
@@ -304,6 +326,23 @@ def _ensure_schema_columns(app):
 
 def _init_default_data(app):
     """初始化默认数据"""
+    # 一次性回填：界面标记开关为 NULL 的历史会话，按当时的全局默认值固定下来。
+    # 目的：让「会话设置 → 界面标记」显示的开关状态与实际注入行为一致 ——
+    # 否则 NULL 会在界面上显示成「关闭」，实际却按全局值在注入（显示与行为不符），
+    # 且用户在该面板里改任何其它设置都会被一并写成 False，静默把标记关掉。
+    try:
+        from rich_marker import RICH_MESSAGE_ENABLED as rich_default
+        updated = db.session.query(Conversation).filter(
+            Conversation.rich_marker_enabled.is_(None)
+        ).update({Conversation.rich_marker_enabled: rich_default},
+                 synchronize_session=False)
+        if updated:
+            db.session.commit()
+            app.logger.info(f'[迁移] 已按全局开关初始化 {updated} 个会话的界面标记状态')
+    except Exception as e:
+        db.session.rollback()
+        app.logger.info(f'[迁移] 界面标记状态回填跳过: {e}')
+
     # 一次性迁移：image_usage.free_count 从「已用次数」转为「剩余次数」语义
     try:
         from models import ImageUsage

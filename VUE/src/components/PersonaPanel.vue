@@ -117,7 +117,7 @@
         </div>
 
         <div class="form-card">
-          <el-form-item label="系统提示词">
+          <el-form-item label="AI 提示词">
             <el-input
               v-model="form.system_prompt"
               type="textarea"
@@ -127,6 +127,21 @@
               placeholder="详细的角色设定，指导 AI 如何扮演这个角色..."
               maxlength="10000"
             />
+          </el-form-item>
+          <!-- 玩家侧设定：与 AI 提示词同卡绑定，换卡即换整套角色关系 -->
+          <el-form-item label="人物提示词">
+            <el-input
+              v-model="form.user_prompt"
+              type="textarea"
+              :rows="4"
+              :autosize="false"
+              resize="none"
+              placeholder="你自己（玩家）在这张卡里的身份设定：姓名、年龄、身份、与角色的关系、性格外貌等。留空则 AI 不知道你是谁。"
+              maxlength="4000"
+            />
+            <div class="form-hint">
+              这里写「你是谁」。会随 AI 提示词一起发给模型，让角色认得你、称呼你、按你们的关系互动。
+            </div>
           </el-form-item>
           <el-form-item label="开场问候语">
             <el-input
@@ -274,6 +289,7 @@ const defaultForm = {
   description: '',
   avatar: '',
   system_prompt: '',
+  user_prompt: '',
   greeting: '',
   is_default: false,
   persona_type: 'ai',
@@ -324,6 +340,7 @@ function editPersona(persona) {
     description: persona.description || '',
     avatar: persona.avatar || '',
     system_prompt: persona.system_prompt,
+    user_prompt: persona.user_prompt || '',
     greeting: persona.greeting || '',
     is_default: persona.is_default,
     persona_type: persona.persona_type || 'ai',
@@ -483,7 +500,7 @@ async function savePersona() {
     return
   }
   if (!form.system_prompt.trim()) {
-    ElMessage.warning('请输入系统提示词')
+    ElMessage.warning('请输入 AI 提示词')
     return
   }
 

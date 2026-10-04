@@ -9,11 +9,15 @@ import {
 import { readStream, chatApi, audioApi, imageApi, providersApi, conversationApi, uploadApi } from '@/utils/resAi';
 import auth from '@/utils/auth';
 import { sanitizeHtml } from '@/utils/sanitize';
+import { hasRichMarkers, GENERIC_MARKERS } from '@/utils/richMessage';
+import { templateMarkers } from '@/utils/replyTemplates';
+import { renderProse } from '@/utils/proseRender';
 import { t } from '../i18n';
 
 import VoiceInput from '@/components/VoiceInput.vue';
 import ImageUpload from '@/components/ImageUpload.vue';
 import PromptToolPanel from '@/components/PromptToolPanel.vue';
+import RichMessage from '@/components/RichMessage.vue';
 
 const props = defineProps({
   conversationId: {
@@ -47,6 +51,10 @@ const props = defineProps({
   settings: { type: Object, default: null },
   isFreeApi: { type: Boolean, default: false },
   autoPlayVoice: { type: Boolean, default: false },
+  /** 会话选定的回复渲染模板（已解析的预设对象；为空则用内置基础渲染） */
+  replyTemplate: { type: Object, default: null },
+  /** 长期记忆（记忆宫殿摘要）：补进「记忆回廊」区块 */
+  longTermMemory: { type: Array, default: () => [] },
   loggedIn: { type: Boolean, default: false },
   personaGreeting: { type: String, default: '' },
   backgroundImage: { type: String, default: '' },
@@ -62,7 +70,9 @@ const emit = defineEmits([
   'updateConversation',
   'conversationCreated',
   'requireLogin',
-  'modelChange'
+  'modelChange',
+  // 本轮回复结束：父组件借此刷新长期记忆（记忆回廊）等派生数据
+  'reply-done'
 ]);
 
 const opacityVal = computed(() => {
@@ -97,8 +107,88 @@ const createMessage = (role, content = '', imageUrl = null) => ({
   // raw：Markdown 原文（落库/语音朗读用）；streamHtml：后端下发的已转义 HTML 片段
   // （生成中直接渲染，与成稿排版一致，避免回复结束后空行被抹掉造成跳变）
   // tokens：本次回复的 token 消耗（厂商未返回时为 null，不展示）
-  role, content, raw: '', streamHtml: '', streaming: false, reasoning: '', showReasoning: false, imageUrl, tokens: null
+  // richRaw：未渲染 Markdown 的原始纯文本，仅当含富标记时保留，供 RichMessage 解析
+  role, content, raw: '', streamHtml: '', streaming: false, reasoning: '', showReasoning: false, imageUrl, tokens: null,
+  richRaw: ''
 });
+
+/**
+ * 富标记落位：仅当原始文本含可渲染标记时，把原文存入 richRaw 交给 RichMessage 渲染。
+ *
+ * 词表 = 当前模板的标记 + 内置通用标记。必须带上通用标记：
+ * 模型偶尔会输出【进度】这类通用标记（尤其受历史消息影响），
+ * 若只认模板词表，整条消息会被判定为"无标记"而走普通渲染，
+ * 结果就是标记原文直接显示在气泡里（用户看到的"坏了"）。
+ */
+/**
+ * 富渲染落位。
+ *
+ * 规则：**选了渲染模板时，所有 AI 消息都走模板渲染**（不只是含标记的）。
+ * 这样整场对话的输出框风格统一 —— 否则没有标记的短回复会退回应用默认气泡，
+ * 同一屏里两种风格混着出现（实测观感很割裂）。
+ * 未选模板时才退化为「只有含标记的消息走富渲染」。
+ *
+ * 词表 = 当前模板的标记 + 内置通用标记。必须带上通用标记：
+ * 模型偶尔会输出【进度】这类通用标记（尤其受历史消息影响），
+ * 若只认模板词表，整条消息会被判定为"无标记"而走普通渲染，
+ * 结果就是标记原文直接显示在气泡里（用户看到的"坏了"）。
+ */
+const applyRichRaw = (msg) => {
+  if (!msg || msg.role !== 'assistant') return;
+  if (props.replyTemplate) {
+    // 有模板：无论有没有标记都用模板渲染
+    msg.richRaw = msg.raw || '';
+    return;
+  }
+  msg.richRaw = hasRichMarkers(msg.raw, null) ? msg.raw : '';
+};
+
+/** 当前生效的标记词表：模板词表 + 内置通用标记 */
+const richMarkerNames = () => (props.replyTemplate
+  ? [...templateMarkers(props.replyTemplate), ...GENERIC_MARKERS]
+  : null);
+
+/**
+ * 流式期间的富渲染。
+ *
+ * 之前只在流结束后才判定富渲染，于是长回复会先以"普通气泡"的样子输出，
+ * 结束时再整体换成模板样式 —— 视觉上明显的跳变/替换。
+ * 这里在流式过程中就按累计文本实时判定，让模板从第一个字就开始渲染。
+ *
+ * 节流：长文（几千 token）逐字重解析代价高，故最多每 120ms 刷新一次；
+ * 流结束时再无条件刷新一次，保证最终结果准确。
+ */
+const RICH_STREAM_INTERVAL = 120;
+function applyRichRawStreaming(msg, force = false) {
+  if (!msg) return;
+  // 有模板时无需等待标记出现：从一开始就用模板渲染，避免"先生成完再整体换样式"
+  if (props.replyTemplate) {
+    const now = Date.now();
+    if (!force && msg.richAt && now - msg.richAt < RICH_STREAM_INTERVAL) return;
+    msg.richAt = now;
+    msg.richRaw = msg.raw || '';
+    return;
+  }
+  if (!hasRichMarkers(msg.raw, richMarkerNames())) {
+    // 没有模板且尚未出现标记：先不启用富渲染，避免每条消息都白解析一遍
+    if (msg.richRaw) msg.richRaw = '';
+    return;
+  }
+  const now = Date.now();
+  if (!force && msg.richAt && now - msg.richAt < RICH_STREAM_INTERVAL) return;
+  msg.richAt = now;
+  msg.richRaw = msg.raw;
+}
+
+// 选项点击：填入输入框但不自动发送（沿用项目「按钮默认填输入框」的既有习惯，
+// 是否发送由用户自己决定，避免误触直接消耗额度）
+const handlePickOption = (textValue) => {
+  inputText.value = textValue;
+  nextTick(() => {
+    const el = document.querySelector('.chat-input textarea, .chat-input input');
+    if (el && typeof el.focus === 'function') el.focus();
+  });
+};
 
 const messages = ref([]);
 const inputText = ref('');
@@ -106,6 +196,20 @@ const loading = ref(false);
 const messageListRef = ref(null);
 const deepThink = ref(false);
 let abortController = null;
+
+/**
+ * 渲染模板变化时，重新判定屏幕上已有消息的富渲染状态。
+ *
+ * 必要性：richRaw 是在消息流结束时按「当时的模板词表」判定并写下的。
+ * 用户在会话设置里切换模板后，旧消息的 richRaw 仍是旧结果，
+ * 于是新模板对它们不生效 —— 表现为"改了模板却看不出效果，必须重新发消息或刷新"。
+ * 这里在模板变化时按新词表重算一遍。
+ */
+watch(() => props.replyTemplate, () => {
+  for (const m of messages.value) {
+    if (m.role === 'assistant' && m.raw) applyRichRaw(m);
+  }
+});
 
 // ========== 对话模型选择器（输入框左下角） ==========
 // 数据来源：当前用户全部已启用的对话模型配置（含配置内启用的模型），
@@ -390,7 +494,7 @@ const handleSend = async () => {
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
-      if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; }
+      if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; applyRichRawStreaming(aiMsg); }
       if (tokens) aiMsg.tokens = tokens;
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
@@ -403,6 +507,11 @@ const handleSend = async () => {
         aiMsg.content = sanitizeHtml(aiMsg.raw)
       }
     }
+
+    // 流结束：无条件刷新一次富渲染（绕过节流），保证最终结果准确
+    applyRichRawStreaming(aiMsg, true);
+    // 通知父组件刷新长期记忆：本轮可能刚触发一次记忆宫殿压缩
+    emit('reply-done');
 
     // 自动播报 AI 回复（该对话开启时）
     if (props.autoPlayVoice && aiMsg.content && !aiMsg.imageUrl) {
@@ -653,7 +762,7 @@ const handleVisionChat = async (text) => {
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
-      if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; }
+      if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; applyRichRawStreaming(aiMsg); }
       if (tokens) aiMsg.tokens = tokens;
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
@@ -668,6 +777,9 @@ const handleVisionChat = async (text) => {
 
     // 模型若输出「改图」标记，则结合人设与用户上传的参考图自动生图并贴到本条回复
     await handleLlmImageMarkers(aiMsg, refDataUrl);
+
+    // 流结束：无条件刷新一次富渲染（用 raw 而非 content，后者已被渲染成 HTML）
+    applyRichRawStreaming(aiMsg, true);
 
   } catch (error) {
     if (error.name === 'AbortError') {
@@ -857,7 +969,7 @@ const regenerate = async (assistantIndex = null) => {
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
-      if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; }
+      if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; applyRichRawStreaming(aiMsg); }
       if (tokens) aiMsg.tokens = tokens;
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
@@ -869,6 +981,11 @@ const regenerate = async (assistantIndex = null) => {
         aiMsg.content = sanitizeHtml(aiMsg.raw)
       }
     }
+
+    // 流结束：无条件刷新一次富渲染（绕过节流），保证最终结果准确
+    applyRichRawStreaming(aiMsg, true);
+    // 通知父组件刷新长期记忆：本轮可能刚触发一次记忆宫殿压缩
+    emit('reply-done');
 
   } catch (error) {
     if (error.name === 'AbortError') {
@@ -937,6 +1054,11 @@ defineExpose({
       // 优先用后端渲染好的 HTML（content_html），避免纯文本进 v-html 把段落压成一行；
       // 老数据或渲染失败时回退原 content
       const item = createMessage(m.role, m.content_html || m.content, m.image_url || m.imageUrl);
+      // 历史消息：富标记按原始纯文本重建（content 已是 HTML，无法再解析标记）
+      if (m.role === 'assistant' && m.content) {
+        item.raw = m.content;
+        applyRichRaw(item);
+      }
       // 回填思考过程与 token 用量（历史消息才能显示"深度思考"展开与消耗）
       if (m.reasoning_content) { item.reasoning = m.reasoning_content; item.showReasoning = true; }
       const total = m.total_tokens
@@ -1021,7 +1143,17 @@ onUnmounted(() => {
               </div>
             </div>
             <div class="message-content">
-              <div class="content-text">{{ props.personaGreeting || greetingText() }}</div>
+              <!-- 开场白同样走模板渲染：否则新对话的第一条消息会是应用默认气泡样式，
+                   与后续回复风格不一致（实测观感是"新对话没套上模板"） -->
+              <RichMessage
+                v-if="replyTemplate"
+                :raw="props.personaGreeting || greetingText()"
+                :render-text="renderProse"
+                :template="replyTemplate"
+                variant="greeting"
+                @pick-option="handlePickOption"
+              />
+              <div v-else class="content-text">{{ props.personaGreeting || greetingText() }}</div>
             </div>
           </div>
           <div
@@ -1075,9 +1207,21 @@ onUnmounted(() => {
                 <img :src="item.imageUrl" alt="生成图片" @click="previewImage(item.imageUrl)" />
               </div>
               
-              <!-- 消息内容：生成中渲染后端下发的 HTML 片段（已转义，与成稿一致），
-                   流结束后由 sse_html 的完整渲染结果替换 -->
-              <div v-if="item.streaming" class="content-text streaming-html" v-html="item.streamHtml"></div>
+              <!-- 消息内容渲染优先级：
+                   1) 命中富标记 -> RichMessage。模板样式从第一个字就开始渲染，
+                      避免"先按普通气泡输出、结束后再整体替换"的跳变
+                   2) 流式中 -> 后端下发的 HTML 片段
+                   3) 成稿 -> 后端渲染好的完整 HTML
+                   4) 兜底 -> 原始文本 -->
+              <RichMessage
+                v-if="item.richRaw"
+                :raw="item.richRaw"
+                :render-text="renderProse"
+                :template="replyTemplate"
+                :long-term-memory="longTermMemory"
+                @pick-option="handlePickOption"
+              />
+              <div v-else-if="item.streaming" class="content-text streaming-html" v-html="item.streamHtml"></div>
               <div v-else-if="item.content" class="content-text" v-html="item.content"></div>
               <div v-else-if="item.raw" class="content-text raw-streaming">{{ item.raw }}</div>
 

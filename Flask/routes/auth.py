@@ -7,6 +7,7 @@ from flask_jwt_extended import (
     create_access_token, create_refresh_token,
     jwt_required, get_jwt_identity
 )
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from extensions import db
 from models import User, UserSettings, VerificationCode, PersonaTemplate, Conversation, local_now
@@ -250,23 +251,70 @@ def _upgrade_legacy_default_personas():
         current_app.logger.info('已升级 %s 张旧版默认人物卡提示词', upgraded)
 
 
-def _create_default_personas(user_id, gender='神秘'):
-    """为 newUser 创建4个系统AI人设，并根据性别设置默认人设。"""
-    # 男→苏晚晴，女→陆驰，神秘→加藤惠
-    default_name = {'男': '苏晚晴', '女': '陆驰'}.get(gender, '加藤惠')
-    for name, info in _PERSONA_PROMPTS.items():
-        persona = PersonaTemplate(
-            user_id=user_id,
-            name=name,
-            description=info['description'],
-            avatar=_DEFAULT_AVATARS.get(name),
-            system_prompt=info['system_prompt'],
-            greeting=info['greeting'],
-            is_default=(name == default_name),
-            persona_type='ai',
-            weight=100,
-        )
-        db.session.add(persona)
+def _create_random_default_persona(user_id, gender='神秘'):
+    """新用户的默认人物卡：从卡片广场**随机采用一张**。
+
+    旧行为是固定发 4 张内置卡（加藤惠/陆驰/苏晚晴/沈砚），
+    新用户人人一样、选择单一；改为随机采用广场卡片后，
+    每位新用户拿到的角色不同，也让广场的卡真正被用起来。
+
+    采用时会**补全设定**：AI 提示词用卡片内容，人物提示词（玩家侧）用卡片自带的，
+    卡片没写就补一份通用模板 —— 保证新用户开局就有一张能直接开聊、且玩家身份明确的卡。
+    广场为空时跳过（不再塞固定卡）。
+    """
+    from models import PersonaMarketplace, MarketplaceAdopt
+
+    # 确保内置卡已入库（首次部署时广场可能是空的）
+    try:
+        from routes.marketplace import ensure_system_cards
+        ensure_system_cards()
+        db.session.flush()
+    except Exception:
+        pass
+
+    # 优先挑一张「与自己性别不同」的卡，避免新用户拿到同性角色当默认对象
+    q = PersonaMarketplace.query
+    picked = None
+    if gender in ('男', '女'):
+        opposite = '女' if gender == '男' else '男'
+        picked = q.filter(PersonaMarketplace.gender == opposite).order_by(func.random()).first()
+    if picked is None:
+        picked = q.order_by(func.random()).first()
+    if picked is None:
+        current_app.logger.info('[初始化] 卡片广场为空，跳过默认人物卡分配')
+        return None
+
+    persona = PersonaTemplate(
+        user_id=user_id,
+        name=picked.name,
+        description=picked.description or '',
+        avatar=picked.avatar,
+        system_prompt=picked.system_prompt,
+        greeting=picked.greeting,
+        # 补全：卡片没带玩家设定时补通用模板，用户之后可自行修改
+        user_prompt=(picked.user_prompt or '').strip() or DEFAULT_USER_PROMPT,
+        is_default=True,
+        persona_type='ai',
+        weight=100,
+    )
+    db.session.add(persona)
+    db.session.flush()
+    # 建立「已添加」关联，使这张卡在广场里显示为已采用
+    db.session.add(MarketplaceAdopt(
+        persona_id=picked.id, user_id=user_id, template_id=persona.id
+    ))
+    current_app.logger.info('[初始化] 已从卡片广场随机采用默认人物卡: %s', picked.name)
+    return persona
+
+
+# 通用玩家设定模板：卡片未提供「人物提示词」时补上，
+# 让 AI 至少知道玩家是 {{user}}，并提示用户可自行补充。
+DEFAULT_USER_PROMPT = (
+    '你是本作中的玩家角色「{{user}}」，与角色对戏。\n'
+    '请在整个剧情中保持身份、性格与称呼一致；若剧情尚未确定你的姓名、年龄、身份或与对方的关系，'
+    '可由剧情自然确立，确立后不得更改。\n'
+    '（建议在此处补上你自己的设定：姓名、年龄、身份、与角色的关系、外貌与性格，代入感会更强）'
+)
 
 
 def _client_ip():
@@ -402,8 +450,8 @@ def register():
     settings = UserSettings(user_id=user.id, tutorial_seen=False, tutorial_hint_dismissed=False)
     db.session.add(settings)
 
-    # 创建4个默认系统AI人设
-    _create_default_personas(user.id, gender)
+    # 人物卡：不再固定发放 4 张内置卡，改为从卡片广场随机采用一张（并补全玩家设定）
+    _create_random_default_persona(user.id, gender)
     
     # 并发下唯一约束兜底：极端竞态导致用户名/邮箱冲突时回滚并返回可读提示，避免 500
     try:

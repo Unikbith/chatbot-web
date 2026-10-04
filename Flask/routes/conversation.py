@@ -1,4 +1,5 @@
 """对话路由 - 对话列表、消息管理、置顶等"""
+import json
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
@@ -274,6 +275,27 @@ def update_conversation(conv_id):
     # 提示词兜底：默认关闭，开启后才会把后端写死的追加提示词接在人物设定之后
     if 'append_prompt_enabled' in data:
         conv.append_prompt_enabled = bool(data['append_prompt_enabled'])
+    # 界面标记（富消息）：默认关闭，开启后把标记约定接在系统提示词后
+    if 'rich_marker_enabled' in data:
+        conv.rich_marker_enabled = bool(data['rich_marker_enabled'])
+    # 回复渲染模板：JSON 文本（前端按 preset 解析版式，后端只取 prompt 注入）
+    if 'reply_template' in data:
+        raw_tpl = data['reply_template']
+        if raw_tpl in (None, ''):
+            conv.reply_template = None
+        elif isinstance(raw_tpl, str):
+            if len(raw_tpl) > 20000:
+                return jsonify({'code': 400, 'message': '渲染模板过长（上限 20000 字符）'}), 400
+            # 必须是合法 JSON 对象，避免脏数据在读取时反复解析失败
+            try:
+                parsed = json.loads(raw_tpl)
+            except (TypeError, ValueError):
+                return jsonify({'code': 400, 'message': '渲染模板不是合法 JSON'}), 400
+            if not isinstance(parsed, dict):
+                return jsonify({'code': 400, 'message': '渲染模板必须是 JSON 对象'}), 400
+            conv.reply_template = raw_tpl
+        else:
+            return jsonify({'code': 400, 'message': '渲染模板格式不正确'}), 400
 
     conv.updated_at = local_now()
     db.session.commit()

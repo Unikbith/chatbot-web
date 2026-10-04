@@ -1,0 +1,91 @@
+/* 渲染预设：终端（Terminal）
+   暗色底 + 青色描边 + 多色标签胶囊 + 数值增减着色。
+   对应「网咖/终端面板」那类角色卡观感：模块清单、状态表、内心独白、推荐行动。
+   结构见 _base.css，这里只覆盖变量与少量专属装饰。 */
+.rtpl.rtpl-terminal {
+  --rtpl-bg: linear-gradient(180deg, #0d1620 0%, #0a1119 100%);
+  --rtpl-fg: #cfe3f5;
+  --rtpl-muted: #6f8ba3;
+  --rtpl-border: rgba(64, 214, 255, 0.28);
+  --rtpl-accent: #40d6ff;
+  --rtpl-accent-strong: #8ceaff;
+  --rtpl-accent-soft: rgba(64, 214, 255, 0.14);
+  --rtpl-accent-soft-2: rgba(64, 214, 255, 0.06);
+  --rtpl-note: #ffb454;
+  --rtpl-head-bg: linear-gradient(135deg, rgba(64, 214, 255, 0.16), rgba(64, 214, 255, 0.05));
+  --rtpl-bar-bg: rgba(64, 214, 255, 0.16);
+  --rtpl-bar-fill: linear-gradient(90deg, #40d6ff, #7b8cff);
+  --rtpl-panel-bg: rgba(64, 214, 255, 0.04);
+  --rtpl-radius: 5px;
+  --rtpl-radius-sm: 4px;
+  --rtpl-shadow: 0 0 0 1px rgba(64, 214, 255, 0.06), 0 0 26px -10px rgba(64, 214, 255, 0.5);
+  --rtpl-font-size: 13px;
+  --rtpl-line-height: 1.7;
+  --rtpl-scene-bg: rgba(64, 214, 255, 0.1);
+  --rtpl-scene-fg: #8ceaff;
+  --rtpl-place-bg: rgba(123, 140, 255, 0.14);
+  --rtpl-place-fg: #b9c2ff;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #2f9fd6, #6a5cff);
+  --rtpl-mem-head-fg: #04121c;
+  --rtpl-indent: 0;
+  /* 对白：亮青；括号内容：暗青斜体 */
+  --rtpl-say-fg: #9df0ff;
+  --rtpl-say-weight: 600;
+  --rtpl-bracket-fg: #6f8ba3;
+  /* 六色标签：让状态表每项颜色不同（由引擎按顺序自动轮换，无需模型指定） */
+  --rtpl-c1: #ff5c8a;
+  --rtpl-c2: #40d6ff;
+  --rtpl-c3: #a78bfa;
+  --rtpl-c4: #ff6b5c;
+  --rtpl-c5: #ffb454;
+  --rtpl-c6: #5cc8ff;
+}
+
+/* 终端风：面板标题像命令行区块名 */
+.rtpl.rtpl-terminal .t-panel-h {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* 顶部状态条：整条像终端标题栏 */
+.rtpl.rtpl-terminal .t-topbar {
+  background: linear-gradient(90deg, rgba(64, 214, 255, 0.14), rgba(64, 214, 255, 0.03));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* 模块行：等宽 + 箭头前缀，hover 时亮起 */
+.rtpl.rtpl-terminal .t-module {
+  border: 1px solid rgba(64, 214, 255, 0.3);
+  border-radius: 4px;
+  background: rgba(64, 214, 255, 0.05);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.rtpl.rtpl-terminal .t-module-caret { color: #40d6ff; }
+
+/* 数值差值的涨跌色 */
+.rtpl.rtpl-terminal .t-delta.is-up .t-delta-to { color: #59e39a; }
+.rtpl.rtpl-terminal .t-delta.is-down .t-delta-to { color: #ff6b5c; }
+
+/* 进度条改成 LED 分段样式，更贴合终端观感 */
+.rtpl.rtpl-terminal .t-bar {
+  height: 8px;
+  border-radius: 1px;
+  background: rgba(64, 214, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(64, 214, 255, 0.18);
+}
+
+.rtpl.rtpl-terminal .t-bar-fill {
+  border-radius: 1px;
+  background: repeating-linear-gradient(
+    90deg,
+    #40d6ff 0 4px,
+    transparent 4px 7px
+  );
+  box-shadow: 0 0 8px -1px rgba(64, 214, 255, 0.8);
+}
+
+/* 内心独白：带左侧竖线的引用块 */
+.rtpl.rtpl-terminal .t-inner {
+  border-left: 3px solid #a78bfa;
+  background: rgba(167, 139, 250, 0.1);
+}

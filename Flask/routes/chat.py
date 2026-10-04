@@ -6,6 +6,11 @@ from flask import Blueprint, request, Response, stream_with_context, jsonify, cu
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import or_
 from extensions import db
+from rich_marker import (
+    RICH_MESSAGE_ENABLED,
+    RICH_MESSAGE_PROMPT,
+    rich_marker_rule as _rich_marker_rule,
+)
 from models import (ModelProvider, Conversation, Message, PersonaTemplate,
                     UserSettings, PromptToolLog, ConversationSummary,
                     WorldBookEntry)
@@ -423,18 +428,38 @@ def _vision_error_hint(response, raw_text):
 def _resolve_chat_model(provider, conversation=None, model_id=None):
     """解析本次对话使用的具体模型 ID
 
-    优先级：请求明确指定 > 对话记忆的模型 > 提供商下第一个启用的模型 > 提供商默认 model
+    优先级：请求明确指定 > 对话记忆的模型（须属于当前提供商）> 提供商下第一个启用的模型 > 提供商默认 model
+
+    「对话记忆的模型」必须校验归属：对话会把上一条回复用过的 model_id 存下来，
+    若用户之后换了提供商，而请求没带 model_id，旧模型名就会被发给新厂商，
+    得到 404 model_not_available（如把 deepseek-flash 发往只支持
+    deepseek-v4-flash-vision 的第三方网关），前端只显示「AI 服务请求失败」，
+    用户很难看出是模型名串了厂商。因此记忆值不属于当前提供商时直接忽略。
     """
     if model_id:
         return model_id
-    if conversation and conversation.model_id:
-        return conversation.model_id
+
+    # 当前提供商真正可用的模型集合（启用中的模型 + 提供商自身 model 字段）
+    provider_models = []
+    provider_model_set = set()
     if provider is not None and not isinstance(provider, FreeAPIProvider):
-        enabled = [m for m in provider.models if m.enabled]
-        if enabled:
-            return enabled[0].model_id
-        if provider.model:
-            return provider.model
+        for m in provider.models:
+            if m.enabled and m.model_id:
+                provider_models.append(m.model_id)
+                provider_model_set.add(m.model_id)
+        if getattr(provider, 'model', None):
+            provider_model_set.add(provider.model)
+
+    if conversation and conversation.model_id:
+        # 提供商没有登记任何模型时无法判断归属，沿用旧行为；
+        # 登记了模型则要求记忆值在集合内，避免跨厂商串模型
+        if not provider_model_set or conversation.model_id in provider_model_set:
+            return conversation.model_id
+
+    if provider_models:
+        return provider_models[0]
+    if provider is not None and getattr(provider, 'model', None):
+        return provider.model
     return None
 
 
@@ -756,6 +781,44 @@ def _resolve_system_prompt(conv, user_id, persona_id=None, custom_prompt=None):
     return ''
 
 
+def _resolve_persona_object(conv, user_id, persona_id=None):
+    """按与 _resolve_system_prompt 相同的优先级取出人物卡对象。
+
+    单独抽出来是为了取卡上的其他字段（如玩家设定 user_prompt）——
+    系统提示词只返回字符串，拿不到卡上的其余信息。
+    """
+    if conv and conv.persona:
+        return conv.persona
+    if persona_id:
+        persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first()
+        if persona:
+            return persona
+    return PersonaTemplate.query.filter_by(user_id=user_id, is_default=True).first()
+
+
+def _user_persona_block(conv, user_id, persona_id=None):
+    """玩家侧人物设定（卡上的「人物提示词」）拼进系统提示词。
+
+    作用：让 AI 明确知道「玩家是谁」。此前玩家设定要么没地方写、
+    要么要单独配一张用户人设卡；现在与 AI 提示词同卡绑定，
+    换一张卡即换整套角色关系，不需要再单独配置。
+    """
+    try:
+        persona = _resolve_persona_object(conv, user_id, persona_id)
+    except Exception:
+        return ''
+    text = (getattr(persona, 'user_prompt', None) or '').strip() if persona else ''
+    if not text:
+        return ''
+    return (
+        '\n\n【玩家设定】\n'
+        + text
+        + '\n以上是正在与你对话的玩家的身份与设定（玩家在剧情中称「{{user}}」）。'
+          '请始终按此设定理解玩家，不要在剧情里把他/她当成没有背景的陌生人，'
+          '涉及称呼、关系、身体特征时以此为准。'
+    )
+
+
 def _append_global_prompt(base, enabled=True):
     """把全局追加提示词 GLOBAL_APPEND_PROMPT 拼在系统提示词后面。
 
@@ -772,13 +835,13 @@ def _append_global_prompt(base, enabled=True):
 
 
 def _get_system_prompt(conv, user_id, persona_id=None, custom_prompt=None):
-    """最终系统提示词 = 解析出的本体 + 全局追加提示词（受「提示词兜底」开关控制）"""
+    """最终系统提示词 = 解析出的本体 + 玩家设定 + 全局追加提示词（受「提示词兜底」开关控制）"""
+    body = _resolve_system_prompt(conv, user_id, persona_id, custom_prompt)
+    # 玩家设定紧跟 AI 提示词之后：先立住 AI 是谁，再交代玩家是谁
+    body = (body or '') + _user_persona_block(conv, user_id, persona_id)
     # 提示词兜底默认关闭：那段兜底词有几千 token，默认带上会明显抬高每轮成本
     enabled = bool(getattr(conv, 'append_prompt_enabled', False)) if conv else False
-    return _append_global_prompt(
-        _resolve_system_prompt(conv, user_id, persona_id, custom_prompt),
-        enabled=enabled,
-    )
+    return _append_global_prompt(body, enabled=enabled)
 
 
 def _save_ai_message(conversation_id, user_id, content, reasoning=None,
@@ -984,13 +1047,13 @@ def chat():
     if final_prompt and (not formatted_messages or formatted_messages[0].get('role') != 'system'):
         formatted_messages.insert(0, {
             'role': 'system',
-            'content': final_prompt + OUTPUT_FORMAT_RULE
+            'content': final_prompt + OUTPUT_FORMAT_RULE + _rich_marker_rule(conv)
         })
     elif formatted_messages and formatted_messages[0].get('role') == 'system':
         # 前端已自带 system（续写等场景）：同样补上格式约定，保持排版一致
         formatted_messages[0]['content'] = (
             formatted_messages[0].get('content') or ''
-        ) + OUTPUT_FORMAT_RULE
+        ) + OUTPUT_FORMAT_RULE + _rich_marker_rule(conv)
 
     # 滑动窗口截断，控制上下文长度
     formatted_messages = _apply_context_window(formatted_messages)
@@ -1073,6 +1136,22 @@ def chat():
                 deep_think=deep_think, usage_holder=usage_holder,
             )
             full_content = full_content_holder[0]
+
+            # 上游返回 200 却一个 token 都没给（限流、网关抖动时常见）：
+            # 补一句可读提示，否则用户只看到空白气泡，会误以为功能坏了。
+            # 该提示只在本次会话展示、不写入历史，避免把错误文案当成 AI 回复存下来。
+            if not full_content.strip() and not (reasoning_holder[0] or '').strip():
+                current_app.logger.warning(
+                    'AI 返回空内容 user=%s provider=%s model=%s',
+                    user_id, getattr(provider, 'name', None), model_name,
+                )
+                hint = ('（模型没有返回任何内容：可能是接口限流或该模型暂不可用，'
+                        '请稍后重试，或在「模型配置」里换一个模型）')
+                yield sse_content(hint)
+                yield sse_html(render_markdown(hint))
+                yield sse_done()
+                return
+
             prompt_tokens, completion_tokens = usage_holder[0], usage_holder[1]
             _log_cache_hit(conversation_id, prompt_tokens, usage_holder[2])
 

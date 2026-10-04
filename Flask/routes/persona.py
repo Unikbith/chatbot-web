@@ -13,17 +13,20 @@ PERSONA_CARD_LIMIT = 10
 MAX_NAME_LEN = 1000
 MAX_DESCRIPTION_LEN = 1000
 MAX_PROMPT_LEN = 10000
+MAX_USER_PROMPT_LEN = 4000
 MAX_GREETING_LEN = 1000
 
 
-def _validate_lengths(name, description, system_prompt, greeting):
+def _validate_lengths(name, description, system_prompt, greeting, user_prompt=None):
     """人物卡字段长度校验，超限返回错误信息字符串，否则返回 None"""
     if name is not None and len(name) > MAX_NAME_LEN:
         return f'角色名称过长（最多 {MAX_NAME_LEN} 字）'
     if description is not None and len(description) > MAX_DESCRIPTION_LEN:
         return f'角色简介过长（最多 {MAX_DESCRIPTION_LEN} 字）'
     if system_prompt is not None and len(system_prompt) > MAX_PROMPT_LEN:
-        return f'系统提示词过长（最多 {MAX_PROMPT_LEN} 字）'
+        return f'AI 提示词过长（最多 {MAX_PROMPT_LEN} 字）'
+    if user_prompt is not None and len(user_prompt) > MAX_USER_PROMPT_LEN:
+        return f'人物提示词过长（最多 {MAX_USER_PROMPT_LEN} 字）'
     if greeting is not None and len(greeting) > MAX_GREETING_LEN:
         return f'开场问候语过长（最多 {MAX_GREETING_LEN} 字）'
     return None
@@ -95,15 +98,16 @@ def create_persona():
     
     name = data.get('name', '').strip()
     system_prompt = data.get('system_prompt', '').strip()
+    user_prompt = (data.get('user_prompt') or '').strip() or None
     description = data.get('description', '').strip() or None
     avatar = data.get('avatar', '').strip() or None
     greeting = data.get('greeting', '').strip() or None
     is_default = data.get('is_default', False)
     
     if not name or not system_prompt:
-        return jsonify({'code': 400, 'message': '角色名和系统提示词不能为空'}), 400
+        return jsonify({'code': 400, 'message': '角色名和 AI 提示词不能为空'}), 400
 
-    length_err = _validate_lengths(name, description, system_prompt, greeting)
+    length_err = _validate_lengths(name, description, system_prompt, greeting, user_prompt)
     if length_err:
         return jsonify({'code': 400, 'message': length_err}), 400
 
@@ -130,6 +134,7 @@ def create_persona():
         description=description,
         avatar=avatar,
         system_prompt=system_prompt,
+        user_prompt=user_prompt,
         greeting=greeting,
         is_default=is_default,
         persona_type=persona_type,
@@ -173,6 +178,7 @@ def update_persona(persona_id):
         _field('description', persona.description),
         _field('system_prompt', persona.system_prompt),
         _field('greeting', persona.greeting),
+        _field('user_prompt', persona.user_prompt),
     )
     if length_err:
         return jsonify({'code': 400, 'message': length_err}), 400
@@ -185,6 +191,10 @@ def update_persona(persona_id):
         persona.avatar = data['avatar'] or None
     if 'system_prompt' in data:
         persona.system_prompt = data['system_prompt'].strip() or persona.system_prompt
+    # 玩家侧人物设定（与 AI 提示词同卡绑定）；允许清空
+    if 'user_prompt' in data:
+        raw_user_prompt = data['user_prompt']
+        persona.user_prompt = raw_user_prompt.strip() or None if isinstance(raw_user_prompt, str) else None
     if 'greeting' in data:
         persona.greeting = data['greeting'].strip() or None
     if 'weight' in data:

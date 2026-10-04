@@ -8,6 +8,11 @@ import 'element-plus/theme-chalk/el-message-box.css'
 import 'element-plus/theme-chalk/el-loading.css'
 // v-loading 指令不经过模板组件扫描，显式全局注册（样式已在上行引入）
 import { ElLoading } from 'element-plus'
+// 回复渲染模板的样式：结构骨架 + 各主题预设。
+// 由 utils/replyTemplateCss.js 在读入 CSS 文本后同步注入，
+// 保证样式一定就绪（并带自检），不依赖外部 CSS 的加载时序。
+import './utils/replyTemplateCss'
+import { assertTemplateStyles } from './utils/replyTemplateCss'
 import App from './App.vue'
 import router from './router'
 
@@ -28,6 +33,10 @@ window.addEventListener('chatbot:theme-change', ensureDarkThemeCss)
 // `import { Setting } from '@element-plus/icons-vue'`），无需在入口全局注册。
 // 原「全量注册 @element-plus/icons-vue」会把 1000+ 图标打进首屏包（约 170KB），
 // 现已移除，首屏仅包含组件真正用到的图标。
+
+// 开发期自检：模板样式若没生效，直接在控制台报警
+// （这类问题肉眼只能看出"模板没样式"，很难定位，故做成显式探针）
+if (import.meta.env.DEV) assertTemplateStyles()
 
 const app = createApp(App)
 
