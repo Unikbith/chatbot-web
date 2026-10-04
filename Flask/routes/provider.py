@@ -6,6 +6,8 @@ ID（name）、API Key、API Base URL。每个提供商下可管理多个模型�
   - 可用模型：从厂商 /models 接口拉取，点击加入已配置
   - 自定义模型：手动输入模型 ID（列表拉取不到的模型）
 """
+import re
+
 import requests
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -14,6 +16,7 @@ from extensions import db
 from models import ModelProvider, ProviderModel
 from services.vendor_presets import get_vendor, get_vendors, get_config_schema, CHAT_VENDORS
 from services.ai_service import AIService
+from services.agnes_image import build_image_endpoint, _extract_image as extract_image
 
 provider_bp = Blueprint('provider', __name__, url_prefix='/api/providers')
 
@@ -380,6 +383,117 @@ def _tts_request_ok(provider, timeout=30):
     return True, ''
 
 
+def _redact_secret(text, *secrets):
+    """把可能出现在上游报错里的 Key / 地址凭证抹掉，避免原样回传给前端。"""
+    s = str(text or '')[:200]
+    for sec in secrets:
+        if sec and isinstance(sec, str) and len(sec) >= 6:
+            s = s.replace(sec, '***')
+    # Bearer xxx / sk-xxx 之类的残留凭证
+    s = re.sub(r'(?i)(bearer\s+)[A-Za-z0-9._\-]{8,}', r'\1***', s)
+    s = re.sub(r'\bsk-[A-Za-z0-9._\-]{8,}\b', 'sk-***', s)
+    return s.strip()
+
+
+def _image_error_hint(status_code, raw_msg, provider=None):
+    """把生图接口的失败原因翻译成用户能直接照着改的诊断提示。
+
+    上游报错五花八门（Key 失效、地址写错、模型名不存在、额度耗尽……），
+    直接把原文甩给用户没有价值，这里按状态码 + 关键字归类。
+    注意：返回文案里不能含 Key / 完整地址。
+    """
+    msg = _redact_secret(raw_msg, getattr(provider, 'api_key', None))
+    low = msg.lower()
+
+    if status_code in (401, 403):
+        return '鉴权失败：API Key 无效、已过期或没有该模型权限（请检查 Key 与模型名）'
+    if status_code == 404:
+        return '接口不存在：地址可能写错，应为 .../v1/images/generations（请检查 API 地址）'
+    if status_code == 429:
+        return '额度或频率受限：Key 额度不足或请求过快（请稍后重试或更换 Key）'
+    if status_code in (400, 422):
+        if 'model' in low:
+            return '模型不被接受：填写的模型名在该 Key 下不存在（请检查「默认生图模型」）'
+        if 'ratio' in low or 'size' in low:
+            return '参数不被接受：分辨率/长宽比超出该模型支持范围（请检查生图参数）'
+        if 'prompt' in low:
+            return '请求参数被拒绝：请检查 API 地址是否为完整的生图端点'
+        return f'请求被拒绝：{msg or "参数不合法"}'
+    if status_code in (500, 502, 503, 504):
+        return f'上游服务异常（HTTP {status_code}）：{msg or "服务商暂时不可用，请稍后重试"}'
+    return f'HTTP {status_code}: {msg or "连接失败"}'
+
+
+def _image_request_ok(provider, model_id=None, timeout=None):
+    """图片生成专用连接测试。
+
+    与对话/STT/TTS 不同，图片生成没有 /models 这类轻量探针，且请求体必须是
+    真实的生图参数，因此这里发起一次**最小规格的真实生图请求**：
+      - 地址、Key、模型三者只要有一个不对就会失败，验证才有意义；
+      - 用最小的 1K + 1:1，尽量少耗时耗量；
+      - 请求体字段与 generate_image 保持一致，否则会出现「测试通过但实际生图失败」；
+      - 超时取用户自己配的 timeout（生图本就偏慢），未配则给 90s；
+      - 使用用户自己的 Key（被测对象就是它），不消耗共享免费额度。
+    """
+    err = AIService._ssrf_error(provider.api_url)
+    if err:
+        return False, err
+
+    params = provider.get_params() or {}
+    if not provider.api_key:
+        return False, '未填写 API Key'
+    use_model = (model_id or provider.model
+                 or params.get('image_model') or 'agnes-image-2.1-flash')
+    endpoint = build_image_endpoint(provider.api_url)
+    if not endpoint:
+        return False, '未填写 API 地址'
+
+    timeout = int(timeout or params.get('timeout') or 90)
+    # 与 generate_image 的 payload 保持一致（最小规格：1K + 1:1）
+    payload = {
+        'model': use_model,
+        'prompt': 'a blue circle on white background',
+        'size': '1K',
+        'ratio': '1:1',
+    }
+    # 代理配置与正式生图保持一致，否则测试通过但实际生图失败
+    proxies = None
+    if params.get('proxy'):
+        proxies = {'http': params['proxy'], 'https': params['proxy']}
+
+    try:
+        resp = requests.post(
+            endpoint,
+            headers={
+                'Authorization': f'Bearer {provider.api_key}',
+                'Content-Type': 'application/json',
+            },
+            json=payload,
+            timeout=timeout,
+            proxies=proxies,
+        )
+    except requests.Timeout:
+        return False, f'请求超时（>{timeout}s）：生图接口响应过慢，请检查地址是否可用或调大超时时间'
+    except requests.RequestException as e:
+        return False, f'网络请求失败：{_redact_secret(e, provider.api_key)}'
+
+    if resp.status_code in (200, 201):
+        try:
+            data = resp.json()
+        except Exception:
+            return False, '响应不是合法 JSON（请确认地址是 JSON API 而非网页）'
+        if extract_image(data):
+            return True, ''
+        return False, '接口返回成功但未找到图像地址：请确认「默认生图模型」在该 Key 下可用'
+
+    try:
+        body = resp.json()
+        raw = body.get('error', {}).get('message') or body.get('message') or resp.text[:200]
+    except Exception:
+        raw = resp.text[:200]
+    return False, _image_error_hint(resp.status_code, raw, provider)
+
+
 @provider_bp.route('/<int:provider_id>/test', methods=['POST'])
 @jwt_required()
 def test_provider(provider_id):
@@ -394,12 +508,18 @@ def test_provider(provider_id):
             ok, err = _chat_request_ok(provider, provider.model)
         elif provider.provider_type == 'tts':
             ok, err = _tts_request_ok(provider)
+        elif provider.provider_type == 'image':
+            # 图片生成走真实生图端点：地址/Key/模型三者的联合校验
+            ok, err = _image_request_ok(provider)
         else:
             ok, err = _generic_request_ok(provider)
         if ok:
             return jsonify({'code': 200, 'message': '连接成功', 'data': {'ok': True}})
-        # 对外脱敏：原始错误仅记录到服务端日志
+        # 图片生成的诊断已由 _image_error_hint 归类且脱敏（不含 Key），对用户有价值，直接透传；
+        # 其余类型仍统一脱敏，避免上游原始报错泄露地址/凭证。
         current_app.logger.error('配置测试失败 user=%s provider=%s: %s', user_id, provider_id, err)
+        if provider.provider_type == 'image':
+            return jsonify({'code': 500, 'message': err or '连接失败，请检查地址与 Key'})
         return jsonify({'code': 500, 'message': '连接失败，请检查配置是否正确'})
     except Exception as e:
         current_app.logger.error('配置测试异常 user=%s provider=%s: %s', user_id, provider_id, e)
@@ -539,14 +659,21 @@ def test_model(provider_id, model_id):
 
     provider = _get_own_provider(provider_id, user_id)
     try:
-        ok, err = _chat_request_ok(provider, pm.model_id)
+        # 按提供商类型分流：图片生成端点不接受 chat 请求体，用 chat 探针必失败
+        if provider.provider_type == 'image':
+            ok, err = _image_request_ok(provider, pm.model_id)
+        else:
+            ok, err = _chat_request_ok(provider, pm.model_id)
         if ok:
             return jsonify({'code': 200, 'message': '连接正常', 'data': {'ok': True}})
-        # 对外脱敏：原始错误仅记录到服务端日志，避免泄漏厂商内部信息
+        # 对外脱敏：原始错误仅记录到服务端日志，避免泄漏厂商内部信息；
+        # 图片类型例外（诊断已归类脱敏，对用户有指导价值）
         current_app.logger.error(
             '模型测试失败 user=%s provider=%s model=%s: %s',
             user_id, provider_id, pm.model_id, err,
         )
+        if provider.provider_type == 'image' and err:
+            return jsonify({'code': 500, 'message': err})
         return jsonify({'code': 500, 'message': '连接失败，请检查配置是否正确'})
     except Exception as e:
         current_app.logger.error(

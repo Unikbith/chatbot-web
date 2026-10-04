@@ -192,7 +192,7 @@ onMounted(() => {
 
           <div class="pt-field">
             <div class="pt-label-row">
-              <label class="pt-label">{{ t('自定义提示词（留空则用默认）', 'Custom prompt (empty = default)') }}</label>
+              <label class="pt-label">{{ t('（建议不输入，生成的人物设定不符合再填入默认）', 'Custom prompt (empty = default)') }}</label>
               <div class="pt-actions">
                 <el-button size="small" text :icon="Plus" @click="fillDefault('character')">
                   {{ t('填入默认', 'Use default') }}
@@ -216,7 +216,7 @@ onMounted(() => {
               v-model="state.character.baseInfo"
               type="textarea"
               :rows="3"
-              :placeholder="t('如：想生成一位冷艳的末世女剑客，穿黑色长风衣\n选择配置的模型后输入基础信息生成，将提示词复制到人物卡中', 'e.g. A cold apocalyptic female swordsman in a black trench coat')"
+              :placeholder="t('如：想生成一位冷艳的末世女剑客，穿黑色长风衣', 'e.g. A cold apocalyptic female swordsman in a black trench coat')"
             />
           </div>
 

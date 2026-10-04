@@ -239,24 +239,34 @@ class AIService:
     @staticmethod
     def vision_chat(provider, messages, image_base64, stream=True,
                     temperature=0.7, frequency_penalty=0.0,
-                    presence_penalty=0.0, top_p=0.95):
+                    presence_penalty=0.0, top_p=0.95,
+                    model=None, image_mime='image/jpeg'):
         """
         识图对话接口
         messages: 文本消息列表
         image_base64: base64 编码的图片（不含前缀）
+        model: 指定模型 ID；缺省时回退到提供商配置里的默认模型
+        image_mime: 图片真实 MIME 类型（由调用方按 magic bytes 检测结果传入）。
+                    写死 image/jpeg 会被 MIME 严格校验的厂商拒收 PNG/WebP。
         """
         config = AIService._get_api_config(provider)
-        model = config['model']
+        use_model = model or config['model']
 
         # SSRF 防护
         ssrf_err = AIService._ssrf_error(config['api_url'])
         if ssrf_err:
             return None, ssrf_err
 
-        # 构造带图片的消息
+        # 构造带图片的消息：图片只挂「最后一条 user 消息」。
+        # 历史消息里的图片若每轮都重发，token 会成倍增长，且部分厂商会直接拒绝。
+        last_user_idx = -1
+        for i, msg in enumerate(messages):
+            if msg.get('role') == 'user':
+                last_user_idx = i
+
         vision_messages = []
-        for msg in messages:
-            if msg['role'] == 'user':
+        for i, msg in enumerate(messages):
+            if i == last_user_idx:
                 vision_messages.append({
                     'role': 'user',
                     'content': [
@@ -264,7 +274,7 @@ class AIService:
                         {
                             'type': 'image_url',
                             'image_url': {
-                                'url': f'data:image/jpeg;base64,{image_base64}'
+                                'url': f'data:{image_mime};base64,{image_base64}'
                             }
                         }
                     ]
@@ -273,14 +283,14 @@ class AIService:
                 vision_messages.append(msg)
 
         payload = {
-            'model': model,
+            'model': use_model,
             'messages': vision_messages,
             'stream': stream,
             'temperature': temperature,
             'top_p': top_p,
         }
         # 智谱 GLM 接口不接受 frequency/presence penalty，发过去会 400
-        if 'glm' not in (model or '').lower():
+        if 'glm' not in (use_model or '').lower():
             payload['frequency_penalty'] = frequency_penalty
             payload['presence_penalty'] = presence_penalty
 

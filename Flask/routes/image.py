@@ -10,21 +10,28 @@
       resolution        可选，1K/2K/4K，覆盖配置默认
       aspect_ratio      可选，如 16:9，覆盖配置默认
       quality           可选，auto/low/medium/high，覆盖配置默认
+      conversation_id   可选，所在对话；传入后本轮生图会写入对话历史
+      reference_url     可选，改图参考图的服务器 URL，用于聊天记录留档
 
 未配置任何图片生成时，会回退使用 .env 中的共享免费 Key（IMAGE_FREE_*）生图/改图，
 并每人限制 IMAGE_FREE_LIMIT 次（默认 10），超出后需用户自行配置 API Key。
+注意：免费额度只约束「共享免费 Key」，用户自己的 Key 生图不受次数限制。
 """
+import base64 as _b64
+
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime
 from sqlalchemy import update
-from models import ModelProvider, ImageUsage, local_now
+from models import ModelProvider, ImageUsage, Conversation, Message, local_now
 from extensions import db
 from services.agnes_image import (
     generate_image, IMAGE_RESOLUTIONS, IMAGE_ASPECT_RATIOS, IMAGE_QUALITIES,
 )
 from services.ssrf import validate_reference_images
 from services.rate_limit import rate_limit
+from services.upload_guard import detect_image_type
+from routes.upload import save_image_bytes
 
 image_bp = Blueprint('image', __name__, url_prefix='/api/image')
 
@@ -49,7 +56,7 @@ class _FreeImageProvider:
     """由 .env 共享 Key 构造的免费图片服务对象（与 generate_image 兼容，简化版）。"""
 
     def __init__(self):
-        self.api_url = current_app.config.get('IMAGE_FREE_API_URL') or 'https://apihub.agnes-ai.cn/v1'
+        self.api_url = current_app.config.get('IMAGE_FREE_API_URL') or 'https://api.agnes-ai.cn/v1'
         self.api_key = current_app.config.get('IMAGE_FREE_API_KEY') or ''
         self.model = current_app.config.get('IMAGE_FREE_MODEL') or 'agnes-image-2.1-flash'
         self.models = []  # generate_image 通过 pick_enabled_model 取模型时返回 None
@@ -106,6 +113,78 @@ def _consume_free_usage(user_id):
     return remaining
 
 
+def _persist_reference(ref, user_id):
+    """把参考图转成可长期访问的服务器 URL。
+
+    - data URI：解出字节后落盘（后端兜底，防止前端未上传导致参考图丢失）；
+    - http(s) 公网地址：直接沿用（本来就是可访问 URL）；
+    - 其他：返回 None。
+
+    落盘失败返回 None —— 调用方据此放弃「参考图留档」，但不影响生图本身。
+    """
+    if not ref or not isinstance(ref, str):
+        return None
+    if ref.startswith('data:'):
+        try:
+            _header, _, payload = ref.partition(',')
+            raw = _b64.b64decode(payload, validate=False)
+        except Exception:
+            return None
+        if not raw:
+            return None
+        ext = detect_image_type(raw) or 'jpg'
+        return save_image_bytes(raw, ext, user_id)
+    if ref.startswith('http://') or ref.startswith('https://'):
+        return ref
+    return None
+
+
+def _persist_image_messages(user_id, conversation_id, prompt, image_url, reference_url=None):
+    """把生图/改图这一轮（用户 prompt + 生成结果）写进对话历史。
+
+    此前 generate() 只扣额度、完全不落 Message，导致生图/改图整段对话
+    切走后全部消失。这里补齐落库：
+
+    - 写两条：user（prompt + 参考图 URL）与 assistant（生成图 URL）；
+    - assistant 的 content 列 NOT NULL，用空串占位，前端按 image_url 渲染；
+    - 幂等：按「最后一条同角色消息」比对，前端重试不会插重复；
+    - 越权防护：只写当前用户自己的对话，他人对话直接返回 False。
+
+    返回 True 表示已写入对话历史。
+    """
+    if not conversation_id:
+        return False
+    conv = Conversation.query.filter_by(id=conversation_id, user_id=user_id).first()
+    if not conv:
+        return False
+
+    last_user = Message.query.filter_by(
+        conversation_id=conv.id, role='user'
+    ).order_by(Message.created_at.desc(), Message.id.desc()).first()
+    if not (last_user is not None
+            and last_user.content == prompt
+            and (last_user.image_url or None) == (reference_url or None)):
+        db.session.add(Message(
+            conversation_id=conv.id, role='user',
+            content=prompt, image_url=reference_url or None,
+        ))
+
+    last_ai = Message.query.filter_by(
+        conversation_id=conv.id, role='assistant'
+    ).order_by(Message.created_at.desc(), Message.id.desc()).first()
+    if not (last_ai is not None and (last_ai.image_url or None) == (image_url or None)):
+        db.session.add(Message(
+            conversation_id=conv.id, role='assistant',
+            content='', image_url=image_url,
+        ))
+
+    # 首条生图时把「新对话」标题更新为 prompt 摘要（与普通聊天一致）
+    if conv.title in (None, '', '新对话'):
+        conv.title = (prompt[:20] + '...') if len(prompt) > 20 else prompt
+
+    return True
+
+
 @image_bp.route('/generate', methods=['POST'])
 @jwt_required()
 def generate():
@@ -131,15 +210,25 @@ def generate():
         free_key = current_app.config.get('IMAGE_FREE_API_KEY') or ''
         if not free_key:
             return jsonify({'code': 400, 'message': '请先在「模型配置-图片生成」中添加图片生成配置'}), 400
+        # 有停用的图片配置时记一笔日志：便于日后排查「为什么没用自己的 API」
+        disabled = ModelProvider.query.filter_by(
+            user_id=user_id, provider_type='image', enabled=False
+        ).first()
+        if disabled:
+            current_app.logger.info(
+                '[生图] 用户 %s 有停用的图片生成配置（%s），本次回退共享免费 Key',
+                user_id, disabled.name,
+            )
         provider = _FreeImageProvider()
     else:
         provider = own_provider
 
     is_free = own_provider is None
 
-    # 每日签到/新用户额度校验：剩余次数为 0 则拦截（无论使用自有 Key 还是共享 Key）
+    # 免费额度校验只作用于「共享免费 Key」：
+    # 用户配置了自己的 Key 生图，不该被每日免费次数拦住。
     remaining = _free_remaining(user_id)
-    if remaining <= 0:
+    if is_free and remaining <= 0:
         return jsonify({
             'code': 403,
             'message': '今日免费生图次数已用完，请先签到或明日再试；也可配置自己的 Agnes API Key。',
@@ -185,14 +274,36 @@ def generate():
         current_app.logger.error('图片生成失败 user=%s: %s', user_id, err)
         return jsonify({'code': 500, 'message': '图片生成失败，请稍后重试或检查配置'}), 500
 
-    remaining = _consume_free_usage(user_id)
-    if remaining is None:
-        # 并发下额度已耗尽：生成结果不回传，提示用户
-        return jsonify({
-            'code': 403,
-            'message': '今日免费生图次数已用完，请先签到或明日再试；也可配置自己的 Agnes API Key。',
-            'data': {'free': is_free, 'remaining': 0},
-        }), 403
+    if is_free:
+        remaining = _consume_free_usage(user_id)
+        if remaining is None:
+            # 并发下额度已耗尽：生成结果不回传，提示用户
+            return jsonify({
+                'code': 403,
+                'message': '今日免费生图次数已用完，请先签到或明日再试；也可配置自己的 Agnes API Key。',
+                'data': {'free': is_free, 'remaining': 0},
+            }), 403
+    else:
+        # 自有 Key 不占用免费次数，仅读一次剩余用于日志
+        remaining = _free_remaining(user_id)
+        current_app.logger.info(
+            '[生图] 用户 %s 使用自有配置「%s」生图，不占用免费次数（剩余 %s）',
+            user_id, provider.name, remaining,
+        )
+
+    # 落库：把这一轮生图写进对话历史（参考图 data URI 在此兜底落盘）。
+    # 失败只 warning 不影响返回 —— 图已生成、额度已消耗，不能让用户白等。
+    conversation_id = data.get('conversation_id')
+    if conversation_id:
+        reference_url = _persist_reference(data.get('reference_url'), user_id)
+        try:
+            _persist_image_messages(user_id, conversation_id, prompt, image, reference_url)
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.warning(
+                '生图消息落库失败 user=%s conv=%s: %s', user_id, conversation_id, e,
+            )
 
     payload = {
         'url': image,

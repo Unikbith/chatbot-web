@@ -12,19 +12,32 @@ const triggerUpload = () => {
   fileInput.value?.click();
 };
 
+// 与后端 upload_guard.MAX_IMAGE_SIZE 保持一致：
+// 前端放行、后端拒绝会造成「选了图却没保存」的静默失败
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+// 与后端 magic bytes 白名单对齐：HEIC / AVIF / SVG / TIFF 等前端放行也会被后端拒
+const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp'];
+const ALLOWED_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
+
 const handleFileChange = (event) => {
   const file = event.target.files[0];
+  // 清空 input 必须放在所有 return 之前，否则校验失败后无法再次选择同一文件
+  event.target.value = '';
   if (!file) return;
 
-  // 检查文件大小（限制 10MB）
-  if (file.size > 10 * 1024 * 1024) {
-    ElMessage.warning('图片大小不能超过 10MB');
+  // 检查文件大小（与后端一致：5MB）
+  if (file.size > MAX_IMAGE_SIZE) {
+    ElMessage.warning('图片大小不能超过 5MB');
     return;
   }
 
-  // 检查文件类型
-  if (!file.type.startsWith('image/')) {
-    ElMessage.warning('请选择图片文件');
+  // 格式校验：file.type 在部分系统/浏览器上为空，用扩展名兜底；
+  // 两者其一命中白名单即放行，后端还有 magic bytes 做最终校验
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const mimeOk = ALLOWED_TYPES.includes(file.type);
+  const extOk = ALLOWED_EXTS.includes(ext);
+  if (!mimeOk && !extOk) {
+    ElMessage.warning('仅支持 PNG / JPG / GIF / WebP / BMP 格式的图片');
     return;
   }
 
@@ -38,9 +51,6 @@ const handleFileChange = (event) => {
     emit('imageSelected', selectedImage.value);
   };
   reader.readAsDataURL(file);
-  
-  // 清空 input，允许重复选择同一文件
-  event.target.value = '';
 };
 
 const clearImage = () => {
@@ -59,7 +69,7 @@ defineExpose({
     <input
       ref="fileInput"
       type="file"
-      accept="image/*"
+      accept="image/png,image/jpeg,image/gif,image/webp,image/bmp"
       style="display: none"
       @change="handleFileChange"
     />

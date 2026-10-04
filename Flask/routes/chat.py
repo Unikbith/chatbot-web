@@ -18,8 +18,31 @@ from services.markdown_streamer import (
 )
 from services.upload_guard import check_upload, detect_image_type, MAX_IMAGE_SIZE
 from services.rate_limit import rate_limit
+from routes.upload import save_image_bytes
 
 chat_bp = Blueprint('chat', __name__, url_prefix='/api/chat')
+
+
+# ---------------------------------------------------------------------------
+# 识图相关常量
+# ---------------------------------------------------------------------------
+
+# 用户「只发图、不说话」时发给模型的占位文案。
+# 关键：它只发给模型，绝不落库、也不在聊天框回显，否则会像替用户说话。
+VISION_PLACEHOLDER = '（用户发来了一张图片，没说话，想让你看看）'
+# 兼容历史数据里的旧占位文案，落库时一并视为空
+_VISION_PLACEHOLDERS = {VISION_PLACEHOLDER, '请描述这张图片', '请描述这张图片。'}
+
+# 扩展名 → MIME。必须按 magic bytes 检测出的真实类型映射，
+# 不能写死 image/jpeg：PNG/WebP 会被 MIME 严格校验的厂商直接拒收。
+_IMAGE_MIME_BY_EXT = {
+    'png': 'image/png',
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'gif': 'image/gif',
+    'webp': 'image/webp',
+    'bmp': 'image/bmp',
+}
 
 
 # 全局输出格式约定：让模型的排版可预测，生成中与成稿渲染保持一致。
@@ -353,6 +376,48 @@ def _get_chat_provider(user_id, provider_id=None):
 def _get_vision_provider(user_id, provider_id=None):
     """获取识图用的提供商（图像理解复用对话模型，无需单独配置）"""
     return _get_chat_provider(user_id, provider_id)
+
+
+def _vision_error_hint(response, raw_text):
+    """把识图接口的失败原因翻译成用户能照着改的提示。
+
+    上游报错千篇一律（"Bad Request" / "invalid request"），直接甩给用户
+    等于没说。这里按状态码 + 关键字归类，让用户知道该去改什么。
+    识图最常见的失败就是「用了非多模态模型」，所以单独优先识别。
+    """
+    status = getattr(response, 'status_code', None) if response is not None else None
+    raw = (raw_text or '')[:300]
+    low = raw.lower()
+
+    # 鉴权/地址类错误：状态码本身已很明确，优先判定（避免被关键词误归类）
+    if status in (401, 403):
+        return '鉴权失败：API Key 无效、已过期或无该模型权限，请检查模型配置'
+    if status == 404:
+        return '接口不存在：请检查提供商的 API 地址是否填写正确'
+
+    # 模型不支持图片输入（最常见）：需同时出现「图片相关词」与「拒绝词」
+    img_kw = ('image' in low or 'vision' in low or 'multimodal' in low
+              or 'content type' in low or 'content-type' in low)
+    rej_kw = ('not support' in low or 'unsupported' in low
+              or '不支持' in raw or 'invalid' in low)
+    if img_kw and rej_kw:
+        return '当前模型不支持图片输入，请在输入框左上角切换到多模态模型后重试'
+    if '不支持' in raw and '图' in raw:
+        return '当前模型不支持图片输入，请在输入框左上角切换到多模态模型后重试'
+
+    if status == 429:
+        return '请求过于频繁或额度不足，请稍后重试'
+    if status in (400, 422):
+        if 'model' in low and ('not found' in low or '不存在' in raw or 'invalid' in low):
+            return '模型不存在：请检查模型 ID 是否填写正确'
+        if 'image' in low or 'url' in low or 'base64' in low:
+            return '图片未被接受：可能图片过大或格式不受支持，请换一张重试'
+    if status is not None and status >= 500:
+        return '识图服务暂时不可用，请稍后重试'
+
+    # 兜底：截断原文，避免把整个响应糊到聊天框
+    tail = raw.strip().replace('\n', ' ')[:120]
+    return f'识图服务请求失败：{tail}' if tail else '识图服务请求失败，请检查配置或稍后重试'
 
 
 def _resolve_chat_model(provider, conversation=None, model_id=None):
@@ -1064,13 +1129,25 @@ def chat():
 @chat_bp.route('/vision', methods=['POST'])
 @jwt_required()
 def vision_chat():
-    """识图聊天接口"""
+    """识图聊天接口
+
+    与普通聊天一致地支持模型选择与深度思考开关：
+      - model_id：前端传入当前选中的多模态模型（缺省则按 对话记忆 > 首个启用
+        模型 > 厂商默认 解析）。不解析会落到厂商「默认 model」，通常是非多模态
+        模型，识图必然报「不支持图片」。
+      - deep_think：跟随输入框的深度思考按钮，默认关闭。
+      - image_url：前端上传后换取的服务器 URL，用于聊天记录留图。
+    """
     user_id = int(get_jwt_identity())
 
-    text = request.form.get('text', '请描述这张图片')
+    # 只发图不说话时用占位文案送模型；该占位不落库、不回显
+    text = request.form.get('text') or VISION_PLACEHOLDER
     provider_id = request.form.get('provider_id')
     conversation_id = request.form.get('conversation_id')
     raw_sys = request.form.get('system_prompt')
+    raw_model_id = (request.form.get('model_id') or '').strip()
+    raw_image_url = (request.form.get('image_url') or '').strip()
+    deep_think = (request.form.get('deep_think') or '').strip().lower() in ('1', 'true', 'on', 'yes')
 
     image_file = request.files.get('image')
     if not image_file:
@@ -1086,29 +1163,54 @@ def vision_chat():
     image_data, guard_err = check_upload(image_file, MAX_IMAGE_SIZE)
     if guard_err:
         return jsonify({'code': 400, 'message': guard_err}), 400
-    if detect_image_type(image_data) is None:
+    image_ext = detect_image_type(image_data)
+    if image_ext is None:
         return jsonify({'code': 400, 'message': '文件不是有效的图片'}), 400
     image_base64 = base64.b64encode(image_data).decode('utf-8')
+
+    # 对话对象提前取出：既用于模型解析（对话记忆的 model_id），也用于落库
+    conv = None
+    if conversation_id:
+        conv = Conversation.query.filter_by(id=conversation_id, user_id=user_id).first()
+
+    # 模型解析：请求指定 > 对话记忆 > 首个启用模型 > 厂商默认
+    model = _resolve_chat_model(provider, conv, raw_model_id or None)
 
     messages = [
         {'role': 'user', 'content': text}
     ]
-    # 识图同样注入人设/图片生成能力约定（前端按能力拼好）；system 消息会被原样转发给模型
+    # 识图同样注入人设/图片回应约定（前端按能力拼好）；system 消息会被原样转发给模型
     system_prompt = (raw_sys.strip() if isinstance(raw_sys, str) else '').strip()
     if system_prompt:
         messages.insert(0, {'role': 'system', 'content': system_prompt})
 
+    # 图片落库 URL：前端已上传则沿用；为空时后端自己存盘兜底，
+    # 避免前端上传失败（体积/格式/登录态过期）导致聊天记录丢图
+    stored_image_url = raw_image_url or None
+    if not stored_image_url:
+        try:
+            stored_image_url = save_image_bytes(image_data, image_ext, user_id)
+        except Exception as e:
+            current_app.logger.warning('识图图片落盘失败 user=%s: %s', user_id, e)
+
     # 立即持久化识图的用户消息，避免生成过程中切换对话丢失（与普通聊天一致）
-    if conversation_id:
-        conv = Conversation.query.filter_by(id=conversation_id, user_id=user_id).first()
-        if conv:
-            last_stored_user = Message.query.filter_by(
-                conversation_id=conv.id, role='user'
-            ).order_by(Message.created_at.desc(), Message.id.desc()).first()
-            plain = strip_html_to_text(text)
-            if not last_stored_user or last_stored_user.content != plain:
-                db.session.add(Message(conversation_id=conv.id, role='user', content=plain))
-                db.session.commit()
+    if conv:
+        last_stored_user = Message.query.filter_by(
+            conversation_id=conv.id, role='user'
+        ).order_by(Message.created_at.desc(), Message.id.desc()).first()
+        # 占位文案不入库：用户没说话时存空串，聊天记录里只显示图片
+        plain = '' if text in _VISION_PLACEHOLDERS else strip_html_to_text(text)
+        # 去重必须同时比对 image_url：无文字图片的 plain 恒为空串，
+        # 只比文本会把「连续发第二张图」误判为重复 → 该图不落库 → 切对话后消失
+        is_dup = (last_stored_user is not None
+                  and last_stored_user.content == plain
+                  and (last_stored_user.image_url or None) == stored_image_url)
+        if not is_dup:
+            db.session.add(Message(
+                conversation_id=conv.id, role='user',
+                content=plain, image_url=stored_image_url,
+            ))
+            db.session.commit()
 
     def generate():
         full_content_holder = [""]
@@ -1122,6 +1224,8 @@ def vision_chat():
                 provider=provider,
                 messages=messages,
                 image_base64=image_base64,
+                model=model,
+                image_mime=_IMAGE_MIME_BY_EXT.get(image_ext, 'image/jpeg'),
                 stream=True,
                 temperature=settings.temperature,
                 frequency_penalty=settings.frequency_penalty,
@@ -1131,7 +1235,7 @@ def vision_chat():
 
             if response is None:
                 current_app.logger.error('识图请求失败 user=%s: %s', user_id, error)
-                yield sse_content('出错了：识图服务请求失败，请检查配置或稍后重试')
+                yield sse_content(f'出错了：{_vision_error_hint(None, error)}')
                 yield sse_done()
                 return
 
@@ -1141,13 +1245,13 @@ def vision_chat():
                     '识图返回非 200 user=%s status=%s body=%s',
                     user_id, response.status_code, error_text,
                 )
-                yield sse_content('出错了：识图服务请求失败，请检查配置或稍后重试')
+                yield sse_content(f'出错了：{_vision_error_hint(response, error_text)}')
                 yield sse_done()
                 return
 
             yield from iter_sse_content(
                 response, full_content_holder, reasoning_holder, model_holder,
-                usage_holder=usage_holder,
+                deep_think=deep_think, usage_holder=usage_holder,
             )
             # 先落库再下发最终事件（与普通聊天一致，避免客户端断开后生成器不推进导致丢失）
             if conversation_id:
