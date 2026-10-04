@@ -1,38 +1,54 @@
-# AI 聊天助手 Web 版
+# Confide（心语）· AI 聊天助手 Web 版
 
-> **Vue 3 + Flask 全栈 AI 聊天应用** —— 流式对话、深度思考、识图与多模态，深度可定制的人设与提示词，让你把各家大模型 API 收拢进一个随手可用的网页。
+> **Vue 3 + Flask 全栈 AI 聊天应用** —— 流式对话、深度思考、识图与多模态、AI 生图、人物卡与人设广场，把各家大模型 API 收拢进一个随手可用的网页。
 
-基于 **Vue 3 + Flask** 构建的开源 AI 聊天应用，集聊天、识图、创作于一体：底层兼容 DeepSeek / 智谱 GLM / 通义千问 / OpenAI 等所有 OpenAI 风格接口，支持**流式响应、深度思考（Reasoner）推理、识图对话、AI 文生图 / 图生图、语音输入输出**，并提供**可深度定制的人物设定、提示词工具、多供应商管理与独立管理后台**。自带邮箱注册登录、云端对话存档与响应式移动端适配，可一键部署到自己的云服务器。
+基于 **Vue 3 + Flask** 构建的 AI 聊天应用，集对话、识图、创作与角色扮演于一体：底层兼容 DeepSeek / 智谱 GLM / 通义千问 / OpenAI 等所有 OpenAI 风格接口，支持**流式响应、深度思考（Reasoner）推理、识图对话、AI 文生图 / 图生图、语音输入输出**，并提供**人物卡（AI 人设 / 用户人设）、世界书、人设广场、提示词工具、多供应商管理与独立管理后台**。自带邮箱注册登录、云端对话存档、记忆宫殿（滚动摘要）与响应式移动端适配，可一键部署到自己的云服务器。
 
 ## 功能特性
 
 ### 核心聊天
 - 流式对话，实时响应
-- 支持多种 AI 模型（DeepSeek、智谱、通义千问、OpenAI 等所有 OpenAI 兼容格式）
+- 支持多种 AI 模型（DeepSeek、智谱 GLM、通义千问、OpenAI 等所有 OpenAI 兼容格式）
 - 深度思考模式（DeepSeek Reasoner 等推理模型）
-- 自定义人物设定提示词
-- 回复长度、采样参数自由调节
+- 自定义人物设定提示词（单对话可覆盖模板）
+- 回复长度、采样参数（温度 / 频率惩罚 / 存在惩罚）自由调节
+- 提示词兜底开关：默认关闭，需要时再让后端追加全局约定，避免每轮多付几千 token
 
-### 多供应商管理
-- 支持添加多个 API 供应商配置
-- 一键切换不同 API 供应商
-- 内置快速模板（DeepSeek、智谱、通义、OpenAI）
-- 连接测试功能
-- 供应商密钥在接口中脱敏返回
+### 人物卡与世界书
+- **人物卡**：分别配置 AI 人设与用户人设，可设为默认、随对话切换
+- **世界书（设定条目）**：为角色维护按需注入的设定条目，命中才进上下文，不命中不占 token
+- 世界书支持关键词触发，条目可增删改查
+
+### 人设广场
+- 发布自己的人物卡到广场，支持标题、简介、系统提示词与开场白
+- 浏览、筛选、按类型过滤，查看他人卡片详情与评论
+- 投票、评论与点赞互动
+- **一键采用**：把广场卡片导入为自己的角色（可取消采用）
+- 确定性假名展示，发布者身份不外泄
+- **每日签到**：签到即赠 5 次免费生图机会，签到状态可查询
+
+### 上下文成本优化
+- **记忆宫殿（滚动摘要）**：每 N 轮把较早对话压成一条摘要，既防遗忘又减少输入 token，阈值可调（1–20 轮，默认 10）
+- 摘要历史可查看，压缩记录留存
+- 历史正文设字数预算，条数窗口不够时自动截断，控制长对话成本
 
 ### 识图对话
-- 上传图片，AI 理解图片内容
-- 基于图片进行多轮对话
+- 上传图片，AI 理解图片内容，支持基于图片多轮对话
+- 识图同样支持模型选择与深度思考开关
+- 失败原因可视化：鉴权失败 / 接口不存在 / 模型不支持图片 / 图片过大 / 服务不可用等分类诊断
+- 识图图片落库留档，聊天记录可回看
 
 ### AI 图片生成
-- 文生图 / 图生图，支持多分辨率、长宽比与质量档位
+- 文生图 / 图生图，支持多分辨率、长宽比与画质档位
 - 支持按关键词触发：`生图` / `生成图片` / `画一张` 生成图片，`改图` / `图生图` / `修改图片` 修改图片
-- 未单独配置图片 API 时，使用内置免费 Key 并默认按 9:16 竖版生成
-- 免费用户有限量额度；超过后可自行在「模型配置-图片生成」中配置 API Key
+- 未单独配置图片 API 时，回退到内置免费 Key
+- 免费用户有每日额度，签到可补充；超过后可自行在「模型配置 - 图片生成」中配置 API Key
+- 参考图与生成结果自动写入对话记录
 
 ### 提示词工具
 - 一键生成人物设定提示词与图片提示词（文生图 / 图生图）
 - 支持自选已启用模型与自定义系统提示词，替代原「清空对话」入口
+- 生成失败会把原因直接写进输出框
 
 ### 语音交互
 - 语音输入（STT），说话转文字
@@ -41,16 +57,17 @@
 - 会话内可独立开关「AI 回复自动语音播报」
 
 ### 用户系统
-- 邮箱注册 / 登录（JWT 认证，支持短信验证码式邮箱验证）
+- 邮箱注册 / 登录（JWT 认证，邮箱验证码）
 - 用户名限普通字符串（字母、数字、下划线），注册后与邮箱一样不可修改
-- 独立管理后台 `/admin`（管理员登录、用户与对话审计）
-- 云端对话存档
-- 本地存储兼容模式
+- 注册须勾选用户须知与免责声明（`/user-agreement`）
+- 独立管理后台（管理员登录、用户与对话审计、广场内容管理）
+- 云端对话存档，本地存储兼容模式
+- 帮助与反馈：内置帮助文档，可提交反馈并留联系方式
 
 ### 个性化设置
 - 自定义头像和背景（背景支持「完全可见 / 覆盖背景」两种展示方式）
 - 消息气泡透明度调节
-- 会话级独立配置：AI / 用户头像、AI 采样参数（温度、频率惩罚、存在惩罚）、自动播报
+- 会话级独立配置：AI / 用户头像、AI 采样参数、自动播报、背景
 - 响应式设计，支持移动端
 
 ## 项目结构
@@ -64,14 +81,15 @@ chatbot-web/
 │   ├── extensions.py       # 扩展与数据库初始化
 │   ├── requirements.txt    # Python 依赖
 │   ├── .env.example        # 环境变量示例
-│   ├── .gitignore          # 忽略本地敏感配置（.env）
 │   ├── routes/             # 路由层，按业务划分的接口
-│   │   ├── auth.py         # 认证：注册/登录/验证码/改密
-│   │   ├── chat.py         # 聊天与识图、提示词工具
+│   │   ├── auth.py         # 认证：注册/登录/验证码/改密/重置
+│   │   ├── chat.py         # 聊天与识图、提示词工具、上下文压缩与世界书注入
 │   │   ├── audio.py        # 语音识别与合成
-│   │   ├── conversation.py # 对话存档
-│   │   ├── provider.py     # 模型供应商与密钥管理
-│   │   ├── persona.py      # 人设模板
+│   │   ├── conversation.py # 对话存档与摘要
+│   │   ├── provider.py     # 模型供应商与密钥管理、连接测试
+│   │   ├── persona.py      # 人物卡模板与世界书条目
+│   │   ├── marketplace.py  # 人设广场：发布/投票/评论/采用、每日签到
+│   │   ├── feedback.py     # 用户反馈
 │   │   ├── settings.py     # 系统设置
 │   │   ├── image.py        # AI 图片生成
 │   │   ├── admin.py        # 管理后台
@@ -93,24 +111,26 @@ chatbot-web/
     └── src/
         ├── main.js         # 前端入口
         ├── App.vue         # 根组件
-        ├── router/         # 路由配置
+        ├── router/         # 路由配置（/、/admin、/chatbotAdmin、/user-agreement）
         ├── views/          # 页面
-        │   ├── Home.vue            # 主页
+        │   ├── Home.vue            # 主页（聊天 + 各设置面板）
         │   ├── AdminLogin.vue      # 管理后台登录
-        │   └── AdminBackend.vue    # 管理后台
+        │   ├── AdminBackend.vue    # 管理后台
+        │   └── UserAgreement.vue   # 用户须知与免责声明
         ├── components/     # 组件
         │   ├── AuthModal.vue            # 登录/注册
-        │   ├── ChatArea.vue             # 聊天区
-        │   ├── ConversationSettings.vue # 会话设置
+        │   ├── ChatArea.vue             # 聊天区（含识图与生图链路）
+        │   ├── ConversationSettings.vue # 会话设置（记忆宫殿等）
         │   ├── PromptToolPanel.vue      # 提示词工具
-        │   ├── PersonaPanel.vue         # 人设模板面板
+        │   ├── PersonaPanel.vue         # 人物卡与世界书面板
+        │   ├── PersonaMarketplace.vue   # 人设广场
         │   ├── ProviderPanel.vue        # 供应商配置面板
-        │   ├── AdminPanel.vue           # 管理后台面板
         │   ├── Sidebar.vue              # 侧边栏
-        │   ├── SystemSettings.vue       # 系统设置
+        │   ├── SystemSettings.vue       # 系统设置（通用/账号/帮助反馈）
+        │   ├── ImageUpload.vue          # 图片上传
         │   └── VoiceInput.vue           # 语音输入
         ├── i18n/           # 多语言
-        └── utils/          # 工具：请求封装/认证/主题
+        └── utils/          # 工具：请求封装/认证/主题/帮助文档等
 ```
 
 ## 快速开始
@@ -227,6 +247,7 @@ server {
 2. **不要提交 `.env`**：`.env` 已被 `.gitignore` 排除；服务器上用环境变量注入，而非上传文件。
 3. **HTTPS**：生产必须启用 HTTPS，否则令牌与内容明文传输。
 4. **Access Token 有效期** 默认 2 小时（`JWT_ACCESS_TOKEN_EXPIRES`），过期后前端自动静默续期。
+5. **SSRF 防护** 保持开启（`SSRF_PROTECTION=true`），拦截指向内网/云元数据的外发请求。
 
 ### SMTP 邮件配置（邮箱注册 / 重置密码）
 
@@ -237,7 +258,7 @@ SMTP_HOST=smtp.qq.com
 SMTP_PORT=465
 SMTP_USER=你的发件邮箱
 SMTP_PASS=你的 SMTP 授权码
-SENDER_NAME=AI 聊天助手
+SENDER_NAME=心语
 ```
 
 未配置 SMTP 时，邮箱注册与重置密码功能不可用。
@@ -253,17 +274,66 @@ SENDER_NAME=AI 聊天助手
 | POST | `/api/auth/refresh` | 刷新 Token |
 | GET | `/api/auth/userinfo` | 获取用户信息 |
 | PUT | `/api/auth/password` | 修改密码 |
+| POST | `/api/auth/verify-code` | 校验验证码 |
+| POST | `/api/auth/reset-password` | 重置密码 |
 | POST | `/api/auth/delete-account` | 注销账号 |
 
 ### 聊天相关
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/chat` | 流式聊天（SSE） |
-| POST | `/api/chat/vision` | 识图聊天（SSE） |
-| GET | `/api/chat/models` | 获取模型列表 |
 | GET | `/api/chat/status` | 聊天服务状态 |
-| GET | `/api/chat/prompt-tool` | 提示词工具配置（候选模型/默认提示词） |
+| POST | `/api/chat` | 流式聊天（SSE） |
+| POST | `/api/chat/vision` | 识图聊天（SSE，支持 model_id / deep_think / image_url） |
+| GET | `/api/chat/models` | 获取模型列表 |
+| GET | `/api/chat/prompt-tool` | 提示词工具配置（候选模型 / 默认提示词） |
 | POST | `/api/chat/prompt-tool` | 生成人物设定 / 图片提示词 |
+
+### 对话存档
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/conversations` | 获取对话列表 |
+| POST | `/api/conversations` | 创建对话 |
+| GET | `/api/conversations/:conv_id` | 获取对话详情 |
+| PUT | `/api/conversations/:conv_id` | 更新对话 |
+| GET | `/api/conversations/:conv_id/summaries` | 获取记忆宫殿压缩摘要 |
+| PUT | `/api/conversations/:conv_id/pin` | 置顶对话 |
+| DELETE | `/api/conversations/:conv_id` | 删除对话 |
+| DELETE | `/api/conversations/:conv_id/messages` | 清空对话消息 |
+
+### 人物卡与世界书
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/personas` | 获取人物卡列表 |
+| POST | `/api/personas` | 创建人物卡 |
+| GET | `/api/personas/:persona_id` | 获取人物卡详情 |
+| PUT | `/api/personas/:persona_id` | 更新人物卡 |
+| DELETE | `/api/personas/:persona_id` | 删除人物卡 |
+| PUT | `/api/personas/:persona_id/default` | 设为默认人物卡 |
+| GET | `/api/personas/:persona_id/worldbook` | 获取世界书条目 |
+| POST | `/api/personas/:persona_id/worldbook` | 新增世界书条目 |
+| PUT | `/api/personas/:persona_id/worldbook/:entry_id` | 更新世界书条目 |
+| DELETE | `/api/personas/:persona_id/worldbook/:entry_id` | 删除世界书条目 |
+
+### 人设广场
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/marketplace` | 广场卡片列表 |
+| POST | `/api/marketplace` | 发布卡片 |
+| GET | `/api/marketplace/:pid` | 卡片详情 |
+| PUT | `/api/marketplace/:pid` | 更新卡片 |
+| DELETE | `/api/marketplace/:pid` | 删除卡片 |
+| GET | `/api/marketplace/public` | 公开卡片列表 |
+| GET | `/api/marketplace/public/:pid` | 公开卡片详情 |
+| GET | `/api/marketplace/public/:pid/comments` | 公开卡片评论 |
+| GET | `/api/marketplace/genders` | 类型（性别）枚举 |
+| POST | `/api/marketplace/:pid/vote` | 投票 |
+| POST | `/api/marketplace/:pid/adopt` | 采用卡片 |
+| POST | `/api/marketplace/:pid/unadopt` | 取消采用 |
+| GET | `/api/marketplace/:pid/comments` | 获取评论 |
+| POST | `/api/marketplace/:pid/comments` | 发表评论 |
+| POST | `/api/marketplace/comments/:cid/like` | 评论点赞 |
+| POST | `/api/marketplace/checkin` | 每日签到（赠免费生图次数） |
+| GET | `/api/marketplace/checkin/status` | 签到状态 |
 
 ### 图片生成
 | 方法 | 路径 | 说明 |
@@ -280,27 +350,22 @@ SENDER_NAME=AI 聊天助手
 ### 供应商管理
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/providers` | 获取供应商列表 |
-| GET | `/api/providers/all` | 获取全部供应商（含未启用） |
 | GET | `/api/providers/vendors` | 获取供应商类型枚举 |
 | GET | `/api/providers/config-schema` | 获取供应商配置字段 |
+| GET | `/api/providers` | 获取供应商列表 |
+| GET | `/api/providers/all` | 获取全部供应商（含未启用） |
 | POST | `/api/providers` | 创建供应商 |
-| GET | `/api/providers/:id` | 获取供应商详情 |
-| PUT | `/api/providers/:id` | 更新供应商 |
-| DELETE | `/api/providers/:id` | 删除供应商 |
-| PUT | `/api/providers/:id/default` | 设为默认供应商 |
-| POST | `/api/providers/:id/test` | 测试连接 |
-| GET | `/api/providers/:id/models` | 获取供应商模型列表 |
-| POST | `/api/providers/:id/models/fetch` | 拉取模型列表 |
-
-### 人设模板
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/personas` | 获取人设列表 |
-| POST | `/api/personas` | 创建人设 |
-| PUT | `/api/personas/:id` | 更新人设 |
-| DELETE | `/api/personas/:id` | 删除人设 |
-| PUT | `/api/personas/:id/default` | 设为默认人设 |
+| GET | `/api/providers/:provider_id` | 获取供应商详情 |
+| PUT | `/api/providers/:provider_id` | 更新供应商 |
+| DELETE | `/api/providers/:provider_id` | 删除供应商 |
+| PUT | `/api/providers/:provider_id/default` | 设为默认供应商 |
+| POST | `/api/providers/:provider_id/test` | 测试连接（图片类为真实出图探测） |
+| GET | `/api/providers/:provider_id/models` | 获取供应商模型列表 |
+| POST | `/api/providers/:provider_id/models` | 新增模型 |
+| POST | `/api/providers/:provider_id/models/fetch` | 拉取模型列表 |
+| PUT | `/api/providers/:provider_id/models/:model_id` | 更新模型 |
+| DELETE | `/api/providers/:provider_id/models/:model_id` | 删除模型 |
+| POST | `/api/providers/:provider_id/models/:model_id/test` | 测试单个模型 |
 
 ### 系统设置
 | 方法 | 路径 | 说明 |
@@ -309,6 +374,18 @@ SENDER_NAME=AI 聊天助手
 | PUT | `/api/settings` | 更新系统设置 |
 | PUT | `/api/settings/profile` | 更新个人资料（头像等；用户名与邮箱注册后不可修改） |
 
+### 文件上传
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/upload/image` | 上传图片 |
+| GET | `/api/upload/image/:filename` | 获取图片 |
+
+### 用户反馈
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/feedback` | 提交反馈（需登录） |
+| GET | `/api/feedback` | 反馈列表（管理员） |
+
 ### 管理后台
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -316,26 +393,21 @@ SENDER_NAME=AI 聊天助手
 | GET | `/api/admin/me` | 当前管理员信息 |
 | GET | `/api/admin/stats` | 平台概览统计 |
 | GET | `/api/admin/users` | 用户列表 |
-| GET | `/api/admin/users/:id/conversations` | 指定用户的对话列表 |
-| GET | `/api/admin/conversations/:id/messages` | 指定对话的消息内容 |
-| GET | `/api/admin/conversations/:id/export` | 导出指定对话 |
-
-### 文件上传
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/upload/image` | 上传图片 |
-| GET | `/api/upload/image/:filename` | 获取图片 |
-
-### 对话存档
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/conversations` | 获取对话列表 |
-| POST | `/api/conversations` | 创建对话 |
-| GET | `/api/conversations/:id` | 获取对话详情 |
-| PUT | `/api/conversations/:id` | 更新对话 |
-| PUT | `/api/conversations/:id/pin` | 置顶对话 |
-| DELETE | `/api/conversations/:id` | 删除对话 |
-| DELETE | `/api/conversations/:id/messages` | 清空对话消息 |
+| GET | `/api/admin/users/:user_id/conversations` | 指定用户的对话列表 |
+| DELETE | `/api/admin/conversations/:conv_id` | 删除指定对话 |
+| POST | `/api/admin/conversations/batch-delete` | 批量删除对话 |
+| GET | `/api/admin/conversations/:conv_id/messages` | 指定对话的消息内容 |
+| GET | `/api/admin/conversations/:conv_id/export` | 导出指定对话 |
+| GET | `/api/admin/marketplace` | 广场卡片管理列表 |
+| GET | `/api/admin/marketplace/:pid` | 广场卡片详情 |
+| PUT | `/api/admin/marketplace/:pid` | 更新广场卡片 |
+| DELETE | `/api/admin/marketplace/:pid` | 下架广场卡片 |
+| GET | `/api/admin/prompt-tool-logs` | 提示词记录 |
+| DELETE | `/api/admin/prompt-tool-logs/:log_id` | 删除单条提示词记录 |
+| POST | `/api/admin/prompt-tool-logs/batch-delete` | 批量删除提示词记录 |
+| GET | `/api/admin/conversation-media-logs` | 对话素材记录 |
+| DELETE | `/api/admin/conversation-media-logs/:log_id` | 删除单条素材记录 |
+| POST | `/api/admin/conversation-media-logs/batch-delete` | 批量删除素材记录 |
 
 ## 支持的 API 类型
 
@@ -353,11 +425,10 @@ SENDER_NAME=AI 聊天助手
 ## 使用说明
 
 1. 启动后端和前端服务
-2. 访问前端页面，注册账号（用户名仅限字母、数字、下划线，注册后不可修改）并登录
-3. 进入「模型配置」添加你的 AI 供应商（聊天、语音、图片生成可分别配置）
-4. 开始聊天，或使用提示词工具生成人物设定 / 图片提示词
-5. 管理后台入口为 `/admin`，需要使用 `.env` 中配置的 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录
-
-## License
-
-MIT
+2. 访问前端页面，注册账号（需勾选用户须知与免责声明；用户名仅限字母、数字、下划线，注册后不可修改）并登录
+3. 进入「模型配置」添加你的 AI 供应商（聊天、语音、图片生成可分别配置），可用「测试连接」验证配置是否可用
+4. 开始聊天；需要角色扮演时在「人物卡」中配置 AI / 用户人设，并可为角色维护「世界书」条目
+5. 想参考或分享设定，去「人设广场」浏览、投票、评论，或一键采用他人的卡片；每日签到可补充免费生图次数
+6. 长对话可在「会话设置 - 记忆宫殿」中开启滚动摘要，控制上下文成本
+7. 使用提示词工具生成人物设定 / 图片提示词
+8. 管理后台入口为 `/chatbotAdmin`（登录页 `/admin`），使用 `.env` 中配置的 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录
