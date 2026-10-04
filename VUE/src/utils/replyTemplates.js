@@ -519,37 +519,40 @@ export const TEMPLATE_PRESETS = {
     blocks: ARCHIVE_BLOCKS,
     darkNative: true,
   },
-  // ── 氛围向：唯美 / 暧昧 / 有代入感，适合亲密与情感戏 ──
-  candle: {
-    id: 'candle',
-    name: '烛夜',
-    nameEn: 'Candlelight',
-    desc: '深棕与琥珀烛光 · 暗色为主 · 对白带暖光，像只剩一盏床头灯',
-    descEn: 'Deep brown and amber candlelight — dark, warm, intimate',
+  // ── 氛围向：三套「叙事隐喻」预设 ──
+  // 共同点：不只是换配色，而是给一轮回复一个可读的隐喻，
+  // 版式（栏宽、居中、装饰边、纸张纹理）跟着隐喻一起变。
+  script: {
+    id: 'script',
+    name: '银幕',
+    nameEn: 'Screenplay',
+    desc: '剧本页 · 打字机等宽 · 台词收窄居中，像在读这一场戏的分镜稿',
+    descEn: 'Typewriter screenplay page — centered dialogue, slugged scene headings',
     css: '',
     prompt: ARCHIVE_PROMPT,
     blocks: ARCHIVE_BLOCKS,
+  },
+  letter: {
+    id: 'letter',
+    name: '信笺',
+    nameEn: 'Letter',
+    desc: '信纸横纹 · 楷体手书 · 航空信封边与邮戳，像收到角色写来的一封信',
+    descEn: 'Ruled writing paper in kai script — airmail edge, postmark, fold creases',
+    css: '',
+    prompt: ARCHIVE_PROMPT,
+    blocks: ARCHIVE_BLOCKS,
+  },
+  oracle: {
+    id: 'oracle',
+    name: '启示',
+    nameEn: 'Oracle',
+    desc: '深靛夜空 · 金发丝双框 · 四角括号与牌卡式选项，像摊开一张牌',
+    descEn: 'Indigo night with gold hairlines — corner brackets, card-like choices',
+    css: '',
+    prompt: ARCHIVE_PROMPT,
+    blocks: ARCHIVE_BLOCKS,
+    // 本身就是深色设计：明暗两种环境下观感一致，无需额外写暗色变量覆盖
     darkNative: true,
-  },
-  moonlit: {
-    id: 'moonlit',
-    name: '月色',
-    nameEn: 'Moonlit',
-    desc: '冷银蓝夜色 · 清透微光 · 唯美而克制',
-    descEn: 'Cool silver-blue night with a clear sheen',
-    css: '',
-    prompt: ARCHIVE_PROMPT,
-    blocks: ARCHIVE_BLOCKS,
-  },
-  amber: {
-    id: 'amber',
-    name: '暖榻',
-    nameEn: 'Bedside',
-    desc: '米白与暖橘 · 床头灯氛围 · 居家贴近的私密感',
-    descEn: 'Cream and warm amber lamp light — domestic and intimate',
-    css: '',
-    prompt: ARCHIVE_PROMPT,
-    blocks: ARCHIVE_BLOCKS,
   },
 }
 

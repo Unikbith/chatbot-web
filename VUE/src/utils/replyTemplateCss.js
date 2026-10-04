@@ -15,9 +15,9 @@ import minimalCss from '../assets/reply-templates/minimal.css?raw'
 import neonCss from '../assets/reply-templates/neon.css?raw'
 import inkCss from '../assets/reply-templates/ink.css?raw'
 import terminalCss from '../assets/reply-templates/terminal.css?raw'
-import candleCss from '../assets/reply-templates/candle.css?raw'
-import moonlitCss from '../assets/reply-templates/moonlit.css?raw'
-import amberCss from '../assets/reply-templates/amber.css?raw'
+import scriptCss from '../assets/reply-templates/script.css?raw'
+import letterCss from '../assets/reply-templates/letter.css?raw'
+import oracleCss from '../assets/reply-templates/oracle.css?raw'
 
 const STYLE_ID = 'reply-template-styles'
 
@@ -29,9 +29,9 @@ export const TEMPLATE_CSS = {
   neon: neonCss,
   ink: inkCss,
   terminal: terminalCss,
-  candle: candleCss,
-  moonlit: moonlitCss,
-  amber: amberCss,
+  script: scriptCss,
+  letter: letterCss,
+  oracle: oracleCss,
 }
 
 /**
@@ -47,7 +47,7 @@ export function ensureTemplateStyles() {
   style.setAttribute('data-reply-templates', '1')
   // 骨架在前，主题在后：主题覆盖同级变量时依赖后者靠后
   style.textContent = [baseCss, archiveCss, minimalCss, neonCss, inkCss, terminalCss,
-    candleCss, moonlitCss, amberCss].join('\n')
+    scriptCss, letterCss, oracleCss].join('\n')
   document.head.appendChild(style)
   return true
 }

@@ -39,12 +39,19 @@
 
     <template #footer>
       <div class="far-footer">
-        <el-button text @click="visible = false">
-          {{ t('先用免费的', 'Keep using free') }}
+        <!-- 新用户首次登录时，这个弹窗会代替教程弹窗出现（两个弹窗叠在一起会互相遮挡），
+             所以教程入口必须在这里也能进，不能只靠侧边栏 -->
+        <el-button text :icon="Reading" @click="openTutorial">
+          {{ t('查看使用教程', 'View the guide') }}
         </el-button>
-        <el-button type="primary" :icon="Setting" @click="goConfigure">
-          {{ t('去配置 API Key', 'Configure API Key') }}
-        </el-button>
+        <div class="far-footer-right">
+          <el-button text @click="visible = false">
+            {{ t('先用免费的', 'Keep using free') }}
+          </el-button>
+          <el-button type="primary" :icon="Setting" @click="goConfigure">
+            {{ t('去配置 API Key', 'Configure API Key') }}
+          </el-button>
+        </div>
       </div>
     </template>
   </el-dialog>
@@ -52,7 +59,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { WarningFilled, MagicStick, Setting } from '@element-plus/icons-vue'
+import { WarningFilled, MagicStick, Setting, Reading } from '@element-plus/icons-vue'
 import { t } from '../i18n'
 
 const props = defineProps({
@@ -61,7 +68,7 @@ const props = defineProps({
   freeName: { type: String, default: '' },
 })
 
-const emit = defineEmits(['update:modelValue', 'configure'])
+const emit = defineEmits(['update:modelValue', 'configure', 'open-tutorial'])
 
 const visible = computed({
   get: () => props.modelValue,
@@ -71,6 +78,12 @@ const visible = computed({
 function goConfigure() {
   visible.value = false
   emit('configure')
+}
+
+// 从这个弹窗进教程：先关掉自己，避免两层弹窗叠在一起
+function openTutorial() {
+  visible.value = false
+  emit('open-tutorial')
 }
 </script>
 
@@ -116,7 +129,12 @@ function goConfigure() {
 }
 .far-footer {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.far-footer-right {
+  display: flex;
   gap: 8px;
 }
 </style>

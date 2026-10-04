@@ -1,0 +1,226 @@
+/* ==========================================================================
+   渲染预设：信笺（Letter）
+
+   隐喻：这一轮回复 = 角色写给你的一封信，摊在桌上。
+   所以整套版式围绕「纸」来做，而不是围绕「卡片」：
+     · 纸面横纹（repeating-linear-gradient，间距对齐行高）
+     · 三分折痕（两道竖向柔和阴影，信被折过一次）
+     · 顶部航空信封红蓝斜纹边
+     · 右上角邮戳圆印（虚线圆、轻微旋转，像盖过章）
+     · 内心独白排成「又及」（附言），落款式的左侧竖线
+
+   方向：Organic / 手书。楷体是这套设计的地基 ——
+   横纹 + 楷体 + 折痕三者叠加，才会真的像一封信；只换色做不到。
+   ========================================================================== */
+.rtpl.rtpl-letter {
+  --rtpl-bg: #fdfaf2;
+  --rtpl-fg: #22304d;
+  --rtpl-muted: #55606f;
+  --rtpl-border: rgba(34, 48, 77, 0.16);
+  --rtpl-accent: #9c4a3c;          /* 邮戳红 */
+  --rtpl-accent-strong: #7a3428;
+  --rtpl-accent-soft: rgba(156, 74, 60, 0.12);
+  --rtpl-accent-soft-2: rgba(156, 74, 60, 0.05);
+  --rtpl-note: #4a6b74;            /* 钢笔墨蓝，用于注释 */
+  --rtpl-head-bg: rgba(156, 74, 60, 0.07);
+  --rtpl-bar-bg: rgba(34, 48, 77, 0.12);
+  --rtpl-bar-fill: linear-gradient(90deg, #c07a63, #9c4a3c);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.55);
+  --rtpl-radius: 5px;
+  --rtpl-radius-sm: 4px;
+  --rtpl-shadow: 0 1px 0 rgba(34, 48, 77, 0.05), 0 14px 30px -22px rgba(34, 48, 77, 0.45);
+  /* 楷体优先：手写感来自它；没有楷体的系统回落到宋体，仍是「书写」语汇 */
+  --rtpl-font: "Kaiti SC", "STKaiti", KaiTi, "Xingkai SC", "Noto Serif SC",
+               "Songti SC", Georgia, serif;
+  --rtpl-font-size: 14.5px;
+  /* 行高与横纹间距（27px）对齐，字正好落在纸上 */
+  --rtpl-line-height: 1.86;
+  --rtpl-indent: 2em;
+  --rtpl-scene-bg: rgba(74, 107, 116, 0.1);
+  --rtpl-scene-fg: #3a5a63;
+  --rtpl-place-bg: rgba(156, 74, 60, 0.1);
+  --rtpl-place-fg: #7a3428;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #9c4a3c, #6d2f24);
+  --rtpl-mem-head-fg: #fdf6ef;
+  /* 对白用钢笔浓墨；括号内容降弱，像信里补充的小字 */
+  --rtpl-say-fg: #1b2842;
+  --rtpl-say-weight: 700;
+  --rtpl-bracket-fg: #55606f;
+  --rtpl-c1: #9c4a3c; --rtpl-c2: #4a6b74; --rtpl-c3: #6b6a45;
+  --rtpl-c4: #7a5a7c; --rtpl-c5: #8a6234; --rtpl-c6: #55606f;
+
+  position: relative;
+  padding: 18px 18px 16px;
+  /* 纸面三层：折痕 → 横纹 → 米白纸底 */
+  background:
+    linear-gradient(90deg,
+      rgba(0, 0, 0, 0) 0 32.5%,
+      rgba(34, 48, 77, 0.05) 33%,
+      rgba(0, 0, 0, 0) 33.6% 66.4%,
+      rgba(34, 48, 77, 0.05) 67%,
+      rgba(0, 0, 0, 0) 67.5% 100%),
+    repeating-linear-gradient(180deg,
+      rgba(0, 0, 0, 0) 0 26px,
+      rgba(34, 48, 77, 0.07) 26px 27px),
+    var(--rtpl-bg);
+}
+
+/* 航空信封边：顶部一道红蓝斜纹，信封的辨识符号 */
+.rtpl.rtpl-letter::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 3px;
+  border-radius: var(--rtpl-radius) var(--rtpl-radius) 0 0;
+  background: repeating-linear-gradient(45deg,
+    #9c4a3c 0 7px, #fdfaf2 7px 14px, #3d5a80 14px 21px, #fdfaf2 21px 28px);
+  opacity: 0.55;
+}
+
+/* 邮戳：右上角虚线圆，轻微旋转，像随手盖的 */
+.rtpl.rtpl-letter::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  border: 1px dashed var(--rtpl-accent);
+  border-radius: 50%;
+  transform: rotate(-13deg);
+  opacity: 0.42;
+  box-shadow: inset 0 0 0 4px transparent, inset 0 0 0 5px rgba(156, 74, 60, 0.35);
+  pointer-events: none;
+}
+
+/* ---------- 称呼 / 场次：像信纸上方的「见字如面」 ---------- */
+.rtpl.rtpl-letter .t-scene-row {
+  background: none;
+  padding: 2px 0;
+  font-size: 13.5px;
+  letter-spacing: 0.03em;
+}
+
+.rtpl.rtpl-letter .t-scene-row.is-place { color: var(--rtpl-place-fg); }
+
+.rtpl.rtpl-letter .t-scene-row.is-note { font-style: italic; }
+
+.rtpl.rtpl-letter .t-topbar {
+  background: none;
+  border: 0;
+  border-bottom: 1px dashed var(--rtpl-border);
+  border-radius: 0;
+  padding: 4px 0 8px;
+}
+
+/* ---------- 面板：像夹在信里的便签，纸色更实 ---------- */
+.rtpl.rtpl-letter .t-panel {
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 1px 3px rgba(34, 48, 77, 0.08);
+}
+
+.rtpl.rtpl-letter .t-panel-h {
+  background: none;
+  border-bottom: 1px dashed var(--rtpl-border);
+  letter-spacing: 0.05em;
+}
+
+.rtpl.rtpl-letter .t-fold-h {
+  background: none;
+  border-bottom: 1px dashed var(--rtpl-border);
+}
+
+/* ---------- 内心独白 = 「又及」（附言）：左侧竖线 + 缩进 ---------- */
+.rtpl.rtpl-letter .t-inner {
+  border: 0;
+  border-left: 1px solid var(--rtpl-accent);
+  border-radius: 0;
+  background: none;
+  padding: 4px 0 4px 14px;
+  color: var(--rtpl-accent-strong);
+  font-style: italic;
+  line-height: 1.8;
+}
+
+/* ---------- 选项：每张像一张折角便签 ---------- */
+.rtpl.rtpl-letter .t-opt {
+  position: relative;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.6);
+  transition: background 0.18s ease-out, box-shadow 0.18s ease-out;
+}
+
+.rtpl.rtpl-letter .t-opt:hover {
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 8px rgba(34, 48, 77, 0.12);
+}
+
+/* 右上角折角：便签被翻起的那一小块 */
+.rtpl.rtpl-letter .t-opt::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-width: 0 11px 11px 0;
+  border-style: solid;
+  border-color: transparent var(--rtpl-border) transparent transparent;
+}
+
+.rtpl.rtpl-letter .t-opt-k { color: var(--rtpl-accent-strong); }
+
+/* 物品：像随信附上的小纸签 */
+.rtpl.rtpl-letter .t-item {
+  border-radius: 3px;
+  border-style: dashed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rtpl.rtpl-letter .t-opt { transition: none; }
+}
+
+/* ---------- 暗色：夜间信纸（深蓝墨底 + 暖字），纸质装饰一并降饱和 ---------- */
+html.dark .rtpl.rtpl-letter {
+  --rtpl-bg: #12161f;
+  --rtpl-fg: #e4e8f2;
+  --rtpl-muted: #8e97a8;
+  --rtpl-border: rgba(228, 232, 242, 0.16);
+  --rtpl-accent: #d9766a;
+  --rtpl-accent-strong: #efa394;
+  --rtpl-accent-soft: rgba(217, 118, 106, 0.15);
+  --rtpl-accent-soft-2: rgba(217, 118, 106, 0.06);
+  --rtpl-note: #8fb0bb;
+  --rtpl-head-bg: rgba(217, 118, 106, 0.09);
+  --rtpl-bar-bg: rgba(228, 232, 242, 0.13);
+  --rtpl-bar-fill: linear-gradient(90deg, #efa394, #b85649);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.035);
+  --rtpl-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 16px 32px -22px rgba(0, 0, 0, 0.9);
+  --rtpl-scene-bg: rgba(143, 176, 187, 0.12);
+  --rtpl-scene-fg: #a8c6cf;
+  --rtpl-place-bg: rgba(217, 118, 106, 0.14);
+  --rtpl-place-fg: #efa394;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #b85649, #7c3329);
+  --rtpl-mem-head-fg: #fdf2ee;
+  --rtpl-say-fg: #f2f5fb;
+  --rtpl-bracket-fg: #8e97a8;
+  --rtpl-c1: #d9766a; --rtpl-c2: #8fb0bb; --rtpl-c3: #a8ac7e;
+  --rtpl-c4: #b093b8; --rtpl-c5: #c69a63; --rtpl-c6: #8e97a8;
+  background:
+    linear-gradient(90deg,
+      rgba(0, 0, 0, 0) 0 32.5%,
+      rgba(255, 255, 255, 0.05) 33%,
+      rgba(0, 0, 0, 0) 33.6% 66.4%,
+      rgba(255, 255, 255, 0.05) 67%,
+      rgba(0, 0, 0, 0) 67.5% 100%),
+    repeating-linear-gradient(180deg,
+      rgba(0, 0, 0, 0) 0 26px,
+      rgba(255, 255, 255, 0.05) 26px 27px),
+    var(--rtpl-bg);
+}
+
+html.dark .rtpl.rtpl-letter .t-panel { background: rgba(255, 255, 255, 0.05); }
+html.dark .rtpl.rtpl-letter .t-opt { background: rgba(255, 255, 255, 0.04); }
+html.dark .rtpl.rtpl-letter .t-opt:hover { background: rgba(255, 255, 255, 0.09); }

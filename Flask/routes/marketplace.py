@@ -779,6 +779,8 @@ def vote_persona(pid):
 @jwt_required()
 def adopt_persona(pid):
     from models import PersonaTemplate
+    # 常量在 routes.auth 中定义；此处按需导入，避免模块级循环引用
+    from routes.auth import DEFAULT_USER_PROMPT
     user_id = int(get_jwt_identity())
     persona = PersonaMarketplace.query.get(pid)
     if not persona:

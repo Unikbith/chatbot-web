@@ -430,7 +430,8 @@ const form = reactive({
   auto_play_voice: false,
   summary_threshold: 10,
   append_prompt_enabled: false,
-  rich_marker_enabled: false,
+  // 界面标记默认开启（与后端 RICH_MESSAGE_ENABLED 默认值一致）
+  rich_marker_enabled: true,
   // 回复渲染模板：默认使用档案风（不再有"不使用"这一档）
   reply_template_id: 'archive',
   // 提示词增强：默认开启，把「每轮输出结构」接进系统提示词
@@ -474,7 +475,10 @@ function resetForm() {
   form.auto_play_voice = !!conv.auto_play_voice
   form.summary_threshold = (conv.summary_threshold != null && conv.summary_threshold !== '') ? Number(conv.summary_threshold) : 10
   form.append_prompt_enabled = !!conv.append_prompt_enabled
-  form.rich_marker_enabled = !!conv.rich_marker_enabled
+  // 未存过（null/undefined）按全局默认「开启」处理：
+  // 后端 resolve_rich_marker_enabled 对 NULL 也是回落到全局开关，
+  // 这里若按 !!null 显示成关闭，就会出现「界面显示关、实际在注入」的不一致。
+  form.rich_marker_enabled = conv.rich_marker_enabled == null ? true : !!conv.rich_marker_enabled
   form.reply_template_id = readTemplateId(conv.reply_template)
   form.prompt_enhance = readPromptEnhance(conv.reply_template)
   form.reply_length_id = readLengthId(conv.reply_template)

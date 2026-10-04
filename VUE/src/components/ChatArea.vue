@@ -190,12 +190,61 @@ const handlePickOption = (textValue) => {
   });
 };
 
-const messages = ref([]);
+// ── 按会话隔离的消息仓库 ─────────────────────────────────────────
+// 旧实现：所有会话共用同一个 messages 数组，切换对话时整体替换。
+// 后果有两个，正是本次要修的：
+//   1) 切走时正在流式的那条消息被摘出数组 → 看起来「切走就打断回复」；
+//   2) 切回来又从服务端重新拉取 → 还没落库的进行中回复彻底消失。
+// 改为每个会话一份数组：切走只是不显示，流继续在后台跑完并落库，
+// 切回来时若该会话仍在流式，就继续展示本地那份（不覆盖）。
+const convStores = new Map();          // convKey -> ref([])
+const storeKey = (id) => (id == null ? '__new__' : String(id));
+function storeFor(id) {
+  const k = storeKey(id);
+  if (!convStores.has(k)) convStores.set(k, ref([]));
+  return convStores.get(k);
+}
+// 当前展示的会话对应的数组（写操作请用各发送函数里捕获的 list，见下）
+const messages = computed(() => storeFor(props.conversationId).value);
+
+// 正在流式回复的会话（Set 里的元素是 convKey）
+const activeStreams = ref(new Set());
+// 每个会话一个中止控制器：A 在后台跑时 B 也能正常发送/中止，互不干扰
+const abortControllers = new Map();
+// 「正在回复」按会话判定：切到别的会话时，按钮不该显示成停止
+const loading = computed(() => activeStreams.value.has(storeKey(props.conversationId)));
+
 const inputText = ref('');
-const loading = ref(false);
 const messageListRef = ref(null);
 const deepThink = ref(false);
-let abortController = null;
+
+// ── 草稿：按会话保存未发送的文字与图片 ───────────────────────────
+// 切走时存起来、切回来时还回去，避免「打了一半切个对话就全没了」。
+const drafts = new Map();              // convKey -> { text, image }
+function saveDraft(key) {
+  if (inputText.value || selectedImage.value) {
+    drafts.set(key, { text: inputText.value, image: selectedImage.value });
+  } else {
+    drafts.delete(key);
+  }
+}
+function restoreDraft(key) {
+  const d = drafts.get(key);
+  inputText.value = d?.text || '';
+  if (d?.image) {
+    selectedImage.value = d.image;
+    imageUploadRef.value?.setImage(d.image);   // 同步上传组件的缩略图
+  } else {
+    selectedImage.value = null;
+    imageUploadRef.value?.clearImage();
+  }
+}
+// 会话切换：先把旧会话的输入存好，再恢复新会话的
+watch(() => props.conversationId, (newId, oldId) => {
+  if (storeKey(newId) === storeKey(oldId)) return;
+  saveDraft(storeKey(oldId));
+  restoreDraft(storeKey(newId));
+});
 
 /**
  * 渲染模板变化时，重新判定屏幕上已有消息的富渲染状态。
@@ -375,11 +424,11 @@ const scrollToBottom = async () => {
   if (wrap) wrap.scrollTop = wrap.scrollHeight;
 };
 
-// 请求中止
+// 请求中止：只中止当前这个会话的流（别的会话在后台跑的不受影响）
 const abortRequest = () => {
-  abortController?.abort();
-  abortController = null;
-  loading.value = false;
+  const key = storeKey(props.conversationId);
+  abortControllers.get(key)?.abort();
+  abortControllers.delete(key);
   stopSpeaking();
 };
 
@@ -398,8 +447,12 @@ const handleVoiceText = (text) => {
 };
 
 // 发送前确保存在会话：无 conversationId 时先创建，保证聊天记录落库
-const ensureConversation = async () => {
-  if (props.conversationId) return props.conversationId;
+// preferId：由调用方传入「发起发送那一刻」的会话 id；缺省才回落到 props。
+// 必须显式传 —— 若会话是在本次发送中新建的，创建请求往返期间用户可能已切走，
+// 此时 props 已是别人的，再读就会把消息写进错误的会话。
+const ensureConversation = async (preferId = null) => {
+  const existing = preferId ?? props.conversationId;
+  if (existing) return existing;
   try {
     const res = await conversationApi.create({
       title: t('新对话', 'New Chat'),
@@ -427,6 +480,21 @@ const guardLogin = () => {
   return true
 }
 
+// 发送前把「本次请求要用的会话参数」一次性快照下来。
+// 必须在任何 await 之前：发送过程中用户随时可能切到别的会话，props 会立刻变成对方的值，
+// 若在 await 之后才读，本次请求就会带上别人的人设 / 模型 / 温度 —— 表现正是
+//「A 还在思考时切到 B 再切回 A，A 的回复却按 B 的设定来」。
+function snapshotRequestContext() {
+  return {
+    conversationId: props.conversationId,
+    systemPrompt: props.systemPrompt,
+    providerId: props.providerId,
+    modelId: props.modelId,
+    temperature: props.temperature,
+    deepThink: deepThink.value,
+  };
+}
+
 // 发送消息
 const handleSend = async () => {
   if (loading.value) { abortRequest(); return; }
@@ -434,6 +502,14 @@ const handleSend = async () => {
 
   const text = inputText.value.trim();
   if (!text && !selectedImage.value) return;
+
+  const ctx = snapshotRequestContext();
+
+  // 先拿到会话 id（已有会话时是同步返回，不会延迟上屏），
+  // 之后所有消息都写进这个会话自己的数组 —— 中途切走也不会被顶掉。
+  const convId = await ensureConversation(ctx.conversationId);
+  if (!convId) { ElMessage.error(t('创建对话失败', 'Failed to create conversation')); return; }
+  const list = storeFor(convId);
 
   // 关键词触发：生图=文生图 / 改图=图生图（无需手动开启生图模式）
   const imgCmd = matchImageCommand(text);
@@ -465,32 +541,32 @@ const handleSend = async () => {
     return;
   }
 
-  messages.value.push(createMessage('user', text));
+  list.value.push(createMessage('user', text));
   inputText.value = '';
   // 用户发送消息后立即定位到底部（AI 生成过程中不强制滚动）
   scrollToBottom();
 
-  const aiIndex = messages.value.length;
+  const aiIndex = list.value.length;
   const aiMsg = reactive(createMessage('assistant'));
-  messages.value.push(aiMsg);
+  list.value.push(aiMsg);
 
-  loading.value = true;
-  abortController = new AbortController();
-
-  const convId = await ensureConversation();
+  const streamKey = storeKey(convId);
+  activeStreams.value.add(streamKey);
+  const ctrl = new AbortController();
+  abortControllers.set(streamKey, ctrl);
 
   try {
     const requestBody = {
-      messages: messages.value.slice(0, -1).map(({ role, content }) => ({ role, content })),
-      deep_think: deepThink.value,
-      system_prompt: props.systemPrompt,
-      temperature: props.temperature,
-      provider_id: props.providerId,
-      model_id: props.modelId || undefined,
+      messages: list.value.slice(0, -1).map(({ role, content }) => ({ role, content })),
+      deep_think: ctx.deepThink,
+      system_prompt: ctx.systemPrompt,
+      temperature: ctx.temperature,
+      provider_id: ctx.providerId,
+      model_id: ctx.modelId || undefined,
       conversation_id: convId,
     };
 
-    const response = await chatApi.stream(requestBody, { signal: abortController.signal });
+    const response = await chatApi.stream(requestBody, { signal: ctrl.signal });
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
@@ -511,7 +587,7 @@ const handleSend = async () => {
     // 流结束：无条件刷新一次富渲染（绕过节流），保证最终结果准确
     applyRichRawStreaming(aiMsg, true);
     // 通知父组件刷新长期记忆：本轮可能刚触发一次记忆宫殿压缩
-    emit('reply-done');
+    emit('reply-done', convId);
 
     // 自动播报 AI 回复（该对话开启时）
     if (props.autoPlayVoice && aiMsg.content && !aiMsg.imageUrl) {
@@ -519,9 +595,11 @@ const handleSend = async () => {
     }
 
     // 更新对话标题（第一条用户消息）
-    if (messages.value.filter(m => m.role === 'user').length === 1) {
+    // 带上 convId：回复可能在后台跑完（用户已切到别的会话），
+    // 父组件据此把标题写到正确的会话上，而不是写到当前显示的那个。
+    if (list.value.filter(m => m.role === 'user').length === 1) {
       const title = text.length > 20 ? text.substring(0, 20) + '...' : text;
-      emit('titleChange', title);
+      emit('titleChange', { convId, title });
     }
 
   } catch (error) {
@@ -534,8 +612,8 @@ const handleSend = async () => {
       aiMsg.content = `出错了：${error.message || '网络异常'}`;
     }
   } finally {
-    abortController = null;
-    loading.value = false;
+    abortControllers.delete(streamKey);
+    activeStreams.value.delete(streamKey);
   }
 };
 
@@ -594,7 +672,7 @@ async function persistImageUrl(src) {
 // 用户主动上传图片并要求修改时，模型输出一行 `改图：<要求>`，前端据此调用图生图。
 // 普通纯文字对话不再走这条链路（原「启用大模型原生工具」开关已下线），
 // 避免模型随口输出标记就触发真实生图、白耗额度。
-async function handleLlmImageMarkers(msg, reference = null) {
+async function handleLlmImageMarkers(msg, reference = null, ownerConvId = null) {
   const src = msg.raw || msg.content || '';
   if (!src) return;
   // 只认「改图：」标记，且必须位于行首（m flag）：
@@ -609,7 +687,8 @@ async function handleLlmImageMarkers(msg, reference = null) {
     // 把用户上传的图作为参考图传入，实现「结合人设 + 参考图生成新图」
     const useRef = reference ? [reference] : [];
     // 带上会话与参考图 URL，让这次生图进入对话历史（否则切走对话就消失）
-    const convId = await ensureConversation();
+    // 用发起识图时定下的会话：用户可能已切走，此时 props 指向的是别的会话
+    const convId = ownerConvId || await ensureConversation();
     const refUrl = await persistImageUrl(reference);
     const res = await imageApi.generate({
       prompt,
@@ -634,22 +713,28 @@ async function handleLlmImageMarkers(msg, reference = null) {
 // 图片生成（mode: 'text2img' 生图 / 'img2img' 改图）
 const handleImageGenerate = async (text, mode = 'text2img') => {
   const isEdit = mode === 'img2img';
+  const ctx = snapshotRequestContext();
   // 仅改图需要带上参考图；生图为文生图
   const prompt = text || t('生成一张图片', 'Generate an image');
-  messages.value.push(createMessage('user', prompt, isEdit ? selectedImage.value?.dataUrl || null : null));
+  const convId = await ensureConversation(ctx.conversationId);
+  if (!convId) { ElMessage.error(t('创建对话失败', 'Failed to create conversation')); return; }
+  const list = storeFor(convId);
+
+  list.value.push(createMessage('user', prompt, isEdit ? selectedImage.value?.dataUrl || null : null));
   const refDataUrl = isEdit ? selectedImage.value?.dataUrl : null;
   inputText.value = '';
   imageUploadRef.value?.clearImage();
   scrollToBottom();
 
   const aiMsg = reactive(createMessage('assistant'));
-  messages.value.push(aiMsg);
+  list.value.push(aiMsg);
 
-  loading.value = true;
-  abortController = new AbortController();
+  const streamKey = storeKey(convId);
+  activeStreams.value.add(streamKey);
+  const ctrl = new AbortController();
+  abortControllers.set(streamKey, ctrl);
   try {
     // 带上会话与参考图 URL：让这次生图写进对话历史（否则切走对话后整段消失）
-    const convId = await ensureConversation();
     const refUrl = isEdit ? await persistImageUrl(refDataUrl) : null;
     const res = await imageApi.generate({
       prompt,
@@ -672,8 +757,8 @@ const handleImageGenerate = async (text, mode = 'text2img') => {
       aiMsg.content = `出错了：${error.message || '网络异常'}`;
     }
   } finally {
-    abortController = null;
-    loading.value = false;
+    abortControllers.delete(streamKey);
+    activeStreams.value.delete(streamKey);
     scrollToBottom();
   }
 };
@@ -696,21 +781,28 @@ const handleVisionChat = async (text) => {
   // 发给模型时若为空则用一个自然占位，避免退化成「客观描述任务」
   const shownText = (text || '').trim()
   const visionText = shownText || t('（用户发来了一张图片，没说话，想让你看看）', '(The user sent an image without saying anything — just showing you)')
+  // 关键：在任何 await 之前快照会话参数。图片上传是一次真实网络往返，
+  // 期间用户完全可以切到别的会话，等下面再读 props.systemPrompt 就已经是对方的了。
+  const ctx = snapshotRequestContext();
+
+  const convId = await ensureConversation(ctx.conversationId);
+  if (!convId) { ElMessage.error(t('创建对话失败', 'Failed to create conversation')); return; }
+  const list = storeFor(convId);
 
   const userMsg = reactive(createMessage('user', shownText, refDataUrl))
-  messages.value.push(userMsg)
+  list.value.push(userMsg)
   inputText.value = '';
   imageUploadRef.value?.clearImage();
   // 用户发送消息后立即定位到底部
   scrollToBottom();
 
   const aiMsg = reactive(createMessage('assistant'));
-  messages.value.push(aiMsg);
+  list.value.push(aiMsg);
 
-  loading.value = true;
-  abortController = new AbortController();
-
-  const convId = await ensureConversation();
+  const streamKey = storeKey(convId);
+  activeStreams.value.add(streamKey);
+  const ctrl = new AbortController();
+  abortControllers.set(streamKey, ctrl);
 
   // 上传图片换取服务器 URL 用于聊天记录留图：先 base64 立即上屏（不卡 UI），
   // 上传成功后换成 URL（reactive 才会触发视图更新）；失败只 warn 不阻断识图，
@@ -732,15 +824,15 @@ const handleVisionChat = async (text) => {
     const formData = new FormData();
     formData.append('text', visionText);
     formData.append('image', img?.file);
-    if (props.providerId) {
-      formData.append('provider_id', props.providerId);
+    if (ctx.providerId) {
+      formData.append('provider_id', ctx.providerId);
     }
     // 必须带 model_id：否则后端落到厂商「默认 model」（通常非多模态），识图必然失败
-    if (props.modelId) {
-      formData.append('model_id', props.modelId);
+    if (ctx.modelId) {
+      formData.append('model_id', ctx.modelId);
     }
     // 深度思考跟随输入框按钮，不再恒开（后端缺省是关闭）
-    formData.append('deep_think', deepThink.value ? '1' : '0');
+    formData.append('deep_think', ctx.deepThink ? '1' : '0');
     if (convId) {
       formData.append('conversation_id', convId);
     }
@@ -752,13 +844,13 @@ const handleVisionChat = async (text) => {
     //  ② 其余情况（只发图、问「这是什么」）→ 给「角色化图片回应」指令：
     //     让模型以角色本人身份、用自己的口吻对图片作出反应，
     //     而不是退化成助手口吻的客观描述员。
-    const personaPrompt = (props.systemPrompt || '').trim();
+    const personaPrompt = (ctx.systemPrompt || '').trim();
     const sysExtra = wantsImageEdit(shownText)
       ? '\n\n[系统能力-图片生成] 用户明确要求修改或重新生成这张图，此时只回复一行：`改图：<用中文描述修改要求>`，用户上传的图片会自动作为参考图使用，不要输出其它解释。'
       : '\n\n[图片回应] 用户发来了一张图片。你就是设定里的这个角色本人，请像用户当面给你看东西那样，用你自己的人设、语气和情绪自然回应（惊讶、好奇、评价、关心、调侃都可以），把它当成你们对话的延续。不要用「这是一张图片」「图中可以看到」这类客观描述的第三方口吻，也不要罗列图片内容清单，除非用户明确要求你描述或分析图片。';
     formData.append('system_prompt', (personaPrompt + sysExtra).trim());
 
-    const response = await chatApi.vision(formData, { signal: abortController.signal });
+    const response = await chatApi.vision(formData, { signal: ctrl.signal });
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
@@ -776,7 +868,7 @@ const handleVisionChat = async (text) => {
     }
 
     // 模型若输出「改图」标记，则结合人设与用户上传的参考图自动生图并贴到本条回复
-    await handleLlmImageMarkers(aiMsg, refDataUrl);
+    await handleLlmImageMarkers(aiMsg, refDataUrl, convId);
 
     // 流结束：无条件刷新一次富渲染（用 raw 而非 content，后者已被渲染成 HTML）
     applyRichRawStreaming(aiMsg, true);
@@ -792,8 +884,8 @@ const handleVisionChat = async (text) => {
     }
   } finally {
     selectedImage.value = null;
-    abortController = null;
-    loading.value = false;
+    abortControllers.delete(streamKey);
+    activeStreams.value.delete(streamKey);
   }
 };
 
@@ -929,6 +1021,7 @@ const isLatestAssistant = (index) => {
 
 // 重新生成
 const regenerate = async (assistantIndex = null) => {
+  const ctx = snapshotRequestContext();
   // 若点击的是某条 AI 消息的「重新生成」，定位到它对应的用户消息所在轮次；
   // 否则（兜底）取最后一条用户消息。
   let userIndex;
@@ -942,30 +1035,34 @@ const regenerate = async (assistantIndex = null) => {
     userIndex = messages.value.length - 1 - lastUserIndex;
   }
 
+  const convId = await ensureConversation(ctx.conversationId);
+  if (!convId) return;
+  const list = storeFor(convId);
+
   // 删除该轮之后的 AI 回复（含该轮）
-  messages.value = messages.value.slice(0, userIndex + 1);
+  list.value = list.value.slice(0, userIndex + 1);
   
   // 重新发送
   const aiMsg = reactive(createMessage('assistant'));
-  messages.value.push(aiMsg);
+  list.value.push(aiMsg);
   
-  loading.value = true;
-  abortController = new AbortController();
-
-  const convId = await ensureConversation();
+  const streamKey = storeKey(convId);
+  activeStreams.value.add(streamKey);
+  const ctrl = new AbortController();
+  abortControllers.set(streamKey, ctrl);
 
   try {
     const requestBody = {
-      messages: messages.value.slice(0, -1).map(({ role, content }) => ({ role, content })),
-      deep_think: deepThink.value,
-      system_prompt: props.systemPrompt,
-      temperature: props.temperature,
-      provider_id: props.providerId,
-      model_id: props.modelId || undefined,
+      messages: list.value.slice(0, -1).map(({ role, content }) => ({ role, content })),
+      deep_think: ctx.deepThink,
+      system_prompt: ctx.systemPrompt,
+      temperature: ctx.temperature,
+      provider_id: ctx.providerId,
+      model_id: ctx.modelId || undefined,
       conversation_id: convId,
     };
 
-    const response = await chatApi.stream(requestBody, { signal: abortController.signal });
+    const response = await chatApi.stream(requestBody, { signal: ctrl.signal });
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
       if (reasoning) aiMsg.reasoning += reasoning;
@@ -985,7 +1082,7 @@ const regenerate = async (assistantIndex = null) => {
     // 流结束：无条件刷新一次富渲染（绕过节流），保证最终结果准确
     applyRichRawStreaming(aiMsg, true);
     // 通知父组件刷新长期记忆：本轮可能刚触发一次记忆宫殿压缩
-    emit('reply-done');
+    emit('reply-done', convId);
 
   } catch (error) {
     if (error.name === 'AbortError') {
@@ -996,8 +1093,8 @@ const regenerate = async (assistantIndex = null) => {
       aiMsg.content = `出错了：${error.message || '网络异常'}`;
     }
   } finally {
-    abortController = null;
-    loading.value = false;
+    abortControllers.delete(streamKey);
+    activeStreams.value.delete(streamKey);
   }
 };
 
@@ -1049,8 +1146,18 @@ const handlePromptInsert = (text) => {
 
 // 暴露方法
 defineExpose({
-  setMessages: (msgList) => {
-    messages.value = msgList.map(m => {
+  // convId 显式传入：父组件切换会话时 props 还没更新完，用它定位仓库才不会写错格子
+  setMessages: (convId, msgList) => {
+    const list = storeFor(convId);
+    // 该会话正在流式回复 → 保留本地正在写的这份，
+    // 否则服务端数据（还没有这条回复）会把进行中的回复整个盖掉。
+    if (activeStreams.value.has(storeKey(convId))) {
+      // 保留本地视图的同时同步开场白状态，避免空/非空判断停留在上一次会话
+      greetingActive.value = list.value.length === 0;
+      scrollToBottom();
+      return;
+    }
+    list.value = msgList.map(m => {
       // 优先用后端渲染好的 HTML（content_html），避免纯文本进 v-html 把段落压成一行；
       // 老数据或渲染失败时回退原 content
       const item = createMessage(m.role, m.content_html || m.content, m.image_url || m.imageUrl);
@@ -1067,15 +1174,17 @@ defineExpose({
       return item;
     });
     // 载入历史对话：仅空对话展示开场白
-    greetingActive.value = messages.value.length === 0;
+    greetingActive.value = list.value.length === 0;
     scrollToBottom();
   },
-  resetMessages: () => {
-    messages.value = [];
+  resetMessages: (convId) => {
+    storeFor(convId).value = [];
     greetingActive.value = true;
     scrollToBottom();
   },
   getMessages: () => messages.value,
+  // 该会话是否正在流式回复：父组件据此判断能否安全重载
+  isStreaming: (convId) => activeStreams.value.has(storeKey(convId)),
   scrollToBottom,
   // 模型配置面板关闭后由父组件调用，刷新输入框模型选择器数据
   reloadProviders: loadChatProviders

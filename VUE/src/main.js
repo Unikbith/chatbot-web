@@ -13,6 +13,8 @@ import { ElLoading } from 'element-plus'
 // 保证样式一定就绪（并带自检），不依赖外部 CSS 的加载时序。
 import './utils/replyTemplateCss'
 import { assertTemplateStyles } from './utils/replyTemplateCss'
+// 图片大图预览打开时锁住底层滚动（滚轮缩放/手指滑动不再带着聊天列表一起滚）
+import { installViewerScrollLock } from './utils/viewerScrollLock'
 import App from './App.vue'
 import router from './router'
 
@@ -39,6 +41,8 @@ window.addEventListener('chatbot:theme-change', ensureDarkThemeCss)
 if (import.meta.env.DEV) assertTemplateStyles()
 
 const app = createApp(App)
+
+installViewerScrollLock()
 
 // v-loading 指令显式全局注册（已在上方引入 el-loading.css）
 app.directive('loading', ElLoading.directive)

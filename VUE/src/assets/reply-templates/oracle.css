@@ -1,0 +1,291 @@
+/* ==========================================================================
+   渲染预设：启示（Oracle）
+
+   隐喻：这一轮回复 = 夜色里摊开的一张牌。
+   所以所有区块都按「仪式感」重排，而不是按「信息卡片」：
+     · 深靛夜空底 + 星点（两层 radial-gradient）
+     · 金色发丝双框（inset box-shadow 叠两层，不做粗边框）
+     · 四角括号「⌜ ⌝ ⌞ ⌟」—— 牌阵的四个角
+     · 标题一律居中，两侧各引一道渐隐金线（伪元素 flex 撑开）
+     · 选项做成牌卡：悬停上浮 + 金光扫过，像把牌推到你面前
+
+   方向：Luxury / 神秘。深底是本设计的地基，金色只做发丝级点缀 ——
+   一克重的金线比一片金色面积更贵。本身就是深色设计（darkNative），
+   浅色环境下不改结构，只把夜空调成黎明前的浅靛。
+   ========================================================================== */
+.rtpl.rtpl-oracle {
+  --rtpl-bg:
+    radial-gradient(1.6px 1.6px at 18% 22%, rgba(255, 255, 255, 0.55), transparent 100%),
+    radial-gradient(1.2px 1.2px at 74% 16%, rgba(255, 255, 255, 0.4), transparent 100%),
+    radial-gradient(1.4px 1.4px at 62% 78%, rgba(255, 255, 255, 0.32), transparent 100%),
+    radial-gradient(1px 1px at 34% 62%, rgba(255, 255, 255, 0.3), transparent 100%),
+    linear-gradient(168deg, #1b1f45 0%, #14183a 55%, #0e1029 100%);
+  --rtpl-fg: #eae6f7;
+  --rtpl-muted: #9aa0c8;
+  --rtpl-border: rgba(217, 178, 106, 0.28);
+  --rtpl-accent: #d9b26a;
+  --rtpl-accent-strong: #f0d9a8;
+  --rtpl-accent-soft: rgba(217, 178, 106, 0.14);
+  --rtpl-accent-soft-2: rgba(217, 178, 106, 0.06);
+  --rtpl-note: #b9a2d6;
+  --rtpl-head-bg: linear-gradient(180deg, rgba(217, 178, 106, 0.12), rgba(217, 178, 106, 0.03));
+  --rtpl-bar-bg: rgba(217, 178, 106, 0.16);
+  --rtpl-bar-fill: linear-gradient(90deg, #f0d9a8, #b98f45);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.03);
+  --rtpl-radius: 6px;
+  --rtpl-radius-sm: 5px;
+  /* 双框：内侧 1px 金线 + 外侧再一道更淡的，中间留出呼吸的空隙 */
+  --rtpl-shadow:
+    inset 0 0 0 1px rgba(217, 178, 106, 0.32),
+    inset 0 0 0 5px rgba(217, 178, 106, 0.06),
+    inset 0 0 0 6px rgba(217, 178, 106, 0.14),
+    0 18px 40px -26px rgba(0, 0, 0, 0.95);
+  --rtpl-font: "Songti SC", "Noto Serif SC", "Source Han Serif SC", SimSun,
+               Georgia, "Times New Roman", serif;
+  --rtpl-font-size: 14px;
+  --rtpl-line-height: 1.9;
+  --rtpl-indent: 2em;
+  --rtpl-scene-bg: transparent;
+  --rtpl-scene-fg: #f0d9a8;
+  --rtpl-place-bg: transparent;
+  --rtpl-place-fg: #f0d9a8;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #c9a05a, #7d5c22);
+  --rtpl-mem-head-fg: #171226;
+  /* 对白是牌面正位：暖金；括号内容是牌背：淡紫斜体 */
+  --rtpl-say-fg: #f5e6c4;
+  --rtpl-say-weight: 600;
+  --rtpl-bracket-fg: #b9a2d6;
+  --rtpl-c1: #e0c07a; --rtpl-c2: #b9a2d6; --rtpl-c3: #8fb6c8;
+  --rtpl-c4: #d69a9a; --rtpl-c5: #9fc0a4; --rtpl-c6: #9aa0c8;
+
+  position: relative;
+  padding: 20px 18px 18px;
+  border-color: transparent;   /* 边框交给 inset 阴影画双线 */
+  letter-spacing: 0.02em;
+}
+
+/* 四角括号：牌阵的四个角。用 background 渐变画出四段 L 形金线，
+   不额外增加 DOM —— 内容是通过 v-html 渲染的，只能靠 CSS 补装饰。 */
+.rtpl.rtpl-oracle::before,
+.rtpl.rtpl-oracle::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+/* 左上角的括号用边框画（最短写法） */
+.rtpl.rtpl-oracle::before {
+  top: 8px;
+  left: 8px;
+  border-top: 1px solid var(--rtpl-accent);
+  border-left: 1px solid var(--rtpl-accent);
+}
+
+/* 右上 / 左下 / 右下：用渐变补出另外三个角 */
+.rtpl.rtpl-oracle::after {
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  width: auto;
+  height: auto;
+  border: 0;
+  background:
+    linear-gradient(var(--rtpl-accent), var(--rtpl-accent)) top right / 14px 1px no-repeat,
+    linear-gradient(var(--rtpl-accent), var(--rtpl-accent)) top right / 1px 14px no-repeat,
+    linear-gradient(var(--rtpl-accent), var(--rtpl-accent)) bottom left / 14px 1px no-repeat,
+    linear-gradient(var(--rtpl-accent), var(--rtpl-accent)) bottom left / 1px 14px no-repeat,
+    linear-gradient(var(--rtpl-accent), var(--rtpl-accent)) bottom right / 14px 1px no-repeat,
+    linear-gradient(var(--rtpl-accent), var(--rtpl-accent)) bottom right / 1px 14px no-repeat;
+}
+
+/* ---------- 标题一律居中，两侧引一道渐隐金线 ---------- */
+.rtpl.rtpl-oracle .t-panel-h,
+.rtpl.rtpl-oracle .t-fold-h {
+  justify-content: center;
+  background: none;
+  border-bottom: 1px solid var(--rtpl-border);
+  color: var(--rtpl-accent-strong);
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;   /* 抵消末字后的字距，视觉才真居中 */
+  font-weight: 600;
+}
+
+.rtpl.rtpl-oracle .t-panel-h::before,
+.rtpl.rtpl-oracle .t-panel-h::after,
+.rtpl.rtpl-oracle .t-fold-h::before,
+.rtpl.rtpl-oracle .t-fold-h::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+}
+
+.rtpl.rtpl-oracle .t-panel-h::before,
+.rtpl.rtpl-oracle .t-fold-h::before {
+  background: linear-gradient(90deg, transparent, var(--rtpl-accent));
+  margin-right: 10px;
+}
+
+.rtpl.rtpl-oracle .t-panel-h::after,
+.rtpl.rtpl-oracle .t-fold-h::after {
+  background: linear-gradient(90deg, var(--rtpl-accent), transparent);
+  margin-left: 10px;
+}
+
+/* ---------- 场次：牌阵上方的一行定位 ---------- */
+.rtpl.rtpl-oracle .t-scene { gap: 4px; }
+
+.rtpl.rtpl-oracle .t-scene-row {
+  width: 100%;
+  max-width: 100%;
+  justify-content: center;
+  background: none;
+  border-bottom: 1px solid var(--rtpl-border);
+  border-radius: 0;
+  padding: 4px 0 6px;
+  color: var(--rtpl-scene-fg);
+  letter-spacing: 0.16em;
+}
+
+.rtpl.rtpl-oracle .t-scene-row.is-note {
+  border-bottom: 0;
+  padding: 1px 0 0;
+  letter-spacing: 0.04em;
+  font-style: italic;
+}
+
+.rtpl.rtpl-oracle .t-topbar {
+  justify-content: center;
+  background: var(--rtpl-head-bg);
+  letter-spacing: 0.08em;
+}
+
+/* ---------- 摘要：牌名，字号最大、字距最开 ---------- */
+.rtpl.rtpl-oracle .t-sum {
+  justify-content: center;
+  background: var(--rtpl-head-bg);
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+  color: var(--rtpl-accent-strong);
+  font-size: 15px;
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+}
+
+/* ---------- 数值：金色等宽，带一点微光 ---------- */
+.rtpl.rtpl-oracle .t-num {
+  color: var(--rtpl-accent-strong);
+  text-shadow: 0 0 12px rgba(217, 178, 106, 0.35);
+}
+
+/* ---------- 标签：方形金线小牌 ---------- */
+.rtpl.rtpl-oracle .t-k,
+.rtpl.rtpl-oracle .t-item {
+  border-radius: 2px;
+  border-color: var(--rtpl-border);
+  letter-spacing: 0.06em;
+}
+
+/* ---------- 选项：一张张牌 ---------- */
+.rtpl.rtpl-oracle .t-opts { gap: 8px; }
+
+.rtpl.rtpl-oracle .t-opt {
+  position: relative;
+  overflow: hidden;
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(217, 178, 106, 0.06), rgba(217, 178, 106, 0.015));
+  border-color: var(--rtpl-border);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.2s ease-out,
+              box-shadow 0.2s ease-out;
+}
+
+/* 金光扫过：一道斜向高光从左上掠到右下 */
+.rtpl.rtpl-oracle .t-opt::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg,
+    transparent 35%, rgba(240, 217, 168, 0.14) 48%, transparent 62%);
+  transform: translateX(-120%);
+  transition: transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.rtpl.rtpl-oracle .t-opt:hover {
+  transform: translateY(-2px);
+  border-color: var(--rtpl-accent);
+  box-shadow: 0 8px 20px -14px rgba(217, 178, 106, 0.75);
+}
+
+.rtpl.rtpl-oracle .t-opt:hover::before { transform: translateX(120%); }
+
+.rtpl.rtpl-oracle .t-opt-k {
+  color: var(--rtpl-accent-strong);
+  letter-spacing: 0.08em;
+}
+
+.rtpl.rtpl-oracle .t-opt-t { color: var(--rtpl-accent-strong); }
+
+/* 内心独白：牌背的低语，紫色斜体 + 左右内缩 */
+.rtpl.rtpl-oracle .t-inner {
+  border: 0;
+  border-top: 1px solid var(--rtpl-border);
+  border-bottom: 1px solid var(--rtpl-border);
+  border-radius: 0;
+  background: none;
+  color: var(--rtpl-note);
+  font-style: italic;
+  text-align: center;
+  padding: 10px 12px;
+}
+
+/* 记忆：金色渐变标题 + 夜色内页 */
+.rtpl.rtpl-oracle .t-mem-h { letter-spacing: 0.18em; text-indent: 0.18em; justify-content: center; }
+.rtpl.rtpl-oracle .t-fold--mem > .t-mem-h { justify-content: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rtpl.rtpl-oracle .t-opt { transition: none; }
+  .rtpl.rtpl-oracle .t-opt:hover { transform: none; }
+  .rtpl.rtpl-oracle .t-opt::before { display: none; }
+}
+
+/* ---------- 浅色环境：黎明前的浅靛，结构与金色装饰完全保留 ---------- */
+html:not(.dark) .rtpl.rtpl-oracle {
+  --rtpl-bg:
+    radial-gradient(1.6px 1.6px at 18% 22%, rgba(90, 74, 160, 0.5), transparent 100%),
+    radial-gradient(1.2px 1.2px at 74% 16%, rgba(90, 74, 160, 0.35), transparent 100%),
+    radial-gradient(1.4px 1.4px at 62% 78%, rgba(90, 74, 160, 0.28), transparent 100%),
+    radial-gradient(1px 1px at 34% 62%, rgba(90, 74, 160, 0.25), transparent 100%),
+    linear-gradient(168deg, #f4f1fb 0%, #ece8f8 55%, #e4dff4 100%);
+  --rtpl-fg: #26203f;
+  --rtpl-muted: #5d5680;
+  --rtpl-border: rgba(140, 108, 40, 0.32);
+  --rtpl-accent: #9c7626;
+  --rtpl-accent-strong: #6f4f14;
+  --rtpl-accent-soft: rgba(156, 118, 38, 0.13);
+  --rtpl-accent-soft-2: rgba(156, 118, 38, 0.06);
+  --rtpl-note: #6a4f8c;
+  --rtpl-head-bg: linear-gradient(180deg, rgba(156, 118, 38, 0.12), rgba(156, 118, 38, 0.03));
+  --rtpl-bar-bg: rgba(38, 32, 63, 0.13);
+  --rtpl-bar-fill: linear-gradient(90deg, #c9a05a, #9c7626);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.55);
+  --rtpl-shadow:
+    inset 0 0 0 1px rgba(156, 118, 38, 0.34),
+    inset 0 0 0 5px rgba(156, 118, 38, 0.05),
+    inset 0 0 0 6px rgba(156, 118, 38, 0.14),
+    0 14px 30px -24px rgba(38, 32, 63, 0.5);
+  --rtpl-scene-fg: #6f4f14;
+  --rtpl-place-fg: #6f4f14;
+  --rtpl-say-fg: #33264f;
+  --rtpl-bracket-fg: #5d5680;
+  --rtpl-c1: #9c7626; --rtpl-c2: #6a4f8c; --rtpl-c3: #3f6d80;
+  --rtpl-c4: #8a4f52; --rtpl-c5: #4d7050; --rtpl-c6: #5d5680;
+}
+
+html:not(.dark) .rtpl.rtpl-oracle .t-num { text-shadow: none; }
+html:not(.dark) .rtpl.rtpl-oracle .t-opt { background: rgba(255, 255, 255, 0.6); }

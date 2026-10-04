@@ -51,7 +51,7 @@ export function renderReplyTemplate(raw, preset, ctx = {}) {
   // 标记原文会直接漏到气泡里（实测出现过）。
   const allNames = [...tplNames, ...GENERIC_MARKERS]
   const text = splitInlineMarkers(normalizeModelText(raw), allNames)
-  const parts = []
+  let parts = []
   const options = []
   let hasBlock = false
   // 是否已经渲染过记忆回廊；以及「推荐行动」在第几个 part（补记忆块时要插在它前面）
@@ -65,6 +65,10 @@ export function renderReplyTemplate(raw, preset, ctx = {}) {
   // 绝不能把【进度】这类标记原文原样丢给用户（那是明显的"坏了"观感）。
   const tplSet = new Set(tplNames)
   const nameSet = new Set(allNames)
+  // 场景类区块（时间 / 地点 / 顶部信息条）：无论模型把它写在回复的哪个位置，
+  // 渲染时一律提到最前面 —— 「在哪儿 / 什么时间」应该先于正文交代。
+  // 实测模型经常先写一句动作、再补【场景】，观感就是"地点时间跑到中间去了"。
+  const SCENE_BLOCK_NAMES = new Set(['场景', '状态条'])
 
   // 行首标记：`【名字】…`
   const LINE_RE = /^\s*【([^】]{1,20})】([\s\S]*)$/
@@ -114,7 +118,7 @@ export function renderReplyTemplate(raw, preset, ctx = {}) {
         }
         if (out && out.html) {
           flushText()
-          parts.push({ type: 'html', html: out.html })
+          parts.push({ type: 'html', html: out.html, scene: SCENE_BLOCK_NAMES.has(mapped.block) })
           if (out.options && out.options.length) options.push(...out.options)
           hasBlock = true
           continue
@@ -139,7 +143,7 @@ export function renderReplyTemplate(raw, preset, ctx = {}) {
       continue
     }
     flushText()
-    parts.push({ type: 'html', html: rendered.html })
+    parts.push({ type: 'html', html: rendered.html, scene: SCENE_BLOCK_NAMES.has(name) })
     if (name === '记忆') memoryRendered = true
     if (rendered.options && rendered.options.length) {
       // 选项文本按出现顺序收集，点击时按索引取回（避免把文案塞进 DOM 属性）
@@ -166,6 +170,14 @@ export function renderReplyTemplate(raw, preset, ctx = {}) {
       parts.splice(at, 0, { type: 'html', html: out.html, synthesized: true })
       hasBlock = true
     }
+  }
+
+  // 场景区块置顶：稳定分区（保持各自内部相对顺序），把场景类挪到最前面。
+  // 记忆兜底块不受影响（它不是 scene），仍在原位。
+  if (hasBlock && parts.some(p => p.scene)) {
+    const sceneParts = parts.filter(p => p.scene)
+    const rest = parts.filter(p => !p.scene)
+    parts = [...sceneParts, ...rest]
   }
 
   return { parts, options, hasBlock }

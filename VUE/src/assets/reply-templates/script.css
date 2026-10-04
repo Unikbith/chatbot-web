@@ -1,0 +1,222 @@
+/* ==========================================================================
+   渲染预设：银幕（Screenplay）
+
+   隐喻：这一轮回复 = 剧本里被撕下来的一页。
+   读起来是「场次 → 动作 → 台词」，而不是「一条聊天消息」。
+
+   方向：Editorial / 打字机。等宽字体是这套设计的地基 —— 剧本页的
+   一切秩序感都来自等宽：场次的大写拉字距、台词居中的窄栏、
+   动作描写的满栏，三者靠**栏宽**而不是颜色区分。
+
+   结构装饰（不只是换色）：
+     · 左侧打孔装订线（border-left 双线 + 一列圆孔）
+     · 场次条整行贯通、大写拉字距、下方一道发丝线
+     · 台词段落收窄居中（剧本里台词的经典排法）
+     · 动作描写满栏；括号内心理/动作保持斜体弱化
+   结构见 _base.css，这里覆盖变量与少量版式。
+   ========================================================================== */
+.rtpl.rtpl-script {
+  --rtpl-bg: linear-gradient(180deg, #fdfcf8 0%, #f6f3ea 100%);
+  --rtpl-fg: #2a2724;
+  --rtpl-muted: #6b6459;
+  --rtpl-border: rgba(42, 39, 36, 0.2);
+  --rtpl-accent: #8c5a2b;
+  --rtpl-accent-strong: #5f3a17;
+  --rtpl-accent-soft: rgba(140, 90, 43, 0.13);
+  --rtpl-accent-soft-2: rgba(140, 90, 43, 0.06);
+  --rtpl-note: #8a6234;
+  --rtpl-head-bg: rgba(140, 90, 43, 0.09);
+  --rtpl-bar-bg: rgba(42, 39, 36, 0.13);
+  --rtpl-bar-fill: linear-gradient(90deg, #c0955c, #8c5a2b);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.5);
+  --rtpl-radius: 3px;
+  --rtpl-radius-sm: 2px;
+  --rtpl-shadow: 0 1px 0 rgba(42, 39, 36, 0.05), 0 16px 32px -24px rgba(42, 39, 36, 0.6);
+  /* 打字机字族：Courier 是剧本页的默认语汇，中文回落等宽宋/黑 */
+  --rtpl-font: "Courier New", Courier, "SFMono-Regular", Menlo, Consolas,
+               "Noto Sans Mono CJK SC", "Sarasa Mono SC", monospace;
+  --rtpl-font-size: 13.5px;
+  --rtpl-line-height: 1.74;
+  /* 剧本不首行缩进：层级靠栏宽与大小写表达，缩进会和平移冲突 */
+  --rtpl-indent: 0;
+  --rtpl-scene-bg: transparent;
+  --rtpl-scene-fg: #5f3a17;
+  --rtpl-place-bg: transparent;
+  --rtpl-place-fg: #5f3a17;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #8c5a2b, #57320f);
+  --rtpl-mem-head-fg: #fdf8f0;
+  /* 对白浓墨；括号内容（心理/动作）降弱为灰，像舞台提示 */
+  --rtpl-say-fg: #1f1c18;
+  --rtpl-say-weight: 700;
+  --rtpl-bracket-fg: #6b6459;
+  /* 校对笔色：低饱和的红蓝绿紫褐灰，给标签轮换用 */
+  --rtpl-c1: #a8503a; --rtpl-c2: #3c6076; --rtpl-c3: #4d6b45;
+  --rtpl-c4: #6a4f77; --rtpl-c5: #8a6234; --rtpl-c6: #5f5a52;
+
+  /* 装订边：剧本页左侧的双线 + 打孔列 */
+  position: relative;
+  padding: 14px 16px 14px 30px;
+  border-left: 3px double rgba(42, 39, 36, 0.32);
+}
+
+/* 打孔：一列圆孔，读起来像从剧本册上撕下来的 */
+.rtpl.rtpl-script::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  background-image: radial-gradient(circle 2.6px at 3.5px 50%, rgba(42, 39, 36, 0.22) 0 100%, transparent 100%);
+  background-size: 7px 30px;
+  background-repeat: repeat-y;
+  pointer-events: none;
+}
+
+/* ---------- 场次条：整行贯通 + 大写拉字距 + 下方发丝线 ---------- */
+.rtpl.rtpl-script .t-scene { gap: 3px; }
+
+.rtpl.rtpl-script .t-scene-row {
+  width: 100%;
+  max-width: 100%;
+  padding: 5px 0 6px;
+  border-radius: 0;
+  border-bottom: 1px solid var(--rtpl-border);
+  color: var(--rtpl-scene-fg);
+  font-weight: 700;
+  font-size: 12.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.rtpl.rtpl-script .t-scene-row.is-note {
+  border-bottom: none;
+  padding: 2px 0 0;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-style: italic;
+}
+
+/* 顶栏（状态条）同样按场次条处理，保持一套语汇 */
+.rtpl.rtpl-script .t-topbar {
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  background: none;
+  padding: 6px 0;
+  letter-spacing: 0.06em;
+}
+
+.rtpl.rtpl-script .t-topbar-title {
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-size: 12.5px;
+}
+
+/* ---------- 台词：收窄居中（剧本的经典栏位） ---------- */
+.rtpl.rtpl-script .rtpl-prose p.rtpl-say-line {
+  max-width: 76%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.rtpl.rtpl-script .rtpl-say {
+  letter-spacing: 0.02em;
+}
+
+/* 动作描写：满栏、行距略松，和台词的窄栏形成对比 */
+.rtpl.rtpl-script .rtpl-prose p.rtpl-narr { line-height: 1.82; }
+
+/* ---------- 摘要：像场次标题那样居中，两侧留白 ---------- */
+.rtpl.rtpl-script .t-sum {
+  justify-content: center;
+  background: none;
+  border-left: 0;
+  border-right: 0;
+  border-radius: 0;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 12.5px;
+}
+
+/* ---------- 标题行：方形小标签，像剧本里的场景编号牌 ---------- */
+.rtpl.rtpl-script .t-panel-h,
+.rtpl.rtpl-script .t-fold-h {
+  border-radius: 0;
+  background: none;
+  border-bottom: 1px solid var(--rtpl-border);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 12.5px;
+}
+
+.rtpl.rtpl-script .t-panel { border-radius: 0; background: none; }
+
+/* 标签胶囊改成方角，贴合打字机语汇 */
+.rtpl.rtpl-script .t-k,
+.rtpl.rtpl-script .t-item,
+.rtpl.rtpl-script .t-badge { border-radius: 2px; }
+
+/* ---------- 选项：像剧本页边缘手写的分支批注 ---------- */
+.rtpl.rtpl-script .t-opt {
+  border-radius: 2px;
+  background: none;
+  border-left: 2px solid var(--rtpl-accent);
+  transition: background 0.18s ease-out, border-color 0.18s ease-out;
+}
+
+.rtpl.rtpl-script .t-opt:hover {
+  background: var(--rtpl-accent-soft);
+  border-color: var(--rtpl-accent);
+}
+
+.rtpl.rtpl-script .t-opt-k {
+  font-family: var(--rtpl-font);
+  color: var(--rtpl-accent-strong);
+}
+
+/* 内心独白：缩进的舞台提示，斜体弱化处理 */
+.rtpl.rtpl-script .t-inner {
+  border-radius: 0;
+  border: 0;
+  border-left: 2px solid var(--rtpl-accent);
+  background: none;
+  padding-left: 12px;
+  font-style: italic;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rtpl.rtpl-script .t-opt { transition: none; }
+}
+
+/* ---------- 暗色：从「米白纸」翻成「深色拷贝纸」，版式一字不改 ---------- */
+html.dark .rtpl.rtpl-script {
+  --rtpl-bg: linear-gradient(180deg, #201e1a 0%, #17150f 100%);
+  --rtpl-fg: #e8e2d4;
+  --rtpl-muted: #9b9284;
+  --rtpl-border: rgba(232, 226, 212, 0.2);
+  --rtpl-accent: #d0a068;
+  --rtpl-accent-strong: #eebf85;
+  --rtpl-accent-soft: rgba(208, 160, 104, 0.15);
+  --rtpl-accent-soft-2: rgba(208, 160, 104, 0.07);
+  --rtpl-note: #c69a63;
+  --rtpl-head-bg: rgba(208, 160, 104, 0.1);
+  --rtpl-bar-bg: rgba(232, 226, 212, 0.14);
+  --rtpl-bar-fill: linear-gradient(90deg, #eebf85, #b9803f);
+  --rtpl-panel-bg: rgba(255, 255, 255, 0.03);
+  --rtpl-shadow: 0 1px 0 rgba(0, 0, 0, 0.3), 0 18px 34px -24px rgba(0, 0, 0, 0.9);
+  --rtpl-scene-fg: #eebf85;
+  --rtpl-place-fg: #eebf85;
+  --rtpl-mem-head-bg: linear-gradient(135deg, #b9803f, #7d5320);
+  --rtpl-mem-head-fg: #fdf6e8;
+  --rtpl-say-fg: #f6efe0;
+  --rtpl-bracket-fg: #9b9284;
+  --rtpl-c1: #d98a72; --rtpl-c2: #7ea6bd; --rtpl-c3: #8fae82;
+  --rtpl-c4: #a98cb8; --rtpl-c5: #c69a63; --rtpl-c6: #9b9284;
+  border-left-color: rgba(232, 226, 212, 0.3);
+}
+
+html.dark .rtpl.rtpl-script::before {
+  background-image: radial-gradient(circle 2.6px at 3.5px 50%, rgba(232, 226, 212, 0.2) 0 100%, transparent 100%);
+}

@@ -21,7 +21,9 @@ import os
 import reply_spec
 
 # 全局默认开关：新会话的初始值，也是历史 NULL 数据的回落值。
-RICH_MESSAGE_ENABLED = os.getenv('RICH_MESSAGE_ENABLED', 'false').lower() == 'true'
+# 默认开启 —— 界面标记（状态栏 / 进展条 / 可点选项）是本产品的默认观感，
+# 仍可用环境变量 RICH_MESSAGE_ENABLED=false 整体关掉，会话设置里也能单独关。
+RICH_MESSAGE_ENABLED = os.getenv('RICH_MESSAGE_ENABLED', 'true').lower() == 'true'
 
 # 兼容保留：旧代码曾用这个常量做「未选模板」时的兜底说明。
 # 现在注入内容统一由 reply_spec 组合（含完整结构与篇幅要求），此常量不再参与注入。

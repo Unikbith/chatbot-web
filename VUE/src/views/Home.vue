@@ -111,10 +111,14 @@ let freeApiReminderShown = false
 function maybeShowFreeApiReminder() {
   if (freeApiReminderShown) return
   if (!needsFreeApiReminder.value) return
-  // 新用户教程弹窗优先：两个弹窗叠在一起会互相遮挡，等教程看完再提醒
-  if (tutorialVisible.value || userSettings.tutorial_seen === false) return
+  // 教程弹窗正在显示时不叠一层（关掉后会再次走到这里）
+  if (tutorialVisible.value) return
   freeApiReminderShown = true
   freeApiReminderVisible.value = true
+  // 新用户（教程一次都没看过）这次由本弹窗统一接管：
+  // 弹窗底部有「查看使用教程」按钮，同时把教程标记为「已提供入口」，
+  // 侧边栏的教程入口才会出现 —— 否则用户点了「先用免费的」就再也找不到教程了。
+  if (userSettings.tutorial_seen === false) markTutorialSeen()
 }
 
 // ========== 新用户使用教程 ==========
@@ -128,10 +132,14 @@ const showTutorialHint = computed(() =>
 )
 
 // 新用户首次登录：自动弹出教程（仅一次）
+// 未配置自己 API Key 的用户不在这里弹 —— 他们每次进入都会看到「建议配置 API Key」弹窗，
+// 两个弹窗会互相遮挡。这类用户的教程入口挂在那个提醒弹窗上（底部「查看使用教程」），
+// 关掉后侧边栏也有常驻入口，不会漏看。
 function maybeShowTutorial() {
-  if (isLoggedIn.value && userSettings.tutorial_seen === false) {
-    tutorialVisible.value = true
-  }
+  if (!isLoggedIn.value) return
+  if (userSettings.tutorial_seen !== false) return
+  if (needsFreeApiReminder.value) return
+  tutorialVisible.value = true
 }
 
 // 看过教程（关闭弹窗即视为阅读）：标记完成后侧边栏入口才出现
@@ -153,6 +161,12 @@ function openTutorial() {
   tutorialVisible.value = true
   markTutorialSeen()
   dismissTutorialHint()
+}
+
+// 从「未配置 API Key」提醒弹窗进入教程
+function openTutorialFromReminder() {
+  freeApiReminderVisible.value = false
+  openTutorial()
 }
 
 // 对话列表
@@ -548,11 +562,10 @@ async function loadDefaultProvider() {
     const res = await providersApi.list('chat')
     chatConfigs.value = (res.data || []).filter(p => p.provider_type === 'chat')
     if (res.code === 200 && res.data?.length > 0) {
-      const savedId = providersApi.getCurrentId('chat')
-      let provider = res.data.find(p => p.id == savedId)
-      if (!provider) provider = res.data.find(p => p.is_default) || res.data[0]
-      currentProviderId.value = provider.id
-      providersApi.setCurrentId(provider.id, 'chat')
+      const sel = resolveDefaultModelSelection()
+      currentProviderId.value = sel.providerId
+      currentModelId.value = sel.modelId
+      if (sel.providerId) providersApi.setCurrentId(sel.providerId, 'chat')
     }
   } catch (e) {
     logger.warn('加载提供商失败', e)
@@ -567,6 +580,41 @@ function pickEnabledChatProviderId() {
   if (!enabled.length) return null
   const saved = enabled.find(p => p.id == providersApi.getCurrentId('chat'))
   return saved ? saved.id : enabled[0].id
+}
+
+// 解析「这次该用哪个模型」：
+//   1) 上一次用过的优先 —— localStorage 跨登录保留，只要该配置仍启用就用它
+//      （这是需求：多个模型时，退出再进接着上次用的，而不是总回到第一个）；
+//   2) 没记录 / 配置已删 → 本地保存的配置 > 首个已启用配置；
+//   3) modelId 为空表示「该配置的默认模型」，由输入框解析第一个启用的模型
+//      （与后端解析顺序一致）。
+function resolveDefaultModelSelection() {
+  const enabled = chatConfigs.value.filter(p => p.enabled !== false)
+  if (!enabled.length) return { providerId: pickEnabledChatProviderId(), modelId: '' }
+  const raw = providersApi.getLastModel('chat')
+  if (raw) {
+    const sep = raw.indexOf('::')
+    const pid = sep >= 0 ? Number(raw.slice(0, sep)) : Number(raw)
+    let mid = sep >= 0 ? raw.slice(sep + 2) : ''
+    const p = enabled.find(x => x.id == pid)
+    if (p) {
+      if (mid) {
+        const models = (p.models || []).filter(m => m.enabled !== false)
+        // 上次的模型已被删除/停用 → 回落到该配置的默认（第一个），避免下发失效模型
+        if (models.length && !models.some(m => m.model_id === mid)) mid = ''
+      }
+      return { providerId: p.id, modelId: mid }
+    }
+  }
+  return { providerId: pickEnabledChatProviderId(), modelId: '' }
+}
+
+// 给「对话自身没存模型」的场景用：仅当上次用的配置与该对话的配置一致时才沿用上次的模型，
+// 否则交回空串（由输入框解析该配置的第一个启用模型）。
+function lastModelForProvider(providerId) {
+  const sel = resolveDefaultModelSelection()
+  if (!providerId || !sel.providerId || sel.providerId != providerId) return ''
+  return sel.modelId || ''
 }
 
 // 根据对话 id 找到对应 persona（无则使用通用默认）
@@ -615,12 +663,21 @@ async function createConversationWithPersona(personaId) {
   await _doCreateConversation(personaId)
 }
 
+// 会话切换令牌：每次切换/新建都自增。
+// 用途：切换会话是一次网络往返，若用户在等待期间又点了另一个会话，
+// 先发的请求可能后返回 —— 不做拦截就会把界面切回旧会话（点了 A 却停在 B）。
+let convSwitchSeq = 0;
+
 async function _doCreateConversation(personaId, forceDelete = false) {
-  currentProviderId.value = pickEnabledChatProviderId()
-  currentModelId.value = ''
+  const seq = ++convSwitchSeq;
+  // 新对话默认沿用「上次用过的模型」；没有记录才落到该配置的第一个启用模型
+  const sel = resolveDefaultModelSelection()
+  currentProviderId.value = sel.providerId
+  currentModelId.value = sel.modelId
   const payload = {
     title: t('新对话', 'New Chat'),
     provider_id: currentProviderId.value,
+    model_id: currentModelId.value || undefined,
     persona_id: personaId,
     system_prompt: systemPrompt.value,
     temperature: userSettings.temperature,
@@ -643,6 +700,7 @@ async function _doCreateConversation(personaId, forceDelete = false) {
     }
 
     if (res.code === 200) {
+      if (seq !== convSwitchSeq) return   // 期间又切了别的会话：丢弃这次过期结果
       currentConv.value = res.data
       currentConvId.value = res.data.id
       currentConvTitle.value = res.data.title || '新对话'
@@ -650,7 +708,7 @@ async function _doCreateConversation(personaId, forceDelete = false) {
       systemPrompt.value = res.data.system_prompt || ''
       currentProviderId.value = res.data.provider_id || pickEnabledChatProviderId()
       currentModelId.value = res.data.model_id || ''
-      chatAreaRef.value?.resetMessages()
+      chatAreaRef.value?.resetMessages(res.data.id)
       loadConversations()
     }
   } catch (e) {
@@ -661,6 +719,13 @@ async function _doCreateConversation(personaId, forceDelete = false) {
 // 长期记忆（记忆宫殿摘要）：在聊天框的「记忆回廊」里展示，
 // 因此随对话切换与回复结束刷新，不需要再单独打开一个查看弹窗。
 const longTermMemory = ref([])
+
+// 本轮回复结束：刷新长期记忆（记忆宫殿摘要）。
+// 带上 convId —— 回复可能在后台跑完，此时不该去刷新「当前显示会话」的记忆。
+function onReplyDone(convId) {
+  if (convId != null && convId != currentConvId.value) return
+  loadLongTermMemory()
+}
 
 async function loadLongTermMemory() {
   if (!currentConvId.value) { longTermMemory.value = []; return }
@@ -678,8 +743,12 @@ async function loadLongTermMemory() {
 
 async function handleSelectConversation(convId) {
   if (!convId || convId === currentConvId.value) return
+  const seq = ++convSwitchSeq
   try {
     const res = await conversationApi.get(convId)
+    // 用户在等待期间又点开了别的会话 → 这次响应已过期，直接丢弃，
+    // 否则会把界面切回旧会话（点了 A 结果停在 B）。
+    if (seq !== convSwitchSeq) return
     if (res.code === 200) {
       const data = res.data
       currentConv.value = data
@@ -688,11 +757,12 @@ async function handleSelectConversation(convId) {
       systemPrompt.value = data.system_prompt || ''
       currentPersona.value = personaOf(data)
       // 对话独立模型配置优先；未指定则回退到已启用的默认配置
+      // 对话自身没存模型时，沿用「上次用过的模型」（仅配置一致时）
       currentProviderId.value = data.provider_id || pickEnabledChatProviderId()
-      currentModelId.value = data.model_id || ''
+      currentModelId.value = data.model_id || lastModelForProvider(currentProviderId.value)
 
       const msgList = data.messages || []
-      chatAreaRef.value?.setMessages(msgList)
+      chatAreaRef.value?.setMessages(convId, msgList)
       loadLongTermMemory()
     }
   } catch (e) {
@@ -710,6 +780,8 @@ async function handleTogglePin(convId) {
 }
 
 async function handleDeleteConversation(convId) {
+  // 自增令牌：作废仍在途的会话切换请求，避免删完后又被旧响应切回去
+  convSwitchSeq++
   try {
     const res = await conversationApi.remove(convId)
     if (currentConvId.value == convId) {
@@ -718,7 +790,7 @@ async function handleDeleteConversation(convId) {
       currentConvTitle.value = '新对话'
       currentModelId.value = ''
       currentPersona.value = personas.value.find(p => p.is_default) || personas.value[0] || null
-      chatAreaRef.value?.resetMessages()
+      chatAreaRef.value?.resetMessages(null)
     }
     await loadConversations()
     ElMessage.success(t('已删除', 'Deleted'))
@@ -729,13 +801,21 @@ async function handleDeleteConversation(convId) {
   }
 }
 
-function handleTitleChange(newTitle) {
-  currentConvTitle.value = newTitle
-  if (currentConv.value) {
-    currentConv.value.title = newTitle
+function handleTitleChange(payload) {
+  // 后台跑完的回复也会触发（用户可能已切到别的会话），因此以事件自带的 convId 为准；
+  // 兼容旧的字符串调用形式
+  const convId = (payload && typeof payload === 'object') ? payload.convId : currentConvId.value
+  const newTitle = (payload && typeof payload === 'object') ? payload.title : payload
+  if (!newTitle) return
+  // 只有仍停在这个会话时才改顶部标题，避免把后台会话的标题贴到当前会话上
+  if (convId == currentConvId.value) {
+    currentConvTitle.value = newTitle
+    if (currentConv.value) {
+      currentConv.value.title = newTitle
+    }
   }
-  if (currentConvId.value) {
-    conversationApi.update(currentConvId.value, { title: newTitle }).then(() => {
+  if (convId) {
+    conversationApi.update(convId, { title: newTitle }).then(() => {
       loadConversations()
     }).catch(() => {})
   }
@@ -751,7 +831,7 @@ function handleConversationCreated(conv) {
     currentPersona.value = personaOf(conv)
     systemPrompt.value = conv.system_prompt || ''
     currentProviderId.value = conv.provider_id || pickEnabledChatProviderId()
-    currentModelId.value = conv.model_id || ''
+    currentModelId.value = conv.model_id || lastModelForProvider(currentProviderId.value)
   }
   loadConversations()
 }
@@ -817,7 +897,7 @@ function handleLogout() {
   currentPersona.value = null
   conversations.value = []
   convGroups.value = { pinned: [], today: [], yesterday: [], week: [], month: [], older: [] }
-  chatAreaRef.value?.resetMessages()
+  chatAreaRef.value?.resetMessages(null)
   // 退出登录后页面刷新重定向到入口页（路由 / 即入口页）：
   // 使用 reload 让 Vue 完全重新挂载，避免旧对话/旧状态闪一下；同时保证内存中的
   // 用户态、对话态彻底清空，避免下一次直接复用旧组件导致脏读。
@@ -887,6 +967,8 @@ function handleProviderSelect({ provider, type }) {
     currentProviderId.value = provider.id
     currentModelId.value = ''
     providersApi.setCurrentId(provider.id, 'chat')
+    // 记录「上次用的」：换配置等于换到该配置的默认模型
+    providersApi.setLastModel(provider.id, '', 'chat')
     ElMessage.success(t('已切换到', 'Switched to') + `「${provider.name}」`)
     loadChatStatus()
   }
@@ -898,6 +980,8 @@ function handleModelChange({ providerId, modelId }) {
   currentProviderId.value = providerId
   currentModelId.value = modelId || ''
   if (providerId) providersApi.setCurrentId(providerId, 'chat')
+  // 记录「上次用的模型」：退出登录再进来仍接着这个用（跨登录保留在浏览器本地）
+  providersApi.setLastModel(providerId, modelId, 'chat')
   const p = chatConfigs.value.find(x => x.id == providerId)
   if (p) {
     ElMessage.success(t('已切换到', 'Switched to') + `「${p.name}${modelId ? ' · ' + modelId : ''}」`)
@@ -974,7 +1058,7 @@ async function handleConvoSettingsSaved(payload) {
       currentProviderId.value = payload.provider_id != null
         ? payload.provider_id
         : pickEnabledChatProviderId()
-      currentModelId.value = payload.model_id || ''
+      currentModelId.value = payload.model_id || lastModelForProvider(currentProviderId.value)
       if (payload.persona_id) {
         currentPersona.value = personas.value.find(p => p.id == payload.persona_id) || currentPersona.value
       }
@@ -1272,7 +1356,7 @@ async function handleConvoSettingsSaved(payload) {
       :auto-play-voice="autoPlayVoice"
       :reply-template="replyTemplate"
       :long-term-memory="longTermMemory"
-      @reply-done="loadLongTermMemory"
+      @reply-done="onReplyDone"
       :is-free-api="chatStatus.is_free"
       :logged-in="isLoggedIn"
       :persona-greeting="currentPersona?.greeting || ''"
@@ -1318,6 +1402,7 @@ async function handleConvoSettingsSaved(payload) {
       v-model="freeApiReminderVisible"
       :free-name="chatStatus.free_name"
       @configure="providerPanelVisible = true"
+      @open-tutorial="openTutorialFromReminder"
     />
 
     <!-- 人物卡管理面板 -->

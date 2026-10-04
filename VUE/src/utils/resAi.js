@@ -274,6 +274,14 @@ const providersApi = {
   setCurrentId(id, type = 'chat') {
     localStorage.setItem(`current_provider_id_${type}`, id);
   },
+  // 上一次使用的模型（`providerId::modelId`），跨登录保留在浏览器本地。
+  // 作用：配置了多个模型时，退出再登录仍接着上次用的那个，而不是总回到第一个。
+  getLastModel(type = 'chat') {
+    try { return localStorage.getItem(`last_model_${type}`) || ''; } catch (e) { return ''; }
+  },
+  setLastModel(providerId, modelId, type = 'chat') {
+    try { localStorage.setItem(`last_model_${type}`, `${providerId}::${modelId || ''}`); } catch (e) { /* 忽略隐私模式 */ }
+  },
 };
 
 // ========== 角色模板 API ==========

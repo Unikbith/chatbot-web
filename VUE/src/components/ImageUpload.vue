@@ -58,8 +58,14 @@ const clearImage = () => {
   emit('clear');
 };
 
+// 由父组件回填图片（如切换对话时恢复未发送的草稿图），保持缩略图与父级状态一致
+const setImage = (imageData) => {
+  selectedImage.value = imageData || null;
+};
+
 defineExpose({
   clearImage,
+  setImage,
   getImage: () => selectedImage.value,
 });
 </script>

@@ -386,7 +386,14 @@ class Conversation(db.Model):
             'summary': self.summary,
             'summary_upto_id': self.summary_upto_id,
             'append_prompt_enabled': bool(self.append_prompt_enabled),
-            'rich_marker_enabled': bool(self.rich_marker_enabled),
+            # NULL 与「未存过」同义：回落到全局默认值，
+            # 与 rich_marker.resolve_rich_marker_enabled 的判定保持一致，
+            # 避免前端显示成关闭、实际却按全局开关在注入。
+            'rich_marker_enabled': (
+                bool(self.rich_marker_enabled)
+                if self.rich_marker_enabled is not None
+                else RICH_MESSAGE_ENABLED
+            ),
             'reply_template': self.reply_template,
             'persona_name': self.persona.name if self.persona else None,
             'persona_avatar': self.persona.avatar if self.persona else None,

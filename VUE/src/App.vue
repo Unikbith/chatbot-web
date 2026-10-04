@@ -90,6 +90,21 @@ html.dark {
 html, body {
   height: 100%;
   width: 100%;
+  /* 关掉浏览器「左右滑动切换网页」的手势（Chrome / 各安卓 WebView 的
+     overscroll navigation）。之前有用户反馈：在页面中间用拇指右滑会直接跳到
+     浏览器首页 —— 那不是全面屏的边缘返回手势，而是浏览器把水平滑动解释为导航。
+     overscroll-behavior-x: contain 正是用来禁用这类原生导航的。
+     注意：iOS Safari 的边缘返回是系统级手势，CSS 拦不住，也不该拦。 */
+  overscroll-behavior-x: contain;
+}
+
+/* 图片大图预览（el-image-viewer）：
+   touch-action: none 让浏览器不再把预览层内的触摸解释为页面平移/缩放，
+   从源头上切断滚动链（手指滑动时底下的聊天列表不再跟着动）。
+   预览自己的拖动用的是 JS 事件监听，不受 touch-action 影响。 */
+.el-image-viewer__wrapper {
+  touch-action: none;
+  overscroll-behavior: contain;
 }
 
 body {

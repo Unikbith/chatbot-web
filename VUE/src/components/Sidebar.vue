@@ -116,17 +116,16 @@
         </div>
         <div class="conv-list-scroll">
         <template v-if="groups.pinned.length > 0">
-          <div class="group-title pinned-title">
-            <el-icon class="gt-icon"><Top /></el-icon>{{ t('置顶', 'Pinned') }}
-          </div>
+          <!-- 置顶就是一个普通分组：标题与「今天 / 昨天」完全同款（无底色、无图标），
+               只是排序上排在它们前面 -->
+          <div class="group-title">{{ t('置顶', 'Pinned') }}</div>
           <div 
             v-for="conv in groups.pinned" 
             :key="conv.id"
-            class="conv-item pinned-item"
+            class="conv-item"
             :class="{ active: currentConvId == conv.id }"
             @click="selectConversation(conv.id)"
           >
-            <span class="conv-pin-mark"><el-icon><Top /></el-icon></span>
             <span class="conv-title" :title="conv.title">{{ conv.title }}</span>
             <div class="conv-actions">
               <el-button size="small" text @click.stop="togglePin(conv.id)">
@@ -137,14 +136,12 @@
               </el-button>
             </div>
           </div>
-          <!-- 置顶区与普通对话区之间的分隔线：仅在下方还有非置顶对话时出现 -->
-          <div v-if="hasUnpinnedConversations" class="conv-section-divider"></div>
         </template>
 
         <!-- 有置顶对话时补上「今天」标题，让第二个分区有明确起点 -->
         <div
           v-if="groups.pinned.length > 0 && groups.today.length > 0"
-          class="group-title group-title-after-pinned"
+          class="group-title"
         >{{ t('今天', 'Today') }}</div>
 
         <div
@@ -288,7 +285,6 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, ArrowLeft, ArrowRight, ArrowUp, Top, Delete,
@@ -321,16 +317,6 @@ const emit = defineEmits([
   'dismiss-free-api',
   'open-tutorial', 'dismiss-tutorial'
 ])
-
-/**
- * 除置顶外是否还有对话：用于决定置顶区下方是否画分隔线、
- * 以及是否需要给第二个分区补「今天」标题（没有普通对话时不画多余的分隔）
- */
-const hasUnpinnedConversations = computed(() => {
-  const g = props.groups || {}
-  return ['today', 'yesterday', 'week', 'month', 'older']
-    .some(key => (g[key]?.length || 0) > 0)
-})
 
 function createConversation() {
   emit('create')
@@ -751,59 +737,8 @@ function handleCommand(cmd) {
   letter-spacing: 0.5px;
 }
 
-/* 置顶分组：标题用品牌色并带图钉，配合分隔线与普通对话明确区分 */
-.pinned-title {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--brand);
-  padding-bottom: 4px;
-}
-
-.gt-icon {
-  font-size: 12px;
-}
-
-/* 置顶区下方的分隔线：视觉上把「置顶」与「今天及更早」切开 */
-.conv-section-divider {
-  height: 1px;
-  margin: 8px 8px 2px;
-  background: var(--border-color);
-  border-radius: 1px;
-}
-
-/* 分隔线之后的第一个分组标题：再多留一点上方间距，避免两区贴在一起 */
-.group-title-after-pinned {
-  padding-top: 10px;
-}
-
-/* 置顶对话：常驻淡品牌底色 + 行首图钉，不依赖悬停即可辨认 */
-.conv-item.pinned-item {
-  background: var(--brand-soft);
-  margin-bottom: 4px;
-}
-
-.conv-item.pinned-item .conv-title {
-  color: var(--text-primary);
-  font-weight: 500;
-}
-
-.conv-item.pinned-item:hover {
-  background: var(--surface-hover);
-}
-
-.conv-item.pinned-item.active {
-  background: var(--brand-soft);
-  box-shadow: inset 2px 0 0 var(--brand);
-}
-
-.conv-pin-mark {
-  display: inline-flex;
-  flex-shrink: 0;
-  margin-right: 6px;
-  color: var(--brand);
-  font-size: 12px;
-}
+/* 置顶不再单独美化：标题用 .group-title 通用样式，列表项用 .conv-item 通用样式，
+   与「今天 / 昨天 / 7天内」等分组完全一致的观感，只靠排序区分先后。 */
 
 .conv-item {
   display: flex;

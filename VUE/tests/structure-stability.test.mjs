@@ -126,5 +126,23 @@ console.log('\n[5] 每个预设的行为一致（换皮不换骨架）')
   check('8 个预设都能正确处理同一段输入', allOk, detail.join(' '))
 }
 
+console.log('\n[6] 场景（时间/地点）必须置顶 —— 模型先写正文再补场景也不能错序')
+{
+  // 线上实测：模型先输出一句括号动作，再补【场景】，界面上地点/时间跑到正文后面
+  const raw = '（说完就转头看窗外，耳朵那块在夕阳里透着红）\n【场景】16:07 (Day 1, 傍晚)|训练场外车内\n夕阳斜照，她汗湿的鬓角贴着脸侧'
+  const parts = renderReplyTemplate(raw, T, {}).parts
+  const firstHtmlIdx = parts.findIndex(p => p.type === 'html')
+  const sceneIdx = parts.findIndex(p => p.type === 'html' && p.scene)
+  check('场景块被提到了所有正文之前', sceneIdx === 0 && firstHtmlIdx === 0,
+    `parts 顺序: ${parts.map(p => p.type + (p.scene ? '(scene)' : '')).join(' -> ')}`)
+
+  // 正文里出现多个区块时，场景依然在最前、且各区块相对顺序保持稳定
+  const raw2 = '【摘要】两人在车里聊开了\n【场景】16:07 (Day 1, 傍晚)|训练场外车内\n【面板】角色资料|姓名:陈默'
+  const parts2 = renderReplyTemplate(raw2, T, {}).parts
+  const order = parts2.map(p => p.scene ? 'S' : '.').join('')
+  check('场景块排第一，其余区块相对顺序不变',
+    order.startsWith('S') && parts2.filter(p => p.scene).length === 1, order)
+}
+
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
 process.exit(fail ? 1 : 0)
