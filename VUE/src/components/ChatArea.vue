@@ -404,9 +404,6 @@ const handleSend = async () => {
       }
     }
 
-    // 大模型输出带生图/改图标记时，自动代为调用图片生成
-    await handleLlmImageMarkers(aiMsg);
-
     // 自动播报 AI 回复（该对话开启时）
     if (props.autoPlayVoice && aiMsg.content && !aiMsg.imageUrl) {
       speakText(aiMsg.content, aiIndex);

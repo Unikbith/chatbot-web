@@ -220,7 +220,7 @@ onMounted(() => {
               v-model="state.character.baseInfo"
               type="textarea"
               :rows="3"
-              :placeholder="t('如：想生成一位冷艳的末世女剑客，穿黑色长风衣\n选择配置的模型后输入基础信息生成，将提示词复制到人物卡中', 'e.g. A cold apocalyptic female swordsman in a black trench coat')"
+              :placeholder="t('如：想生成一位冷艳的末世女剑客，穿黑色长风衣', 'e.g. A cold apocalyptic female swordsman in a black trench coat')"
             />
           </div>
 
