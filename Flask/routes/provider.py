@@ -174,6 +174,9 @@ def create_provider():
         api_url=api_url,
         api_key=api_key,
         model=model or None,
+        # 新建配置默认启用：图片配置的「启用」开关藏在列表里，
+        # 配好 Key、测试连接也成功却忘了拨开关，就会白白落到共享免费通道
+        enabled=True,
     )
     provider.set_params(params)
     db.session.add(provider)
@@ -234,6 +237,11 @@ def update_provider(provider_id):
         provider.set_params(data.get('params') or {})
     if 'enabled' in data:
         provider.enabled = bool(data['enabled'])
+    elif provider.provider_type == 'image':
+        # 保存图片配置即视为启用（本次请求显式传了 enabled 时以上面为准）。
+        # 用户改完 Key / 地址 / 模型点保存，本意就是「让这个配置能用」，
+        # 不该因为列表里那个小开关还关着而继续走免费通道。
+        provider.enabled = True
 
     db.session.commit()
 

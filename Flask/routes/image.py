@@ -40,16 +40,34 @@ MAX_PROMPT_LEN = 1500
 
 
 def _get_image_provider(user_id, provider_id=None):
-    """获取用户自定义的图片生成配置：优先指定 id（校验归属），否则取第一个启用的配置"""
+    """挑选本次生图使用的图片配置。
+
+    优先级按用户直觉来（「我配好了就应该用我配的」）：
+      1. 显式指定的 provider_id（校验归属）
+      2. 第一个「已启用」的图片配置
+      3. 有配置但一个都没启用时，仍然用配置本身（默认配置优先，其次最近新增的）
+      4. 一条配置都没有 → 返回 None，由上层回退到共享免费 Key
+
+    第 3 条是踩过坑之后加的：图片配置的「启用」开关藏在配置列表里的小开关上，
+    很容易配好 Key、测试连接也成功，却因为没拨开关而静默落到共享免费通道，
+    最终表现成「配好了却生不了图」。有配置就优先用配置，比默默用免费通道更有用。
+    """
     if provider_id:
         p = ModelProvider.query.filter_by(
             id=provider_id, user_id=user_id, provider_type='image'
         ).first()
         if p:
             return p
-    return ModelProvider.query.filter_by(
+
+    enabled = ModelProvider.query.filter_by(
         user_id=user_id, provider_type='image', enabled=True
-    ).first()
+    ).order_by(ModelProvider.is_default.desc(), ModelProvider.id.desc()).first()
+    if enabled:
+        return enabled
+
+    return ModelProvider.query.filter_by(
+        user_id=user_id, provider_type='image'
+    ).order_by(ModelProvider.is_default.desc(), ModelProvider.id.desc()).first()
 
 
 class _FreeImageProvider:
@@ -69,15 +87,14 @@ def _free_limit():
     return int(current_app.config.get('IMAGE_FREE_LIMIT') or 5)
 
 
-def _no_provider_hint(disabled_provider=None):
-    """没有可用图片配置时的提示：区分「真的没配」与「配了但没启用」。"""
-    if disabled_provider is not None:
-        return (
-            f'检测到图片生成配置「{disabled_provider.name}」处于未启用状态：'
-            '请在「模型配置 → 图片生成」里打开它的启用开关（连接测试成功不代表已启用），'
-            '或新建一个图片生成配置。'
-        )
+def _no_provider_hint():
+    """一条图片配置都没有时的提示（走共享免费通道或提示去配置）。"""
     return '请先在「模型配置-图片生成」中添加图片生成配置'
+
+
+def _provider_name(provider):
+    """配置名（免费通道没有名字，统一叫「共享免费通道」）。"""
+    return getattr(provider, 'name', None) or '共享免费通道'
 
 
 def _usage_row(user_id):
@@ -216,25 +233,18 @@ def generate():
 
     own_provider = _get_image_provider(user_id, data.get('provider_id'))
 
-    # 关键坑：用户配好了图片生成、连接测试也成功，但只要没打开「启用」开关，
-    # 这里就会静默回退到共享免费 Key（可能没额度/Key 失效），表现为「测试成功但生不了图」。
-    # 因此先记住这条被停用的配置，任何失败提示里都要把它说清楚。
-    disabled_provider = None
-    if not own_provider:
-        disabled_provider = ModelProvider.query.filter_by(
-            user_id=user_id, provider_type='image', enabled=False
-        ).first()
+    # 没有可用配置时才回退共享免费 Key；用户自己的配置一律优先（哪怕它的启用开关是关着的，
+    # 见 _get_image_provider 的优先级说明），否则就会出现「配好了却被免费通道拖垮」的假故障。
+    if own_provider is not None and own_provider.enabled is False:
+        current_app.logger.info(
+            '[生图] 用户 %s 的图片配置「%s」未启用，仍按该配置生图（有配置优先于共享免费通道）',
+            user_id, own_provider.name,
+        )
 
-    # 未配置自有图片生成时，回退到 .env 共享免费 Key
     if not own_provider:
         free_key = current_app.config.get('IMAGE_FREE_API_KEY') or ''
         if not free_key:
-            return jsonify({'code': 400, 'message': _no_provider_hint(disabled_provider)}), 400
-        if disabled_provider:
-            current_app.logger.info(
-                '[生图] 用户 %s 有停用的图片生成配置（%s），本次回退共享免费 Key',
-                user_id, disabled_provider.name,
-            )
+            return jsonify({'code': 400, 'message': _no_provider_hint()}), 400
         provider = _FreeImageProvider()
     else:
         provider = own_provider
@@ -287,22 +297,19 @@ def generate():
     )
     if err:
         # 对外统一脱敏，避免透传上游厂商内部地址 / 配额 / 堆栈等敏感信息，
-        # 但必须给出「接下来该做什么」，否则用户只会看到一句无用的「请稍后重试」
-        current_app.logger.error('图片生成失败 user=%s: %s', user_id, err)
+        # 但必须给出「接下来该做什么」：带上用的是哪条配置，用户才知道去改哪里。
+        current_app.logger.error('图片生成失败 user=%s provider=%s: %s', user_id, _provider_name(provider), err)
         if is_free:
-            if disabled_provider is not None:
-                message = (
-                    '图片生成失败：本次使用的是共享免费通道，但它当前不可用。'
-                    f'你已配置「{disabled_provider.name}」但处于未启用状态，'
-                    '在「模型配置 → 图片生成」里启用它即可用自己的 Key 生图。'
-                )
-            else:
-                message = (
-                    '图片生成失败：本次使用的是共享免费通道，但它当前不可用。'
-                    '请在「模型配置 → 图片生成」里填入自己的 API Key 后再试。'
-                )
-            return jsonify({'code': 500, 'message': message}), 500
-        return jsonify({'code': 500, 'message': '图片生成失败，请稍后重试或检查配置'}), 500
+            message = (
+                '图片生成失败：本次使用的是共享免费通道，但它当前不可用。'
+                '请在「模型配置 → 图片生成」里填入自己的 API Key 后再试。'
+            )
+        else:
+            message = (
+                f'图片生成失败（使用的是配置「{_provider_name(provider)}」）：'
+                '请检查该配置的 API Key、接口地址与模型名是否正确。'
+            )
+        return jsonify({'code': 500, 'message': message}), 500
 
     if is_free:
         remaining = _consume_free_usage(user_id)
