@@ -63,8 +63,12 @@ const loadOptions = async () => {
   }
 };
 
+// 「填入默认」填入的内容：
+// - 人物设定：填入与 placeholder 完全一致的「安全版」提示词，界面上不暴露后端
+//   DEFAULT_CHARACTER_PROMPT；只有用户一个字都没填时，后端才回落到那份实际提示词。
+// - 生图：沿用后端下发的默认提示词（非敏感，可安全展示）。
 const fillDefault = (cat) => {
-  state[cat].customPrompt = defaultPrompt(cat);
+  state[cat].customPrompt = cat === 'character' ? CHARACTER_PLACEHOLDER : defaultPrompt(cat);
 };
 
 const clearCustom = (cat) => {
