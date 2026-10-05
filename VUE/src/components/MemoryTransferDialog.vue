@@ -146,7 +146,6 @@ async function importMemory() {
     size="460px"
     append-to-body
     destroy-on-close
-    :close-on-click-modal="false"
     class="memory-transfer-drawer"
   >
     <template #header>

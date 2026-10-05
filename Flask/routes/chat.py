@@ -1061,6 +1061,11 @@ def chat():
     for msg in messages:
         role = msg.get('role')
         content = msg.get('content', '')
+        # 过滤「记忆导入通知」（role=system）：系统提示词由后端统一注入，
+        # 中间的 system 消息既浪费 token，又会在新对话场景顶替系统提示词位置，
+        # 导致人物设定与记忆摘要不被注入 —— 记忆内容本身经 _memory_summary_block 下发。
+        if role == 'system' and str(content).startswith('[系统提示]'):
+            continue
         if role == 'assistant' and content:
             content = strip_html_to_text(content)
         formatted_messages.append({

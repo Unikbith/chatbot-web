@@ -3,6 +3,31 @@ import vue from '@vitejs/plugin-vue'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 import path from 'path'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+
+// 生产构建清理产物注释：index.html 不会被 esbuild 处理，
+// 其中的 HTML 注释与内联 <style> 的 CSS 注释会原样保留到 dist，
+// 开发者工具查看源码即可读到实现说明，这里在打包完成后统一剥离。
+function stripBuildComments() {
+  return {
+    name: 'strip-build-comments',
+    apply: 'build',
+    closeBundle() {
+      const distHtml = path.resolve(__dirname, 'dist/index.html')
+      if (!existsSync(distHtml)) return
+      let html = readFileSync(distHtml, 'utf8')
+      // 移除 HTML 注释（<!---->、<!--v-if--> 等功能性锚点由 Vue 运行时生成，
+      // 不在产物 HTML 中，正则只需清掉源码注释）
+      html = html.replace(/<!--[\s\S]*?-->/g, '')
+      // 移除内联 <style> 块内的 CSS 注释
+      html = html.replace(/<style([^>]*)>([\s\S]*?)<\/style>/gi, (m, attr, css) => {
+        const clean = css.replace(/\/\*[\s\S]*?\*\//g, '')
+        return `<style${attr}>${clean}</style>`
+      })
+      writeFileSync(distHtml, html)
+    },
+  }
+}
 
 export default defineConfig({
   plugins: [
@@ -15,6 +40,7 @@ export default defineConfig({
       resolvers: [ElementPlusResolver()],
       dts: false,
     }),
+    stripBuildComments(),
   ],
   resolve: {
     alias: {
@@ -62,5 +88,7 @@ export default defineConfig({
   // 生产构建去掉 console 与 debugger（源码中的 logger 生产态已静默，这里再兜底一次）
   esbuild: {
     drop: ['console', 'debugger'],
+    // 连第三方库的 license 头注释也一并剥离，避免产物残留可读说明
+    legalComments: 'none',
   },
 })
