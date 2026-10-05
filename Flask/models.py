@@ -928,3 +928,77 @@ class AiUsageLog(db.Model):
             'error_type': self.error_type,
             'created_at': iso_time(self.created_at),
         }
+
+
+class MemoryCard(db.Model):
+    """用户可编辑的长期记忆卡片，用于关系、时间线与偏好记忆。"""
+    __tablename__ = 'memory_cards'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False, index=True)
+    card_type = db.Column(db.String(20), default='fact', nullable=False)
+    title = db.Column(db.String(200), nullable=False, default='')
+    content = db.Column(db.Text, nullable=False, default='')
+    importance = db.Column(db.Integer, default=1, nullable=False)
+    source = db.Column(db.String(20), default='user', nullable=False)
+    created_at = db.Column(db.DateTime, default=local_now)
+    updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
+
+    __table_args__ = (
+        db.Index('idx_memory_cards_conv_updated', 'conversation_id', 'updated_at'),
+        db.Index('idx_memory_cards_user_updated', 'user_id', 'updated_at'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'conversation_id': self.conversation_id,
+            'card_type': self.card_type,
+            'title': self.title,
+            'content': self.content,
+            'importance': self.importance,
+            'source': self.source,
+            'created_at': iso_time(self.created_at),
+            'updated_at': iso_time(self.updated_at),
+        }
+
+
+class SupportThread(db.Model):
+    """用户与管理员之间的匿名反馈会话（每个用户一个线程）。"""
+    __tablename__ = 'support_threads'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True, index=True)
+    status = db.Column(db.String(20), default='open', nullable=False)
+    user_unread = db.Column(db.Integer, default=0, nullable=False)
+    admin_unread = db.Column(db.Integer, default=0, nullable=False)
+    last_message_at = db.Column(db.DateTime, nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=local_now)
+    updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
+
+    user = db.relationship('User', backref='support_thread')
+
+
+class SupportMessage(db.Model):
+    """匿名反馈会话消息，sender=user/admin。"""
+    __tablename__ = 'support_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    thread_id = db.Column(db.Integer, db.ForeignKey('support_threads.id'), nullable=False, index=True)
+    sender = db.Column(db.String(10), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=local_now, index=True)
+
+    __table_args__ = (
+        db.Index('idx_support_messages_thread_created', 'thread_id', 'created_at', 'id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'thread_id': self.thread_id,
+            'sender': self.sender,
+            'content': self.content,
+            'created_at': iso_time(self.created_at),
+        }

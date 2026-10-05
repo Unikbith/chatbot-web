@@ -21,6 +21,8 @@ import PersonaPanel from '../components/PersonaPanel.vue'
 import ConversationSettings from '../components/ConversationSettings.vue'
 import PersonaMarketplace from '../components/PersonaMarketplace.vue'
 import NewUserTutorialDialog from '../components/NewUserTutorialDialog.vue'
+import SupportChatDialog from '../components/SupportChatDialog.vue'
+import MemoryCenterDialog from '../components/MemoryCenterDialog.vue'
 import ThumbIcon from '../components/ThumbIcon.vue'
 import { identiconDataUrl } from '../utils/identicon'
 
@@ -46,6 +48,8 @@ const settingsInitialTab = ref('general')
 const personaPanelVisible = ref(false)
 const convoSettingsVisible = ref(false)
 const marketplaceVisible = ref(false)
+const supportChatVisible = ref(false)
+const memoryCenterVisible = ref(false)
 // 新用户使用教程弹窗（新用户注册后首次登录自动弹出一次）
 const tutorialVisible = ref(false)
 
@@ -663,6 +667,11 @@ async function createConversationWithPersona(personaId) {
   await _doCreateConversation(personaId)
 }
 
+async function handleMemoryImported(conv) {
+  await loadConversations()
+  if (conv?.id) await handleSelectConversation(conv.id)
+}
+
 // 会话切换令牌：每次切换/新建都自增。
 // 用途：切换会话是一次网络往返，若用户在等待期间又点了另一个会话，
 // 先发的请求可能后返回 —— 不做拦截就会把界面切回旧会话（点了 A 却停在 B）。
@@ -1112,6 +1121,8 @@ async function handleConvoSettingsSaved(payload) {
       @open-settings="requireLogin(openSettings)"
       @open-persona="requireLogin(() => personaPanelVisible = true)"
       @open-marketplace="requireLogin(() => marketplaceVisible = true)"
+      @open-support="requireLogin(() => supportChatVisible = true)"
+      @open-memory-center="requireLogin(() => memoryCenterVisible = true)"
       @edit-persona="handleSidebarEditPersona"
       @login="authModalVisible = true"
       @logout="handleLogout"
@@ -1396,6 +1407,15 @@ async function handleConvoSettingsSaved(payload) {
 
     <!-- 新用户使用教程：注册后首次登录自动弹出一次，之后从侧边栏/系统设置随时可看 -->
     <NewUserTutorialDialog v-model="tutorialVisible" @read="markTutorialSeen" />
+    <SupportChatDialog v-model="supportChatVisible" :user="user" />
+    <MemoryCenterDialog
+      v-model="memoryCenterVisible"
+      :conversation-id="currentConvId"
+      :provider-id="currentProviderId"
+      :model-id="currentModelId"
+      :persona-id="currentPersona?.id"
+      @imported="handleMemoryImported"
+    />
 
     <!-- 免费模型提醒：未配置自己 API Key 的用户每次进入都会看到一次 -->
     <FreeApiReminderDialog

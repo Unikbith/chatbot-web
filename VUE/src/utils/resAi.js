@@ -381,6 +381,24 @@ const conversationApi = {
   async clear(id) {
     return resAi.delete(`/api/conversations/${id}/messages`);
   },
+  async memoryCenter(id) {
+    return resAi.get(`/api/conversations/${id}/memory-center`);
+  },
+  async createMemory(id, data) {
+    return resAi.post(`/api/conversations/${id}/memories`, data);
+  },
+  async updateMemory(id, cardId, data) {
+    return resAi.put(`/api/conversations/${id}/memories/${cardId}`, data);
+  },
+  async removeMemory(id, cardId) {
+    return resAi.delete(`/api/conversations/${id}/memories/${cardId}`);
+  },
+  async dailyEvent(id) {
+    return resAi.get(`/api/conversations/${id}/daily-event`);
+  },
+  async importMemory(data) {
+    return resAi.post('/api/conversations/import-memory', data);
+  },
 };
 
 // ========== 聊天 API ==========
@@ -396,6 +414,9 @@ const chatApi = {
   },
   async models(providerId, type = 'chat') {
     return resAi.get(`/api/chat/models?provider_id=${providerId}&type=${type}`);
+  },
+  async exportMemory(data) {
+    return resAi.post('/api/chat/memory-export', data, { timeout: 120000 });
   },
 };
 
@@ -579,9 +600,27 @@ const adminApi = {
   async feedbackList(page = 1, perPage = 20) {
     return adminReq.get(`/api/feedback?page=${page}&per_page=${perPage}`);
   },
+  async supportChats(page = 1, perPage = 30) {
+    return adminReq.get(`/api/feedback/admin/support-chats?page=${page}&per_page=${perPage}`);
+  },
+  async supportThread(threadId) {
+    return adminReq.get(`/api/feedback/admin/support-chats/${threadId}`);
+  },
+  async replySupportThread(threadId, content) {
+    return adminReq.post(`/api/feedback/admin/support-chats/${threadId}`, { content });
+  },
   logout() {
     localStorage.removeItem("admin_token");
     localStorage.removeItem("admin_username");
+  },
+};
+
+const supportApi = {
+  async getThread() {
+    return resAi.get('/api/feedback/support');
+  },
+  async send(content) {
+    return resAi.post('/api/feedback/support', { content });
   },
 };
 
@@ -708,6 +747,7 @@ export {
   audioApi,
   imageApi,
   adminApi,
+  supportApi,
   marketplaceApi,
   feedbackApi,
   baseURL

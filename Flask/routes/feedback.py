@@ -2,7 +2,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
-from models import Feedback
+from models import Feedback, SupportThread, SupportMessage, User, local_now
 from functools import wraps
 from flask_jwt_extended import get_jwt
 
@@ -71,3 +71,123 @@ def list_feedback():
             'pages': pagination.pages,
         }
     })
+
+
+def _get_or_create_support_thread(user_id):
+    thread = SupportThread.query.filter_by(user_id=user_id).first()
+    if thread:
+        return thread
+    thread = SupportThread(user_id=user_id)
+    db.session.add(thread)
+    db.session.commit()
+    return thread
+
+
+def _anonymous_identity(user_id):
+    return {
+        'anonymous_id': f'匿名用户{int(user_id):04d}',
+        'avatar_seed': f'support-{int(user_id)}',
+    }
+
+
+@feedback_bp.route('/support', methods=['GET'])
+@jwt_required()
+def support_thread():
+    """用户侧匿名反馈会话；只显示匿名身份和回复时间。"""
+    user_id = int(get_jwt_identity())
+    thread = _get_or_create_support_thread(user_id)
+    messages = SupportMessage.query.filter_by(thread_id=thread.id).order_by(
+        SupportMessage.created_at.asc(), SupportMessage.id.asc()
+    ).all()
+    if thread.user_unread:
+        thread.user_unread = 0
+        db.session.commit()
+    return jsonify({'code': 200, 'data': {
+        **_anonymous_identity(user_id),
+        'thread_id': thread.id,
+        'messages': [m.to_dict() for m in messages],
+    }})
+
+
+@feedback_bp.route('/support', methods=['POST'])
+@jwt_required()
+def send_support_message():
+    user_id = int(get_jwt_identity())
+    data = request.get_json(silent=True) or {}
+    content = (data.get('content') or '').strip()
+    if not content:
+        return jsonify({'code': 400, 'message': '请输入内容'}), 400
+    if len(content) > 2000:
+        return jsonify({'code': 400, 'message': '单条消息最多 2000 字'}), 400
+    thread = _get_or_create_support_thread(user_id)
+    msg = SupportMessage(thread_id=thread.id, sender='user', content=content)
+    thread.admin_unread = (thread.admin_unread or 0) + 1
+    thread.last_message_at = local_now()
+    db.session.add(msg)
+    db.session.commit()
+    return jsonify({'code': 200, 'message': '已发送', 'data': msg.to_dict()})
+
+
+@feedback_bp.route('/admin/support-chats', methods=['GET'])
+@admin_required
+def admin_support_chats():
+    page = max(1, int(request.args.get('page', 1)))
+    per_page = min(100, max(1, int(request.args.get('per_page', 30))))
+    pagination = SupportThread.query.order_by(
+        SupportThread.last_message_at.desc(),
+        SupportThread.updated_at.desc(),
+    ).paginate(page=page, per_page=per_page, error_out=False)
+    items = []
+    for t in pagination.items:
+        user = User.query.get(t.user_id)
+        last = SupportMessage.query.filter_by(thread_id=t.id).order_by(SupportMessage.id.desc()).first()
+        identity = _anonymous_identity(t.user_id)
+        items.append({
+            'id': t.id,
+            'user': user.to_dict() if user else None,
+            'anonymous_id': identity['anonymous_id'],
+            'avatar_seed': identity['avatar_seed'],
+            'status': t.status,
+            'admin_unread': t.admin_unread or 0,
+            'last_message': last.to_dict() if last else None,
+            'last_message_at': last.to_dict()['created_at'] if last else None,
+        })
+    return jsonify({'code': 200, 'data': {
+        'items': items,
+        'total': pagination.total,
+        'page': page,
+        'pages': pagination.pages,
+    }})
+
+
+@feedback_bp.route('/admin/support-chats/<int:thread_id>', methods=['GET', 'POST'])
+@admin_required
+def admin_support_thread(thread_id):
+    thread = SupportThread.query.get(thread_id)
+    if not thread:
+        return jsonify({'code': 404, 'message': '会话不存在'}), 404
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        content = (data.get('content') or '').strip()
+        if not content:
+            return jsonify({'code': 400, 'message': '请输入回复内容'}), 400
+        if len(content) > 2000:
+            return jsonify({'code': 400, 'message': '单条消息最多 2000 字'}), 400
+        msg = SupportMessage(thread_id=thread.id, sender='admin', content=content)
+        thread.user_unread = (thread.user_unread or 0) + 1
+        thread.last_message_at = local_now()
+        db.session.add(msg)
+        db.session.commit()
+        return jsonify({'code': 200, 'message': '已回复', 'data': msg.to_dict()})
+
+    thread.admin_unread = 0
+    db.session.commit()
+    messages = SupportMessage.query.filter_by(thread_id=thread.id).order_by(
+        SupportMessage.created_at.asc(), SupportMessage.id.asc()
+    ).all()
+    user = User.query.get(thread.user_id)
+    return jsonify({'code': 200, 'data': {
+        'thread': {'id': thread.id, 'anonymous_id': _anonymous_identity(thread.user_id)['anonymous_id']},
+        'user': user.to_dict() if user else None,
+        'messages': [m.to_dict() for m in messages],
+    }})

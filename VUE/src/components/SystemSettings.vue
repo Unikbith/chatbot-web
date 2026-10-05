@@ -32,8 +32,8 @@
           </div>
 
           <div class="settings-section avatar-section">
-            <div class="section-title">{{ t('头像', 'Avatars') }}</div>
-            <p class="section-desc">{{ t('通用头像用于所有未单独设置头像的角色对话，可分别在聊天框与角色设置中覆盖。', 'General avatars apply to conversations that have no per-chat avatar. They can be overridden per chat.') }}</p>
+            <div class="section-title">{{ t('账号头像', 'Account Avatar') }}</div>
+            <p class="section-desc">{{ t('仅作为账号头像显示，不再统一控制对话中的 AI 头像或单聊外观。', 'Shown as your account avatar only; it no longer controls per-chat AI avatars or appearance.') }}</p>
 
             <div class="avatar-row">
               <div class="avatar-block">
@@ -62,130 +62,9 @@
                 </div>
               </div>
 
-              <div class="avatar-block">
-                <el-avatar :size="60" :src="aiAvatarUrl" class="avatar-preview ai-avatar">
-                  <el-icon><MagicStick /></el-icon>
-                </el-avatar>
-                <div class="avatar-meta">
-                  <span class="avatar-label">{{ t('AI 头像', 'AI Avatar') }}</span>
-                  <div class="avatar-actions">
-                    <el-upload
-                      :show-file-list="false"
-                      :before-upload="handleAiAvatarUpload"
-                      accept="image/*"
-                    >
-                      <el-button size="small">{{ t('更换', 'Change') }}</el-button>
-                    </el-upload>
-                    <el-button
-                      size="small"
-                      plain
-                      :disabled="!aiAvatarUrl"
-                      @click="clearAvatar('ai_avatar')"
-                    >
-                      {{ t('清除', 'Clear') }}
-                    </el-button>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
 
-          <div class="settings-section">
-            <div class="section-title">{{ t('界面', 'Interface') }}</div>
-
-            <div class="setting-item">
-              <div class="setting-label">{{ t('背景图片', 'Background Image') }}</div>
-              <div class="bg-image-control">
-                <div class="bg-preview" :style="bgPreviewStyle">
-                  <span v-if="!localSettings.background_image" class="bg-placeholder">{{ t('无背景', 'None') }}</span>
-                </div>
-                <div class="bg-actions">
-                  <el-upload
-                    :show-file-list="false"
-                    :before-upload="handleBgUpload"
-                    accept="image/*"
-                  >
-                    <el-button size="small">{{ t('上传图片', 'Upload') }}</el-button>
-                  </el-upload>
-                  <el-button
-                    size="small"
-                    type="danger"
-                    plain
-                    @click="clearBgImage"
-                    :disabled="!localSettings.background_image"
-                  >
-                    {{ t('清除', 'Clear') }}
-                  </el-button>
-                </div>
-              </div>
-            </div>
-
-            <div class="setting-item">
-              <div class="setting-label">{{ t('背景图片展示方式', 'Background Display') }}</div>
-              <el-radio-group v-model="localSettings.background_cover">
-                <el-radio-button value="contain">{{ t('完全可见', 'Full Visible') }}</el-radio-button>
-                <el-radio-button value="cover">{{ t('覆盖背景', 'Cover') }}</el-radio-button>
-              </el-radio-group>
-            </div>
-
-            <div class="setting-item">
-              <div class="setting-label">{{ t('消息框透明度', 'Message Transparency') }}</div>
-              <div class="slider-control">
-                <el-slider
-                  v-model="localSettings.message_opacity"
-                  :min="0.1"
-                  :max="1"
-                  :step="0.05"
-                  style="flex: 1; margin-right: 16px"
-                />
-                <span class="slider-value">{{ Math.round(localSettings.message_opacity * 100) }}%</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="settings-section">
-            <div class="section-title">{{ t('参数微调', 'Parameters') }}</div>
-            <p class="section-desc">{{ t('以下为各模型通用参数，小众参数未包含以保持简洁。', 'Common parameters across models; niche ones omitted for clarity.') }}</p>
-
-            <div class="setting-item">
-              <div class="setting-label">
-                温度
-                <el-tooltip :content="t('较高值使输出更随机创意，较低值更确定保守', 'Higher is more creative, lower is more focused')" placement="top">
-                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                </el-tooltip>
-              </div>
-              <div class="slider-control">
-                <el-slider v-model="localSettings.temperature" :min="0" :max="2" :step="0.1" style="flex: 1; margin-right: 16px" />
-                <span class="slider-value">{{ localSettings.temperature.toFixed(1) }}</span>
-              </div>
-            </div>
-
-            <div class="setting-item">
-              <div class="setting-label">
-                频率惩罚
-                <el-tooltip :content="t('减少重复内容，值越高越倾向于使用新词', 'Reduce repetition')" placement="top">
-                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                </el-tooltip>
-              </div>
-              <div class="slider-control">
-                <el-slider v-model="localSettings.frequency_penalty" :min="-2" :max="2" :step="0.1" style="flex: 1; margin-right: 16px" />
-                <span class="slider-value">{{ localSettings.frequency_penalty.toFixed(1) }}</span>
-              </div>
-            </div>
-
-            <div class="setting-item">
-              <div class="setting-label">
-                存在惩罚
-                <el-tooltip :content="t('增加谈论新话题的可能性', 'Increase chance of new topics')" placement="top">
-                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                </el-tooltip>
-              </div>
-              <div class="slider-control">
-                <el-slider v-model="localSettings.presence_penalty" :min="-2" :max="2" :step="0.1" style="flex: 1; margin-right: 16px" />
-                <span class="slider-value">{{ localSettings.presence_penalty.toFixed(1) }}</span>
-              </div>
-            </div>
-          </div>
         </el-tab-pane>
 
         <!-- 账号管理 -->

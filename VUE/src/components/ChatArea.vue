@@ -4,7 +4,7 @@ import logger from '@/utils/logger';
 import { ElMessage, ElInput } from 'element-plus';
 import { 
   Setting, RefreshLeft, Lightning, 
-  Bell, VideoPause, CircleClose, Upload, Edit, MagicStick, Picture, Notebook, Menu
+  Bell, VideoPause, CircleClose, Upload, Edit, MagicStick, Picture, Notebook, Menu, Collection
 } from '@element-plus/icons-vue';
 import { readStream, chatApi, audioApi, imageApi, providersApi, conversationApi, uploadApi } from '@/utils/resAi';
 import auth from '@/utils/auth';
@@ -74,7 +74,8 @@ const emit = defineEmits([
   'modelChange',
   // 本轮回复结束：父组件借此刷新长期记忆（记忆回廊）等派生数据
   'reply-done',
-  'toggleSidebar'
+  'toggleSidebar',
+  'openMemoryCenter'
 ]);
 
 const opacityVal = computed(() => {
@@ -93,6 +94,17 @@ const bgStyle = computed(() => {
 });
 
 const greetingText = () => t('你好！有什么可以帮你的吗？', 'Hello! How can I help you?');
+
+const quickAction = ref('');
+const quickActions = computed(() => [
+  { id: 'continue', label: t('继续', 'Continue') },
+  { id: 'rewrite', label: t('重写', 'Rewrite') },
+  { id: 'more_intimate', label: t('更亲密', 'Closer') },
+  { id: 'more_restrained', label: t('更克制', 'Restrained') },
+  { id: 'shorter', label: t('更简短', 'Shorter') },
+  { id: 'change_scene', label: t('换场景', 'New scene') },
+  { id: 'lock_voice', label: t('锁定口吻', 'Lock voice') },
+]);
 
 // 开场白：作为会话首条消息常驻展示，发送消息/收到回复后不会消失；
 // 仅当载入已有历史消息的对话时隐藏（历史中没有开场白，避免重复）。
@@ -566,7 +578,9 @@ const handleSend = async () => {
       provider_id: ctx.providerId,
       model_id: ctx.modelId || undefined,
       conversation_id: convId,
+      quick_action: quickAction.value || undefined,
     };
+    quickAction.value = '';
 
     const response = await chatApi.stream(requestBody, { signal: ctrl.signal });
     await readStream(response, (data) => {
@@ -618,6 +632,13 @@ const handleSend = async () => {
     activeStreams.value.delete(streamKey);
   }
 };
+
+async function sendQuickAction(action, label) {
+  if (loading.value) return
+  quickAction.value = action
+  inputText.value = label
+  await handleSend()
+}
 
 // 关键词识别：返回 {mode:'text2img'|'img2img', prompt} 或 null
 function matchImageCommand(raw) {
@@ -1234,6 +1255,9 @@ onUnmounted(() => {
         <el-tooltip :content="t('提示词工具', 'Prompt Tool')">
           <el-button circle :icon="Notebook" @click="openPromptTool" />
         </el-tooltip>
+        <el-tooltip :content="t('记忆中心', 'Memory Center')">
+          <el-button circle :icon="Collection" @click="emit('openMemoryCenter')" />
+        </el-tooltip>
         <el-tooltip :content="t('模型设置', 'Model Settings')">
           <el-button circle :icon="Setting" @click="emit('openProvider')" />
         </el-tooltip>
@@ -1375,6 +1399,15 @@ onUnmounted(() => {
                 <span v-if="item.tokens" class="token-usage" :title="t('本次回复消耗的 token 数', 'Tokens used by this reply')">
                   {{ t('消耗', 'Used') }} {{ item.tokens.toLocaleString() }} {{ t('tokens', 'tokens') }}
                 </span>
+              </div>
+              <div v-if="item.role === 'assistant' && isLatestAssistant(index) && !loading" class="quick-action-row">
+                <button
+                  v-for="a in quickActions"
+                  :key="a.id"
+                  class="quick-action-chip"
+                  type="button"
+                  @click.stop="sendQuickAction(a.id, a.label)"
+                >{{ a.label }}</button>
               </div>
             </div>
           </div>
@@ -1561,15 +1594,22 @@ onUnmounted(() => {
   display: none;
   width: 36px;
   height: 36px;
-  margin-right: 6px;
-  border: 1px solid var(--border-color);
-  border-radius: 11px;
-  background: var(--surface);
-  color: var(--text-primary);
+  margin-right: 4px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #6b7280;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.chat-menu-btn:hover,
+.chat-menu-btn:active {
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .chat-title {
@@ -1909,6 +1949,30 @@ onUnmounted(() => {
   color: #9ca3af;
   white-space: nowrap;
   user-select: text;
+}
+
+.quick-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.quick-action-chip {
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.quick-action-chip:hover,
+.quick-action-chip:active {
+  background: var(--brand-soft, rgba(176, 106, 46, .1));
+  border-color: var(--brand);
+  color: var(--brand);
 }
 
 .action-btn {

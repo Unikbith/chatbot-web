@@ -619,6 +619,30 @@
         </el-tab-pane>
 
         <el-tab-pane :label="t('对话素材记录', 'Media History')" name="mediaLogs">
+          <div class="admin-toolbar support-toolbar">
+            <span class="admin-title">{{ t('匿名反馈会话', 'Anonymous Support Chats') }}</span>
+            <el-button size="small" :icon="Refresh" @click="loadSupportChats">{{ t('刷新反馈', 'Refresh chats') }}</el-button>
+          </div>
+          <el-table :data="supportChats" v-loading="supportChatsLoading" size="small" stripe class="admin-table support-table">
+            <el-table-column prop="user.id" label="UID" width="70" align="center" />
+            <el-table-column prop="anonymous_id" :label="t('匿名ID', 'Anonymous ID')" width="130" />
+            <el-table-column :label="t('用户信息', 'User')" min-width="180">
+              <template #default="{ row }">{{ row.user?.username }} · {{ row.user?.email }}</template>
+            </el-table-column>
+            <el-table-column :label="t('最近消息', 'Last message')" min-width="200" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.last_message?.content || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('未读', 'Unread')" width="70" align="center">
+              <template #default="{ row }"><el-badge v-if="row.admin_unread" :value="row.admin_unread" /></template>
+            </el-table-column>
+            <el-table-column :label="t('时间', 'Time')" width="150">
+              <template #default="{ row }">{{ formatTime(row.last_message_at) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('操作', 'Actions')" width="90" align="center">
+              <template #default="{ row }"><el-button size="small" type="primary" plain @click="openSupportChat(row)">{{ t('回复', 'Reply') }}</el-button></template>
+            </el-table-column>
+          </el-table>
+
           <div class="admin-toolbar">
             <span class="admin-title">{{ t('对话素材设置历史', 'Conversation Media History') }}</span>
             <el-button size="small" type="danger" :disabled="!mediaSelected.length" :icon="Delete" @click="deleteMediaLogs">
@@ -971,6 +995,9 @@
             <el-button size="small" plain :icon="Refresh" @click="refreshConversationMessages">
               {{ t('刷新最新', 'Refresh latest') }}
             </el-button>
+            <el-button size="small" plain @click="_scrollMessageDrawerToTop">
+              {{ t('回到顶部', 'Back to top') }}
+            </el-button>
           </div>
         </div>
 
@@ -1013,6 +1040,32 @@
         </div>
       </div>
     </el-drawer>
+
+    <el-dialog
+      v-model="supportDialogVisible"
+      :title="t('匿名反馈会话', 'Anonymous Support Chat')"
+      width="min(680px, 96vw)"
+      align-center
+      class="support-admin-dialog"
+    >
+      <div v-loading="supportDialogLoading" class="support-admin-chat">
+        <div class="support-admin-user">
+          <strong>{{ supportDetail.user?.username || '-' }}</strong>
+          <span>{{ supportDetail.user?.email || '-' }}</span>
+          <el-tag size="small" effect="plain">{{ supportDetail.user?.id || '-' }}</el-tag>
+        </div>
+        <div class="support-admin-messages">
+          <div v-for="m in supportDetail.messages" :key="m.id" class="support-admin-msg" :class="m.sender">
+            <div>{{ m.content }}</div>
+            <time>{{ formatTime(m.created_at) }}</time>
+          </div>
+        </div>
+        <div class="support-admin-reply">
+          <el-input v-model="supportReply" type="textarea" :rows="2" maxlength="2000" :placeholder="t('回复用户', 'Reply to user')" />
+          <el-button type="primary" @click="replySupport">{{ t('发送回复', 'Send reply') }}</el-button>
+        </div>
+      </div>
+    </el-dialog>
 
     <!-- 卡片广场详情弹窗（管理员查看完整信息） -->
     <el-dialog
@@ -1520,6 +1573,12 @@ async function _scrollMessageDrawerToBottom() {
   if (el) el.scrollTop = el.scrollHeight
 }
 
+async function _scrollMessageDrawerToTop() {
+  await nextTick()
+  const el = _msgDrawerScrollEl()
+  if (el) el.scrollTop = 0
+}
+
 async function viewConversation(conv) {
   msgDrawerData.value = {
     conversation: { id: conv.id, title: conv.title },
@@ -1545,7 +1604,7 @@ async function viewConversation(conv) {
     ElMessage.error(t('加载消息失败', 'Failed to load messages'))
   } finally {
     msgDrawerLoading.value = false
-    await _scrollMessageDrawerToBottom()
+    await _scrollMessageDrawerToTop()
   }
 }
 
@@ -1839,11 +1898,59 @@ async function deletePromptLogs() {
 // ========== 对话素材设置历史 ==========
 const mediaLogs = ref([])
 const mediaLoading = ref(false)
+const supportChats = ref([])
+const supportChatsLoading = ref(false)
+const supportDialogVisible = ref(false)
+const supportDialogLoading = ref(false)
+const supportDetail = ref({ thread: null, user: null, messages: [] })
+const supportReply = ref('')
 const mediaPage = ref(1)
 const mediaPerPage = 20
 const mediaTotal = ref(0)
 const mediaSelected = ref([])
 const mediaFilters = ref({ userId: '', mediaType: '' })
+
+async function loadSupportChats() {
+  supportChatsLoading.value = true
+  try {
+    const res = await adminApi.supportChats()
+    if (res.code === 200) supportChats.value = res.data.items || []
+  } catch (e) {
+    ElMessage.error(t('加载反馈会话失败', 'Failed to load support chats'))
+  } finally {
+    supportChatsLoading.value = false
+  }
+}
+
+async function openSupportChat(row) {
+  supportDialogVisible.value = true
+  supportDialogLoading.value = true
+  try {
+    const res = await adminApi.supportThread(row.id)
+    if (res.code === 200) supportDetail.value = res.data
+    await nextTick()
+    const el = document.querySelector('.support-admin-dialog .el-dialog__body')
+    if (el) el.scrollTop = el.scrollHeight
+  } catch (e) {
+    ElMessage.error(t('加载会话失败', 'Failed to load thread'))
+  } finally {
+    supportDialogLoading.value = false
+  }
+}
+
+async function replySupport() {
+  const content = supportReply.value.trim()
+  if (!content || !supportDetail.value.thread?.id) return
+  try {
+    const res = await adminApi.replySupportThread(supportDetail.value.thread.id, content)
+    if (res.code === 200) {
+      supportReply.value = ''
+      await openSupportChat({ id: supportDetail.value.thread.id })
+    }
+  } catch (e) {
+    ElMessage.error(t('回复失败', 'Reply failed'))
+  }
+}
 
 async function loadMediaLogs() {
   mediaLoading.value = true
@@ -2057,7 +2164,10 @@ watch(activeTab, (val) => {
 // 切换标签页时按需加载：提示词记录首次进入才拉取，避免首屏多余请求
 function onTabChange(name) {
   if (name === 'promptLogs') loadPromptLogs()
-  if (name === 'mediaLogs') loadMediaLogs()
+  if (name === 'mediaLogs') {
+    loadMediaLogs()
+    loadSupportChats()
+  }
 }
 </script>
 
@@ -3047,6 +3157,18 @@ function onTabChange(name) {
 .md-load-more { display: flex; justify-content: center; padding: 8px 0 14px; }
 .md-msg-meta { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; color: var(--text-muted, #a9815a); font-size: 11.5px; }
 .md-reasoning { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--brand, #b06a2e); background: rgba(176, 106, 46, 0.06); color: var(--text-secondary, #6a5d53); white-space: pre-wrap; font-size: 12.5px; }
+
+.support-toolbar { margin-top: 6px; }
+.support-table { margin-bottom: 18px; }
+.support-admin-chat { display: flex; flex-direction: column; gap: 12px; }
+.support-admin-user { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--surface-hover); border-radius: 10px; }
+.support-admin-user span { color: var(--text-muted); }
+.support-admin-messages { max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.support-admin-msg { max-width: 78%; padding: 9px 11px; border-radius: 11px; background: var(--surface-hover); white-space: pre-wrap; }
+.support-admin-msg.admin { align-self: flex-end; background: rgba(176, 106, 46, .12); }
+.support-admin-msg time { display: block; margin-top: 4px; font-size: 10.5px; color: var(--text-muted); }
+.support-admin-reply { display: flex; gap: 8px; align-items: flex-end; }
+.support-admin-reply :deep(.el-textarea) { flex: 1; }
 
 @media (max-width: 900px) {
   .pl-meta-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }

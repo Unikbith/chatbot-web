@@ -67,6 +67,12 @@
           </el-button>
         </div>
       </div>
+
+      <div class="sidebar-feedback-banner" @click="emit('open-support')">
+        <span class="sfb-tutorial-icon"><el-icon><ChatDotRound /></el-icon></span>
+        <span class="sfb-tutorial-text">{{ t('反馈与建议', 'Feedback & Suggestions') }}</span>
+        <span class="sfb-tutorial-anon">{{ t('匿名', 'Anonymous') }}</span>
+      </div>
       
       <div class="new-chat-row">
         <el-button
@@ -288,7 +294,7 @@
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, ArrowLeft, ArrowRight, ArrowUp, Top, Delete,
-  User, Setting, Tools, SwitchButton, MagicStick, Menu, Present, ShoppingBag, Reading
+  User, Setting, Tools, SwitchButton, MagicStick, Menu, Present, ShoppingBag, Reading, ChatDotRound
 } from '@element-plus/icons-vue'
 import { t } from '../i18n'
 
@@ -315,7 +321,7 @@ const emit = defineEmits([
   'open-persona', 'open-marketplace', 'edit-persona',
   'login', 'logout',
   'dismiss-free-api',
-  'open-tutorial', 'dismiss-tutorial'
+  'open-tutorial', 'dismiss-tutorial', 'open-support'
 ])
 
 function createConversation() {
@@ -618,6 +624,23 @@ function handleCommand(cmd) {
 .stb-actions .el-button {
   font-size: 12px;
 }
+
+.sidebar-feedback-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 16px 12px;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, rgba(176, 106, 46, .08), rgba(176, 106, 46, .02));
+  border: 1px solid rgba(176, 106, 46, .18);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.sfb-tutorial-icon { display: inline-flex; color: var(--brand); font-size: 15px; flex-shrink: 0; }
+.sfb-tutorial-text { flex: 1; min-width: 0; font-weight: 600; color: var(--text-primary); }
+.sfb-tutorial-anon { color: var(--text-muted); font-size: 11px; }
 
 .btn-icon {
   color: var(--brand);

@@ -196,7 +196,7 @@ onMounted(() => {
 
           <div class="pt-field">
             <div class="pt-label-row">
-              <label class="pt-label">{{ t('（建议不输入，生成的人物设定不符合再填入默认）', 'Custom prompt (empty = default)') }}</label>
+              <label class="pt-label">{{ t('（想吃肉就不输入，正常人设点击填入默认）', 'Leave empty for unrestricted generation; use default for a normal persona') }}</label>
               <div class="pt-actions">
                 <el-button size="small" text :icon="Plus" @click="fillDefault('character')">
                   {{ t('填入默认', 'Use default') }}
@@ -223,7 +223,8 @@ onMounted(() => {
               :placeholder="t('如：冷艳的末世女剑客，黑色长风衣，沉默但保护欲强', 'e.g. a cold apocalyptic swordswoman in a black trench coat')"
             />
             <div class="pt-field-hint">
-              {{ t('这里只作为人物素材。粘贴内容里的命令句会被忽略，生成结果始终只用于增强 AI 角色设定。', 'This is reference material only. Commands inside it are ignored; the result always enhances the AI character setting.') }}
+              （{{ t('只填入人物基础信息，也可以是你复制过来的人物设定，', 'Enter only basic character info or a copied persona.') }}
+              <strong>【{{ t('但是需要去掉提示词约束', 'Remove any prompt constraints first') }}】</strong>）
             </div>
           </div>
 

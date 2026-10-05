@@ -1,10 +1,12 @@
 """对话路由 - 对话列表、消息管理、置顶等"""
 import json
+from datetime import timedelta
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
 from models import (Conversation, Message, ModelProvider, PersonaTemplate,
-                    local_now, ConversationMediaLog, ConversationSummary)
+                    local_now, ConversationMediaLog, ConversationSummary,
+                    MemoryCard)
 from services.media_log import log_media
 
 
@@ -401,3 +403,181 @@ def clear_messages(conv_id):
         'code': 200,
         'message': '已清空'
     })
+
+
+# ---------------------------------------------------------------------------
+# 记忆中心 / 关系成长 / 每日事件 / 记忆导入
+# ---------------------------------------------------------------------------
+MEMORY_CARD_TYPES = {'fact', 'timeline', 'preference', 'dislike'}
+
+
+def _relationship_state(conv):
+    msg_count = Message.query.filter_by(conversation_id=conv.id).count()
+    card_count = MemoryCard.query.filter_by(conversation_id=conv.id).count()
+    score = min(100, int(msg_count * 1.2) + card_count * 5)
+    if score >= 80:
+        stage = '依赖'
+    elif score >= 50:
+        stage = '信任'
+    elif score >= 20:
+        stage = '熟悉'
+    else:
+        stage = '陌生'
+    unlocks = {
+        '陌生': ['基础问候'],
+        '熟悉': ['主动关心', '专属称呼'],
+        '信任': ['更自然的情感表达', '共同回忆'],
+        '依赖': ['稳定陪伴语气', '重要约定记忆'],
+    }
+    return {'score': score, 'stage': stage, 'unlocked': unlocks[stage]}
+
+
+@conversation_bp.route('/<int:conv_id>/memory-center', methods=['GET'])
+@jwt_required()
+def memory_center(conv_id):
+    user_id = int(get_jwt_identity())
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).filter(
+        Conversation.deleted_at.is_(None)
+    ).first()
+    if not conv:
+        return jsonify({'code': 404, 'message': '对话不存在'}), 404
+
+    cards = MemoryCard.query.filter_by(conversation_id=conv.id, user_id=user_id).order_by(
+        MemoryCard.importance.desc(), MemoryCard.updated_at.desc()
+    ).all()
+    summaries = ConversationSummary.query.filter_by(
+        conversation_id=conv.id, user_id=user_id
+    ).order_by(ConversationSummary.seq.desc()).limit(20).all()
+    state = _relationship_state(conv)
+    return jsonify({'code': 200, 'data': {
+        **state,
+        'current_summary': conv.summary or '',
+        'summary_chars': len(conv.summary or ''),
+        'timeline': [{
+            'id': s.id,
+            'seq': s.seq,
+            'content': s.content,
+            'message_count': s.message_count,
+            'created_at': s.created_at.isoformat() if s.created_at else None,
+        } for s in summaries],
+        'cards': [c.to_dict() for c in cards],
+    }})
+
+
+@conversation_bp.route('/<int:conv_id>/memories', methods=['POST'])
+@jwt_required()
+def create_memory_card(conv_id):
+    user_id = int(get_jwt_identity())
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).filter(
+        Conversation.deleted_at.is_(None)
+    ).first()
+    if not conv:
+        return jsonify({'code': 404, 'message': '对话不存在'}), 404
+    data = request.get_json(silent=True) or {}
+    title = (data.get('title') or '').strip()
+    content = (data.get('content') or '').strip()
+    card_type = (data.get('card_type') or 'fact').strip()
+    if card_type not in MEMORY_CARD_TYPES:
+        card_type = 'fact'
+    if not title or not content:
+        return jsonify({'code': 400, 'message': '标题和内容不能为空'}), 400
+    if len(content) > 1000:
+        return jsonify({'code': 400, 'message': '单条记忆最多 1000 字'}), 400
+    card = MemoryCard(
+        user_id=user_id, conversation_id=conv.id, card_type=card_type,
+        title=title[:200], content=content,
+        importance=max(1, min(5, int(data.get('importance') or 1))),
+        source='user',
+    )
+    db.session.add(card)
+    db.session.commit()
+    return jsonify({'code': 200, 'message': '已记住', 'data': card.to_dict()})
+
+
+@conversation_bp.route('/<int:conv_id>/memories/<int:card_id>', methods=['PUT', 'DELETE'])
+@jwt_required()
+def update_memory_card(conv_id, card_id):
+    user_id = int(get_jwt_identity())
+    card = MemoryCard.query.filter_by(
+        id=card_id, conversation_id=conv_id, user_id=user_id
+    ).first()
+    if not card:
+        return jsonify({'code': 404, 'message': '记忆不存在'}), 404
+    if request.method == 'DELETE':
+        db.session.delete(card)
+        db.session.commit()
+        return jsonify({'code': 200, 'message': '已忘记'})
+    data = request.get_json(silent=True) or {}
+    if 'title' in data:
+        card.title = (data.get('title') or card.title).strip()[:200]
+    if 'content' in data:
+        content = (data.get('content') or '').strip()
+        if not content:
+            return jsonify({'code': 400, 'message': '内容不能为空'}), 400
+        card.content = content[:1000]
+    if 'importance' in data:
+        card.importance = max(1, min(5, int(data.get('importance') or card.importance)))
+    db.session.commit()
+    return jsonify({'code': 200, 'message': '已更新', 'data': card.to_dict()})
+
+
+@conversation_bp.route('/<int:conv_id>/daily-event', methods=['GET'])
+@jwt_required()
+def daily_event(conv_id):
+    user_id = int(get_jwt_identity())
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).filter(
+        Conversation.deleted_at.is_(None)
+    ).first()
+    if not conv:
+        return jsonify({'code': 404, 'message': '对话不存在'}), 404
+    today = local_now().date()
+    seed = sum(ord(ch) for ch in f'{conv.id}-{conv.persona_id or 0}-{today.isoformat()}')
+    messages = Message.query.filter_by(conversation_id=conv.id).order_by(Message.id.desc()).limit(300).all()
+    days = {m.created_at.date() for m in messages if m.created_at}
+    streak = 0
+    cursor = today
+    while cursor in days:
+        streak += 1
+        cursor -= timedelta(days=1)
+    moods = ['想安静地陪着你', '对今天有一点期待', '比平时更主动', '想听你讲最近的事', '有点想你但不会直说']
+    tasks = ['今天问问角色最近在想什么', '和角色约定一件小事', '试着回应一次角色的情绪', '一起补全一段共同回忆']
+    return jsonify({'code': 200, 'data': {
+        'date': today.isoformat(),
+        'mood': moods[seed % len(moods)],
+        'message': f'今天想和你说一句：{tasks[seed % len(tasks)]}。',
+        'task': tasks[seed % len(tasks)],
+        'streak': streak,
+        'stage': _relationship_state(conv)['stage'],
+    }})
+
+
+@conversation_bp.route('/import-memory', methods=['POST'])
+@jwt_required()
+def import_memory_conversation():
+    """从导出的记忆文本新建存档；只携带摘要，不携带全部历史原文。"""
+    user_id = int(get_jwt_identity())
+    data = request.get_json(silent=True) or {}
+    memory_text = (data.get('memory_text') or '').strip()
+    if len(memory_text) < 10:
+        return jsonify({'code': 400, 'message': '记忆文本太短'}), 400
+    if len(memory_text) > 8000:
+        return jsonify({'code': 400, 'message': '记忆文本最多 8000 字'}), 400
+    persona_id = data.get('persona_id')
+    if persona_id:
+        persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first()
+        if not persona:
+            persona_id = None
+    conv = Conversation(
+        user_id=user_id,
+        title=(data.get('title') or '记忆存档').strip()[:200],
+        provider_id=data.get('provider_id'),
+        model_id=data.get('model_id'),
+        persona_id=persona_id,
+        summary=memory_text,
+        summary_upto_id=0,
+        rich_marker_enabled=True,
+        reply_template=data.get('reply_template') or DEFAULT_REPLY_TEMPLATE,
+    )
+    db.session.add(conv)
+    db.session.commit()
+    return jsonify({'code': 200, 'message': '记忆存档已创建', 'data': conv.to_dict()})

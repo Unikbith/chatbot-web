@@ -110,10 +110,9 @@
               :rows="2"
               :autosize="false"
               resize="none"
-              placeholder="简短描述角色特点"
+              placeholder="简述角色特点（只是用于人物卡信息展示不作为提示词参考，人设相关提示词请写入下方AI角色设定）"
               maxlength="1000"
             />
-            <div class="form-hint">仅用于卡片列表和详情展示，不参与模型请求；重要设定请写进下方 AI 角色设定。</div>
           </el-form-item>
         </div>
 
@@ -125,10 +124,9 @@
               :rows="8"
               :autosize="false"
               resize="none"
-              placeholder="详细的角色设定，指导 AI 如何扮演这个角色..."
+              placeholder="详细的角色设定，指导 AI 如何扮演这个角色...（这是 AI 真正遵循的系统提示词。角色名称会作为身份提示一并发送；简介不会。）"
               maxlength="10000"
             />
-            <div class="form-hint">这是 AI 真正遵循的系统提示词。角色名称会作为身份提示一并发送；简介不会。</div>
           </el-form-item>
           <!-- 玩家侧设定：与 AI 提示词同卡绑定，换卡即换整套角色关系 -->
           <el-form-item label="玩家设定">
@@ -138,12 +136,9 @@
               :rows="4"
               :autosize="false"
               resize="none"
-              placeholder="你自己（玩家）在这张卡里的身份设定：姓名、年龄、身份、与角色的关系、性格外貌等。留空则 AI 不知道你是谁。"
+              placeholder="你自己（玩家）在这张卡里的身份设定：姓名、年龄、身份、与角色的关系、性格外貌等。留空则 AI 不知道你是谁。（这里写「你是谁」。会随 AI 提示词一起发给模型，让角色认得你、称呼你、按你们的关系互动。）"
               maxlength="4000"
             />
-            <div class="form-hint">
-              这里写「你是谁」。会随 AI 提示词一起发给模型，让角色认得你、称呼你、按你们的关系互动。
-            </div>
           </el-form-item>
           <el-form-item label="开场问候语">
             <el-input

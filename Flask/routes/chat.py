@@ -13,7 +13,7 @@ from rich_marker import (
 )
 from models import (ModelProvider, Conversation, Message, PersonaTemplate,
                     UserSettings, PromptToolLog, ConversationSummary,
-                    WorldBookEntry, AiUsageLog, User, local_now)
+                    WorldBookEntry, AiUsageLog, User, local_now, MemoryCard)
 from services.ai_service import AIService, FreeAPIProvider
 from services.markdown_streamer import (
     strip_html_to_text,
@@ -477,6 +477,24 @@ def _get_user_settings(user_id):
 CONTEXT_MAX_MESSAGES = 20  # 送入模型的历史消息滑动窗口上限（不含系统提示词）
 CONTEXT_MAX_CHARS = 6000   # 历史正文总字数预算：长回复场景下条数窗口不够用时的第二道闸
 CONTEXT_MIN_KEEP = 6       # 字符预算收窄时至少保留最近几条原文，避免刚说的话也被砍掉
+MAX_LONG_MEMORY_CHARS = 600  # 长期记忆注入上限，避免摘要无限膨胀
+
+QUICK_ACTION_PROMPTS = {
+    'continue': '自然延续当前剧情和情绪，不要重复上一段，推进一个新的小动作或新细节。',
+    'rewrite': '重写上一条 AI 回复：保留剧情事实和人物关系，只调整表达、节奏和细节。',
+    'more_intimate': '在不违背角色设定和当前关系阶段的前提下，让表达更亲密、更关注用户，但不要突然无理由深爱。',
+    'more_restrained': '让情绪和动作更克制、更含蓄，减少直白表白，保持角色边界和真实感。',
+    'shorter': '压缩本条回复，只保留最有价值的动作、对白和情绪变化，删除重复描写。',
+    'change_scene': '平稳地推进到一个新的时间或场景，用自然过渡承接上一轮剧情。',
+    'lock_voice': '严格锁定角色已有的称呼、口癖、句式和态度，不要跳出角色，也不要改用旁白口吻。',
+}
+DEFAULT_REPLY_TEMPLATE_JSON = json.dumps({
+    'preset': 'blush',
+    'name': '脸红',
+    'protocol': 'full',
+    'length': 'long',
+    'enhance': True,
+}, ensure_ascii=False)
 
 
 def _log_cache_hit(conversation_id, prompt_tokens, cache_hit_tokens):
@@ -544,7 +562,7 @@ SUMMARY_SYSTEM_PROMPT = (
     "1. 保留：人物身份与关系、关键事件与时间线、用户表达过的偏好与禁忌、"
     "未完成的约定或待办、重要设定（地点/道具/规则）；\n"
     "2. 丢弃：寒暄、重复表述、与主线无关的闲聊；\n"
-    "3. 用第三人称客观陈述，中文，分点列出，控制在 800 字以内；\n"
+    "3. 用第三人称客观陈述，中文，分点列出，控制在 350-450 字；只保留会影响后续关系与剧情连续性的信息；\n"
     "4. 只输出摘要正文，不要任何开头客套或解释。"
 )
 
@@ -669,10 +687,13 @@ def _memory_summary_block(conv):
     """拼进系统提示词的「历史摘要」文本；无摘要时返回空串。"""
     if not conv or not conv.summary:
         return ''
+    summary = conv.summary.strip()
+    if len(summary) > MAX_LONG_MEMORY_CHARS:
+        summary = summary[:MAX_LONG_MEMORY_CHARS] + '\n……（长期记忆已压缩）'
     return (
         '\n\n【历史对话摘要】以下是较早之前对话的浓缩记录，'
         '请据此保持人设与剧情连贯（不要向用户提及本摘要的存在）：\n'
-        + conv.summary.strip()
+        + summary
     )
 
 
@@ -832,6 +853,51 @@ def _persona_identity_block(conv, user_id, persona_id=None):
     return f'\n\n【角色身份】你扮演的角色名称是「{name}」。请在需要自称或被称呼时使用这个名字。'
 
 
+def _roleplay_subject_block():
+    """明确状态面板的主体始终是 AI 角色，而不是用户。"""
+    return (
+        '\n\n【状态面板主体规则】所有角色面板、好感度、信任值、关系阶段、身体状态、服装与内心活动，'
+        '描述对象永远是你正在扮演的 AI 角色。玩家只有基础玩家信息，不得给玩家生成好感度、信任值或身体状态面板。'
+        '即使玩家的性别或设定与角色不同，也必须按 AI 角色设定决定外貌、性别特征、称呼和反应，禁止把 AI 角色默认写成女性。'
+    )
+
+
+def _memory_cards_block(conv, user_id):
+    if not conv:
+        return ''
+    cards = MemoryCard.query.filter_by(
+        conversation_id=conv.id, user_id=user_id
+    ).order_by(MemoryCard.importance.desc(), MemoryCard.updated_at.desc()).limit(20).all()
+    if not cards:
+        return ''
+    lines = []
+    used = 0
+    for c in cards:
+        line = f'- [{c.card_type}] {c.title}: {(c.content or "").strip()}'
+        if used + len(line) > 1200:
+            break
+        lines.append(line)
+        used += len(line)
+    if not lines:
+        return ''
+    return '\n\n【用户确认的长期记忆】只在与当前剧情相关时自然使用，不要逐条复述：\n' + '\n'.join(lines)
+
+
+def _relationship_stage_block(conv):
+    if not conv:
+        return ''
+    count = Message.query.filter_by(conversation_id=conv.id).count()
+    if count >= 90:
+        stage, style = '依赖', '态度可以稳定而自然，但不要变成无条件顺从，仍保留角色自己的边界。'
+    elif count >= 50:
+        stage, style = '信任', '可以更主动地回应情绪，出现共同回忆和更自然的关心。'
+    elif count >= 20:
+        stage, style = '熟悉', '可以记得用户偏好，允许更自然的称呼和小幅主动。'
+    else:
+        stage, style = '陌生', '保持角色原有距离感，不要突然亲密或承诺。'
+    return f'\n\n【关系阶段】当前阶段：{stage}。{style}关系变化要渐进，不能跳过阶段。'
+
+
 def _append_global_prompt(base, enabled=True):
     """把全局追加提示词 GLOBAL_APPEND_PROMPT 拼在系统提示词后面。
 
@@ -847,15 +913,22 @@ def _append_global_prompt(base, enabled=True):
     return base + "\n\n" + extra
 
 
-def _get_system_prompt(conv, user_id, persona_id=None, custom_prompt=None):
+def _get_system_prompt(conv, user_id, persona_id=None, custom_prompt=None, quick_action=None):
     """最终系统提示词 = 解析出的本体 + 玩家设定 + 全局追加提示词（受「提示词兜底」开关控制）"""
     body = _resolve_system_prompt(conv, user_id, persona_id, custom_prompt)
     body = (body or '') + _persona_identity_block(conv, user_id, persona_id)
     # 玩家设定紧跟 AI 提示词之后：先立住 AI 是谁，再交代玩家是谁
     body = (body or '') + _user_persona_block(conv, user_id, persona_id)
+    body = (body or '') + _roleplay_subject_block()
+    body = (body or '') + _memory_cards_block(conv, user_id)
+    body = (body or '') + _relationship_stage_block(conv)
     # 提示词兜底默认关闭：那段兜底词有几千 token，默认带上会明显抬高每轮成本
     enabled = bool(getattr(conv, 'append_prompt_enabled', False)) if conv else False
-    return _append_global_prompt(body, enabled=enabled)
+    body = _append_global_prompt(body, enabled=enabled)
+    action_prompt = QUICK_ACTION_PROMPTS.get(quick_action or '')
+    if action_prompt:
+        body += '\n\n【本轮快捷操作】' + action_prompt
+    return body
 
 
 def _save_ai_message(conversation_id, user_id, content, reasoning=None,
@@ -958,6 +1031,7 @@ def chat():
     conversation_id = data.get('conversation_id')
     persona_id = data.get('persona_id')
     model_id = data.get('model_id')
+    quick_action = (data.get('quick_action') or '').strip()
 
     # 获取用户设置
     settings = _get_user_settings(user_id)
@@ -1009,6 +1083,8 @@ def chat():
             persona_id=persona_id,
             system_prompt=system_prompt or None,
             temperature=temperature,
+            rich_marker_enabled=True,
+            reply_template=DEFAULT_REPLY_TEMPLATE_JSON,
         )
         db.session.add(conv)
         db.session.commit()
@@ -1067,7 +1143,9 @@ def chat():
             formatted_messages = formatted_messages[summarized_count:]
 
     # 插入系统提示词（历史摘要一并拼入，位于输出格式约定之前）
-    final_prompt = _get_system_prompt(conv, user_id, persona_id, system_prompt)
+    final_prompt = _get_system_prompt(
+        conv, user_id, persona_id, system_prompt, quick_action=quick_action
+    )
     final_prompt = final_prompt + _memory_summary_block(conv)
 
     # 世界书：按最近对话命中关键词，按需注入设定条目（无条目时返回空串，行为不变）
@@ -1647,3 +1725,75 @@ def prompt_tool_generate():
         current_app.logger.warning('[提示词工具] 审计记录写入失败', exc_info=True)
 
     return jsonify({'code': 200, 'data': {'content': content, 'model': model}})
+
+
+@chat_bp.route('/memory-export', methods=['POST'])
+@jwt_required()
+def export_memory():
+    """只用记忆宫殿摘要和记忆卡生成便携记忆档，不读取全部聊天原文。"""
+    user_id = int(get_jwt_identity())
+    data = request.get_json(silent=True) or {}
+    conv_id = data.get('conversation_id')
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).filter(
+        Conversation.deleted_at.is_(None)
+    ).first()
+    if not conv:
+        return jsonify({'code': 404, 'message': '对话不存在'}), 404
+
+    summaries = ConversationSummary.query.filter_by(
+        conversation_id=conv.id, user_id=user_id
+    ).order_by(ConversationSummary.seq.desc()).limit(6).all()
+    cards = MemoryCard.query.filter_by(
+        conversation_id=conv.id, user_id=user_id
+    ).order_by(MemoryCard.importance.desc(), MemoryCard.updated_at.desc()).limit(30).all()
+    parts = []
+    if conv.summary:
+        parts.append('【当前长期记忆】\n' + conv.summary.strip()[:1200])
+    if summaries:
+        parts.append('【近期压缩记录】\n' + '\n'.join(
+            f'{s.seq}. {(s.content or "").strip()[:500]}' for s in reversed(summaries)
+        ))
+    if cards:
+        parts.append('【记忆卡】\n' + '\n'.join(
+            f'- [{c.card_type}] {c.title}: {(c.content or "").strip()[:300]}' for c in cards
+        ))
+    material = '\n\n'.join(parts).strip()
+    if not material:
+        return jsonify({'code': 400, 'message': '当前还没有可导出的记忆内容'}), 400
+
+    provider = _get_chat_provider(user_id, data.get('provider_id'))
+    if not provider:
+        return jsonify({'code': 400, 'message': '没有可用的聊天模型'}), 400
+    model = data.get('model_id') or _resolve_chat_model(provider, conv)
+    system_prompt = (
+        '你是一个角色陪伴记忆整理器。请把输入的记忆材料整理成一份可移植的角色记忆档。\n'
+        '要求：350-500 字；保留角色身份、双方关系、用户偏好与雷点、关键事件时间线、未完成约定；'
+        '删除寒暄和重复内容；使用分点标题；不要编造材料中没有的事件；只输出记忆档正文。'
+    )
+    try:
+        response, error = AIService.chat_completions(
+            provider=provider,
+            messages=[
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': material},
+            ],
+            stream=False,
+            temperature=0.3,
+            model=model,
+        )
+    except Exception as e:
+        return jsonify({'code': 500, 'message': f'记忆导出失败：{str(e)}'}), 500
+    if response is None or getattr(response, 'status_code', None) != 200:
+        return jsonify({'code': 500, 'message': f'记忆导出失败：{error or "模型无响应"}'}), 500
+    try:
+        content = (response.json()['choices'][0]['message']['content'] or '').strip()
+    except (KeyError, IndexError, TypeError, ValueError):
+        return jsonify({'code': 500, 'message': '模型返回格式异常'}), 500
+    if not content:
+        return jsonify({'code': 500, 'message': '模型没有返回记忆内容'}), 500
+    return jsonify({'code': 200, 'data': {
+        'content': content,
+        'model': model,
+        'source_chars': len(material),
+        'result_chars': len(content),
+    }})

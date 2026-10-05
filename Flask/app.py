@@ -181,6 +181,9 @@ def _ensure_runtime_indexes(app):
         'idx_ai_usage_user_created',
         'idx_ai_usage_model_created',
         'idx_ai_usage_conversation_created',
+        'idx_memory_cards_conv_updated',
+        'idx_memory_cards_user_updated',
+        'idx_support_messages_thread_created',
     }
     try:
         for table in db.metadata.tables.values():
