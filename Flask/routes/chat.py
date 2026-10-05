@@ -1769,20 +1769,13 @@ def export_memory():
 
 请输出总结后的记忆档案："""
 
-    # 获取 provider 和 model
-    provider = None
-    if provider_id:
-        provider = ModelProvider.query.filter_by(id=provider_id, user_id=user_id, is_active=True).first()
-    if not provider:
-        provider = ModelProvider.query.filter_by(user_id=user_id, is_active=True).first()
+    # 复用对话主流程的提供商解析：指定配置 > 已启用配置 > 免费 API
+    provider = _get_chat_provider(user_id, provider_id)
     if not provider:
         return jsonify({'code': 400, 'message': '请先配置一个模型提供商'}), 400
 
-    model = model_id or provider.default_model or ''
-    if not model:
-        models = AIService.list_models(provider)
-        if models and len(models[0]) > 0:
-            model = models[0][0].get('id', '')
+    # 复用正常聊天的模型解析：请求指定 > 对话记忆 > 提供商下启用模型 > provider.model
+    model = _resolve_chat_model(provider, conv, model_id) or ''
     if not model:
         return jsonify({'code': 400, 'message': '未找到可用模型'}), 400
 
