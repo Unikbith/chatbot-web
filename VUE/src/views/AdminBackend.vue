@@ -3175,16 +3175,16 @@ function onTabChange(name) {
 
 .support-toolbar { margin-top: 6px; }
 .support-table { margin-bottom: 18px; }
-.support-admin-chat { display: flex; flex-direction: column; gap: 12px; }
-.support-admin-user { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--surface-hover); border-radius: 10px; }
+.support-admin-chat { display: flex; flex-direction: column; gap: 14px; }
+.support-admin-user { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: linear-gradient(135deg, rgba(176,106,46,.1), rgba(176,106,46,.02)); border: 1px solid rgba(176,106,46,.14); border-radius: 14px; }
 .support-admin-user span { color: var(--text-muted); }
-.support-admin-messages { max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
-.support-admin-msg { max-width: 78%; padding: 9px 11px; border-radius: 11px; background: var(--surface-hover); white-space: pre-wrap; }
-.support-admin-msg.admin { align-self: flex-end; background: rgba(176, 106, 46, .12); }
+.support-admin-messages { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 8px 4px; }
+.support-admin-msg { max-width: 78%; padding: 10px 12px; border-radius: 14px 14px 14px 4px; background: var(--surface-hover); white-space: pre-wrap; box-shadow: 0 4px 14px rgba(0,0,0,.04); }
+.support-admin-msg.admin { align-self: flex-end; border-radius: 14px 14px 4px 14px; background: rgba(176, 106, 46, .14); }
 .support-admin-msg time { display: block; margin-top: 4px; font-size: 10.5px; color: var(--text-muted); }
 .support-admin-image { display: block; max-width: 220px; max-height: 220px; margin-top: 6px; border-radius: 8px; }
 .support-admin-image-preview :deep(.el-image) { max-height: 120px; }
-.support-admin-reply { display: flex; gap: 8px; align-items: flex-end; }
+.support-admin-reply { display: flex; gap: 8px; align-items: flex-end; padding: 10px; border: 1px solid var(--border-color); border-radius: 14px; background: var(--surface-hover); }
 .support-admin-reply :deep(.el-textarea) { flex: 1; }
 
 @media (max-width: 900px) {

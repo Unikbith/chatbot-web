@@ -349,7 +349,7 @@ class Conversation(db.Model):
     presence_penalty = db.Column(db.Float, nullable=True)
     auto_play_voice = db.Column(db.Boolean, nullable=True)  # 对话独立：AI 回复自动播报
     # 记忆宫殿（滚动摘要）：每 N 轮触发一次压缩，压缩后旧消息被替换为一条摘要
-    summary_threshold = db.Column(db.Integer, default=10, nullable=True)  # 触发阈值，1-20 轮，默认 10
+    summary_threshold = db.Column(db.Integer, default=7, nullable=True)  # 触发阈值，1-20 轮，默认 7
     summary = db.Column(db.Text, nullable=True)             # 当前滚动摘要正文（最新一次压缩结果）
     summary_upto_id = db.Column(db.Integer, nullable=True)  # 已摘要到的最后一条 message id
     # 提示词兜底：开启后，后端写死的 GLOBAL_APPEND_PROMPT 才会接在人物设定之后。

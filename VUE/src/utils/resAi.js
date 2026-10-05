@@ -381,8 +381,8 @@ const conversationApi = {
   async clear(id) {
     return resAi.delete(`/api/conversations/${id}/messages`);
   },
-  async importMemory(data) {
-    return resAi.post('/api/conversations/import-memory', data);
+  async replaceMemory(id, memoryText) {
+    return resAi.put(`/api/conversations/${id}/memory`, { memory_text: memoryText });
   },
 };
 

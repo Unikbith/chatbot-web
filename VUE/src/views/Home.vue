@@ -435,6 +435,7 @@ onMounted(async () => {
   unbindSystemTheme = bindSystemThemeListener(() => userSettings.theme)
   updateViewport()
   window.addEventListener('resize', updateViewport)
+  window.addEventListener('focus', loadSupportUnread)
 
   const token = tokenStore.getAccess()
   if (token) {
@@ -442,7 +443,7 @@ onMounted(async () => {
       await loadUserInfo()
       await loadAllData()
       await loadSupportUnread()
-      supportPollTimer = setInterval(loadSupportUnread, 15000)
+      startSupportPolling()
       await ensureInitialConversation()
       // 新用户注册后若直接刷新页面，这里兜底再判一次（已看过则不会弹）
       maybeShowTutorial()
@@ -480,9 +481,10 @@ watch(providerPanelVisible, (val) => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', updateViewport)
+  window.removeEventListener('focus', loadSupportUnread)
   window.removeEventListener('auth:expired', handleAuthExpired)
   if (unbindSystemTheme) unbindSystemTheme()
-  if (supportPollTimer) clearInterval(supportPollTimer)
+  stopSupportPolling()
 })
 
 function handleAuthExpired() {
@@ -679,9 +681,8 @@ async function createConversationWithPersona(personaId) {
   await _doCreateConversation(personaId)
 }
 
-async function handleMemoryImported(conv) {
-  await loadConversations()
-  if (conv?.id) await handleSelectConversation(conv.id)
+async function handleMemoryImported() {
+  if (currentConvId.value) await handleSelectConversation(currentConvId.value)
 }
 
 // 会话切换令牌：每次切换/新建都自增。
@@ -871,6 +872,7 @@ async function handleLoginSuccess(userData) {
   isLoggedIn.value = true
   authModalVisible.value = false
   loadSupportUnread()
+  startSupportPolling()
   // 清空旧人设，让 loadPersonas 按新登录用户的性别重新挑默认人物卡
   currentPersona.value = null
   // 登录/注册响应只有用户信息，不含用户设置：这里补拉一次，
@@ -919,10 +921,22 @@ async function loadSupportUnread() {
   } catch (e) { /* 静默 */ }
 }
 
+function startSupportPolling() {
+  if (supportPollTimer) return
+  supportPollTimer = setInterval(loadSupportUnread, 15000)
+}
+
+function stopSupportPolling() {
+  if (supportPollTimer) clearInterval(supportPollTimer)
+  supportPollTimer = null
+}
+
 function handleLogout() {
   authApi.logout()
   isLoggedIn.value = false
   user.value = null
+  supportUnread.value = 0
+  stopSupportPolling()
   currentConv.value = null
   currentConvId.value = null
   currentConvTitle.value = '新对话'
@@ -1435,7 +1449,6 @@ async function handleConvoSettingsSaved(payload) {
       :conversation-id="currentConvId"
       :provider-id="currentProviderId"
       :model-id="currentModelId"
-      :persona-id="currentPersona?.id"
       @imported="handleMemoryImported"
     />
 

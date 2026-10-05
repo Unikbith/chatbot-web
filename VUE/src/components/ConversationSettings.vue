@@ -428,7 +428,7 @@ const form = reactive({
   background_image: null, background_cover: 'contain', message_opacity: null,
   temperature: null, frequency_penalty: null, presence_penalty: null,
   auto_play_voice: false,
-  summary_threshold: 10,
+  summary_threshold: 7,
   append_prompt_enabled: true,
   // 界面标记默认开启（与后端 RICH_MESSAGE_ENABLED 默认值一致）
   rich_marker_enabled: true,
@@ -473,7 +473,7 @@ function resetForm() {
   form.frequency_penalty = (conv.frequency_penalty != null && conv.frequency_penalty !== '') ? conv.frequency_penalty : null
   form.presence_penalty = (conv.presence_penalty != null && conv.presence_penalty !== '') ? conv.presence_penalty : null
   form.auto_play_voice = !!conv.auto_play_voice
-  form.summary_threshold = (conv.summary_threshold != null && conv.summary_threshold !== '') ? Number(conv.summary_threshold) : 10
+  form.summary_threshold = (conv.summary_threshold != null && conv.summary_threshold !== '') ? Number(conv.summary_threshold) : 7
   form.append_prompt_enabled = conv.append_prompt_enabled == null ? true : !!conv.append_prompt_enabled
   // 未存过（null/undefined）按全局默认「开启」处理：
   // 后端 resolve_rich_marker_enabled 对 NULL 也是回落到全局开关，

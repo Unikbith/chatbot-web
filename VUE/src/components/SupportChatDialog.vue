@@ -73,20 +73,20 @@ onUnmounted(stopPolling)
 </template>
 
 <style scoped>
-.support-chat { display: flex; flex-direction: column; gap: 12px; }
-.support-chat-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface-hover); }
+.support-chat { display: flex; flex-direction: column; gap: 14px; }
+.support-chat-head { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 16px; background: linear-gradient(135deg, rgba(176,106,46,.12), rgba(176,106,46,.03)); border: 1px solid rgba(176,106,46,.16); }
 .support-chat-head strong { font-size: 14px; }
 .support-chat-head p { margin: 2px 0 0; font-size: 11.5px; color: var(--text-muted); }
-.support-messages { min-height: 260px; max-height: 48vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px 2px; }
+.support-messages { min-height: 280px; max-height: 52vh; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 8px 4px; }
 .support-empty { margin: auto; color: var(--text-muted); display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 13px; }
-.support-message { display: flex; align-items: flex-end; gap: 8px; }
+.support-message { display: flex; align-items: flex-end; gap: 9px; }
 .support-message.user { flex-direction: row-reverse; }
-.support-bubble { max-width: 76%; padding: 9px 11px; border-radius: 12px; background: var(--surface-hover); }
-.support-message.user .support-bubble { background: var(--brand-soft, rgba(176, 106, 46, .12)); }
+.support-bubble { max-width: 78%; padding: 10px 12px; border-radius: 14px 14px 14px 4px; background: var(--surface-hover); box-shadow: 0 4px 14px rgba(0,0,0,.04); }
+.support-message.user .support-bubble { border-radius: 14px 14px 4px 14px; background: var(--brand-soft, rgba(176, 106, 46, .14)); }
 .support-text { white-space: pre-wrap; word-break: break-word; font-size: 13.5px; line-height: 1.55; }
 .support-bubble time { display: block; margin-top: 4px; font-size: 10.5px; color: var(--text-muted); }
 .support-image { display: block; max-width: 220px; max-height: 220px; margin-top: 6px; border-radius: 8px; }
 .support-image-preview :deep(.el-image) { max-height: 120px; }
-.support-input { display: flex; gap: 8px; align-items: flex-end; }
+.support-input { display: flex; gap: 8px; align-items: flex-end; padding: 10px; border-radius: 14px; background: var(--surface-hover); border: 1px solid var(--border-color); }
 .support-input :deep(.el-textarea) { flex: 1; }
 </style>

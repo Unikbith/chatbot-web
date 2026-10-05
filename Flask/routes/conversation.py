@@ -410,33 +410,35 @@ def clear_messages(conv_id):
 # ---------------------------------------------------------------------------
 
 
-@conversation_bp.route('/import-memory', methods=['POST'])
+@conversation_bp.route('/<int:conv_id>/memory', methods=['PUT'])
 @jwt_required()
-def import_memory_conversation():
-    """从导出的记忆文本新建存档；只携带摘要，不携带全部历史原文。"""
+def update_conversation_memory(conv_id):
+    """把外部记忆档写入当前对话的记忆宫殿。"""
     user_id = int(get_jwt_identity())
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).filter(
+        Conversation.deleted_at.is_(None)
+    ).first()
+    if not conv:
+        return jsonify({'code': 404, 'message': '对话不存在'}), 404
     data = request.get_json(silent=True) or {}
     memory_text = (data.get('memory_text') or '').strip()
     if len(memory_text) < 10:
         return jsonify({'code': 400, 'message': '记忆文本太短'}), 400
     if len(memory_text) > 8000:
         return jsonify({'code': 400, 'message': '记忆文本最多 8000 字'}), 400
-    persona_id = data.get('persona_id')
-    if persona_id:
-        persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first()
-        if not persona:
-            persona_id = None
-    conv = Conversation(
+    last_message = Message.query.filter_by(conversation_id=conv.id).order_by(Message.id.desc()).first()
+    conv.summary = memory_text
+    conv.summary_upto_id = last_message.id if last_message else 0
+    seq = ConversationSummary.query.filter_by(conversation_id=conv.id).count() + 1
+    db.session.add(ConversationSummary(
+        conversation_id=conv.id,
         user_id=user_id,
-        title=(data.get('title') or '记忆存档').strip()[:200],
-        provider_id=data.get('provider_id'),
-        model_id=data.get('model_id'),
-        persona_id=persona_id,
-        summary=memory_text,
-        summary_upto_id=0,
-        rich_marker_enabled=True,
-        reply_template=data.get('reply_template') or DEFAULT_REPLY_TEMPLATE,
-    )
-    db.session.add(conv)
+        seq=seq,
+        content=memory_text,
+        msg_from=1 if last_message else None,
+        msg_to=last_message.id if last_message else None,
+        message_count=0,
+    ))
+    conv.updated_at = local_now()
     db.session.commit()
-    return jsonify({'code': 200, 'message': '记忆存档已创建', 'data': conv.to_dict()})
+    return jsonify({'code': 200, 'message': '记忆已导入当前对话'})
