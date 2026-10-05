@@ -790,8 +790,10 @@ export const OUTPUT_LENGTHS = {
 }
 
 export const OUTPUT_LENGTH_LIST = Object.values(OUTPUT_LENGTHS)
-// 默认「短文」：更省 token、节奏更快；需要更长的正文时在「回复长度」里切换
-export const DEFAULT_LENGTH = 'short'
+// 默认「适中」：与后端 reply_spec.DEFAULT_LENGTH 及 chat.py 的默认回复模板保持一致。
+// 前端新建会话时会把这个值写进 reply_template，两边不一致会导致"前端显示短文、
+// 实际按适中生成"这类默认值漂移。
+export const DEFAULT_LENGTH = 'medium'
 
 /**
  * 取篇幅要求文本；未知 id 回落默认。

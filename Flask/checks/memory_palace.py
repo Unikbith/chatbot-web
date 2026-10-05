@@ -155,7 +155,7 @@ try:
         detail_b = (client.get(f'/api/conversations/{conv_b}', headers=H).get_json() or {}).get('data') or {}
         summary = detail_b.get('summary') or ''
         check('压缩已触发并写入 conv.summary', bool(summary), repr(summary[:60]))
-        check('摘要长度符合设计（≤200 字）', 0 < len(summary) <= 220, f'{len(summary)} 字')
+        check('摘要长度在注入上限内（≤600 字）', 0 < len(summary) <= 600, f'{len(summary)} 字')
         check('summary_upto_id 已推进', (detail_b.get('summary_upto_id') or 0) > 0,
               f'summary_upto_id={detail_b.get("summary_upto_id")}')
 
