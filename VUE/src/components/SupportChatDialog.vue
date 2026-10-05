@@ -11,6 +11,7 @@ const emit = defineEmits(['update:modelValue'])
 const visible = computed({ get: () => props.modelValue, set: (v) => emit('update:modelValue', v) })
 const loading = ref(false); const sending = ref(false); const content = ref(''); const imageUrl = ref('')
 const thread = ref(null); const messages = ref([]); let pollTimer = null
+const supportMessagesRef = ref(null)
 const anonymousId = computed(() => thread.value?.anonymous_id || t('匿名用户', 'Anonymous'))
 const anonymousAvatar = computed(() => identiconDataUrl(thread.value?.avatar_seed || 'anonymous'))
 
@@ -20,18 +21,34 @@ function formatTime(value) {
   if (Number.isNaN(d.getTime())) return value
   return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(d)
 }
+function isNearBottom(el) {
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 80
+}
+
+async function scrollToLatest(force = false) {
+  await nextTick()
+  const el = supportMessagesRef.value
+  if (el && (force || isNearBottom(el))) el.scrollTop = el.scrollHeight
+}
+
 async function loadThread(silent = false) {
   if (!silent) loading.value = true
   try {
     const res = await supportApi.getThread()
-    if (res.code === 200) { thread.value = res.data; messages.value = res.data.messages || []; await nextTick(); const body = document.querySelector('.support-chat-dialog .el-dialog__body'); if (body) body.scrollTop = body.scrollHeight }
+    if (res.code === 200) {
+      const shouldStick = !silent || isNearBottom(supportMessagesRef.value)
+      thread.value = res.data
+      messages.value = res.data.messages || []
+      await scrollToLatest(shouldStick)
+    }
   } catch (e) { if (!silent) ElMessage.error(t('加载反馈会话失败', 'Failed to load support chat')) }
   finally { if (!silent) loading.value = false }
 }
 async function send() {
   const text = content.value.trim(); if ((!text && !imageUrl.value) || sending.value) return
   sending.value = true
-  try { const res = await supportApi.send(text, imageUrl.value); if (res.code === 200) { content.value = ''; imageUrl.value = ''; await loadThread(true) } }
+  try { const res = await supportApi.send(text, imageUrl.value); if (res.code === 200) { content.value = ''; imageUrl.value = ''; await loadThread(true); await scrollToLatest(true) } }
   catch (e) { ElMessage.error(t('发送失败', 'Failed to send')) }
   finally { sending.value = false }
 }
@@ -55,7 +72,7 @@ onUnmounted(stopPolling)
         <el-avatar :size="36" :src="anonymousAvatar" />
         <div><strong>{{ anonymousId }}</strong><p>{{ t('双方均以匿名身份显示。', 'Both sides appear anonymous.') }}</p></div>
       </div>
-      <div class="support-messages">
+      <div ref="supportMessagesRef" class="support-messages">
         <div v-if="!messages.length" class="support-empty"><el-icon><ChatDotRound /></el-icon><span>{{ t('可以直接告诉管理员你的建议或遇到的问题。', 'Send the admin a suggestion or report an issue.') }}</span></div>
         <div v-for="m in messages" :key="m.id" class="support-message" :class="m.sender">
           <el-avatar :size="26" :src="m.sender === 'admin' ? identiconDataUrl('admin-support') : anonymousAvatar" />

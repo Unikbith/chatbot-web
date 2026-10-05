@@ -1054,7 +1054,7 @@
           <span>{{ supportDetail.user?.email || '-' }}</span>
           <el-tag size="small" effect="plain">{{ supportDetail.user?.id || '-' }}</el-tag>
         </div>
-        <div class="support-admin-messages">
+        <div ref="supportAdminMessagesRef" class="support-admin-messages">
           <div v-for="m in supportDetail.messages" :key="m.id" class="support-admin-msg" :class="m.sender">
             <div>{{ m.content }}</div>
             <el-image v-if="m.image_url" :src="m.image_url" fit="contain" class="support-admin-image" />
@@ -1910,6 +1910,7 @@ const supportDialogLoading = ref(false)
 const supportDetail = ref({ thread: null, user: null, messages: [] })
 const supportReply = ref('')
 const supportReplyImage = ref('')
+const supportAdminMessagesRef = ref(null)
 const mediaPage = ref(1)
 const mediaPerPage = 20
 const mediaTotal = ref(0)
@@ -1935,7 +1936,7 @@ async function openSupportChat(row) {
     const res = await adminApi.supportThread(row.id)
     if (res.code === 200) supportDetail.value = res.data
     await nextTick()
-    const el = document.querySelector('.support-admin-dialog .el-dialog__body')
+    const el = supportAdminMessagesRef.value
     if (el) el.scrollTop = el.scrollHeight
   } catch (e) {
     ElMessage.error(t('加载会话失败', 'Failed to load thread'))

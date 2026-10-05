@@ -68,7 +68,15 @@ async function importMemory() {
 </script>
 
 <template>
-  <el-drawer v-model="visible" :title="t('聊天记忆管理', 'Chat Memory')" size="min(460px, 94vw)" direction="rtl">
+  <el-drawer
+    v-model="visible"
+    :title="t('聊天记忆管理', 'Chat Memory')"
+    size="420px"
+    direction="rtl"
+    append-to-body
+    destroy-on-close
+    class="memory-transfer-drawer"
+  >
     <div class="memory-drawer">
       <div class="memory-choice">
         <button type="button" :class="{ active: mode === 'export' }" @click="mode = 'export'">
@@ -106,4 +114,9 @@ async function importMemory() {
 .memory-choice button.active { border-color: var(--brand); color: var(--brand); background: var(--brand-soft, rgba(176, 106, 46, .1)); }
 .memory-pane { display: flex; flex-direction: column; gap: 12px; }
 .memory-pane p { margin: 0; color: var(--text-secondary); line-height: 1.6; }
+</style>
+
+<style>
+.memory-transfer-drawer { max-width: 94vw; }
+.memory-transfer-drawer .el-drawer__body { padding-top: 8px; }
 </style>

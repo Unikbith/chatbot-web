@@ -628,6 +628,7 @@ function handleCommand(cmd) {
 }
 
 .sidebar-feedback-banner {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -643,7 +644,16 @@ function handleCommand(cmd) {
 .sfb-tutorial-icon { display: inline-flex; color: var(--brand); font-size: 15px; flex-shrink: 0; }
 .sfb-tutorial-text { flex: 1; min-width: 0; font-weight: 600; color: var(--text-primary); }
 .sfb-tutorial-anon { color: var(--text-muted); font-size: 11px; }
-.feedback-unread-badge { margin-left: auto; }
+.feedback-unread-badge {
+  position: absolute;
+  top: -7px;
+  right: -6px;
+}
+
+.feedback-unread-badge :deep(.el-badge__content) {
+  background: #e5484d;
+  border: 2px solid var(--sidebar-bg);
+}
 
 .btn-icon {
   color: var(--brand);
