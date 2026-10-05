@@ -1,5 +1,5 @@
 // 临时验证：渲染模板引擎 + 消毒通道
-import { TEMPLATE_PRESETS, resolveTemplate, templateMarkers, DEFAULT_PROTOCOL, protocolPrompt, composeTemplatePrompt, OUTPUT_LENGTH_LIST, DEFAULT_LENGTH } from '../src/utils/replyTemplates.js'
+import { TEMPLATE_PRESETS, DEFAULT_TEMPLATE_ID, resolveTemplate, templateMarkers, DEFAULT_PROTOCOL, protocolPrompt, composeTemplatePrompt, OUTPUT_LENGTH_LIST, DEFAULT_LENGTH } from '../src/utils/replyTemplates.js'
 import { renderReplyTemplate } from '../src/utils/renderReplyTemplate.js'
 import { hasRichMarkers, GENERIC_MARKERS } from '../src/utils/richMessage.js'
 
@@ -10,6 +10,7 @@ const check = (name, cond, extra = '') => {
 }
 
 const T = TEMPLATE_PRESETS.archive
+const DEFAULT_T = TEMPLATE_PRESETS[DEFAULT_TEMPLATE_ID]
 
 console.log('\n[1] 预设结构')
 check('预设存在', !!T)
@@ -21,10 +22,11 @@ check('有提示词', typeof T.prompt === 'string' && T.prompt.includes('【场�
 check('不含内联 CSS（改由静态文件提供）', !T.css, JSON.stringify(T.css))
 check('标记词表', templateMarkers(T).length >= 6, JSON.stringify(templateMarkers(T)))
 check('resolveTemplate 认 preset', resolveTemplate(JSON.stringify({ preset: 'archive' })) === T)
-check('未保存过模板时返回默认预设', resolveTemplate(null) === T && resolveTemplate('') === T,
+check('未保存过模板时返回默认预设', resolveTemplate(null) === DEFAULT_T && resolveTemplate('') === DEFAULT_T,
   String(resolveTemplate(null)))
-check('坏 JSON 时也回落默认预设', resolveTemplate('不是json') === T)
-check('未知 preset 回落默认预设', resolveTemplate(JSON.stringify({ preset: '不存在' })) === T)
+check('坏 JSON 时也回落默认预设', resolveTemplate('不是json') === DEFAULT_T)
+check('未知 preset 回落默认预设', resolveTemplate(JSON.stringify({ preset: '不存在' })) === DEFAULT_T)
+check('新用户默认外观为脸红', DEFAULT_TEMPLATE_ID === 'blush', DEFAULT_TEMPLATE_ID)
 
 console.log('\n[2] 场景 / 摘要')
 {

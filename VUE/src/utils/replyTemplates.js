@@ -614,7 +614,7 @@ export const TEMPLATE_PRESETS = {
 export const TEMPLATE_PRESET_LIST = Object.values(TEMPLATE_PRESETS)
 
 /** 默认渲染预设：不指定时用它（而不是"不使用"），保证开箱就有版式 */
-export const DEFAULT_TEMPLATE_ID = 'archive'
+export const DEFAULT_TEMPLATE_ID = 'blush'
 
 /**
  * 通用标记 → 模板区块的映射。
@@ -825,6 +825,19 @@ export function composeTemplatePrompt(preset, protocolId, lengthId) {
 /** 取某个预设支持的标记名列表（用于解析与提示词对齐） */
 export function templateMarkers(preset) {
   return Object.keys(preset?.blocks || {})
+}
+
+/** 新对话默认模板：脸红 + 长文 + 提示词增强开启。 */
+export function buildDefaultReplyTemplateJson(overrides = {}) {
+  const preset = TEMPLATE_PRESETS[DEFAULT_TEMPLATE_ID] || TEMPLATE_PRESET_LIST[0] || {}
+  return JSON.stringify({
+    preset: preset.id || DEFAULT_TEMPLATE_ID,
+    name: preset.name || '脸红',
+    protocol: DEFAULT_PROTOCOL,
+    length: DEFAULT_LENGTH,
+    enhance: true,
+    ...overrides,
+  })
 }
 
 /**

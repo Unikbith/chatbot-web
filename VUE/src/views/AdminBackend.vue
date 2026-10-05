@@ -135,14 +135,17 @@
           >
             <el-table-column type="expand">
               <template #default="{ row }">
-                <el-table
-                  ref="convTableRef"
-                  :data="row._conversations || []"
-                  class="inner-table"
-                  row-key="id"
-                  v-loading="row._loading"
-                  @selection-change="(sel) => onConvSelectChange(row, sel)"
-                >
+                <div class="inner-table-scroll">
+                  <el-table
+                    ref="convTableRef"
+                    :data="row._conversations || []"
+                    class="inner-table"
+                    row-key="id"
+                    :max-height="460"
+                    scrollbar-always-on
+                    v-loading="row._loading"
+                    @selection-change="(sel) => onConvSelectChange(row, sel)"
+                  >
                   <el-table-column type="selection" width="42" :selectable="(conv) => canSelectConv(conv)" />
                   <el-table-column prop="title" :label="t('对话标题', 'Conversation')" min-width="150" show-overflow-tooltip />
                   <el-table-column prop="message_count" :label="t('消息数', 'Msgs')" width="80" align="center">
@@ -231,7 +234,8 @@
                       </div>
                     </template>
                   </el-table-column>
-                </el-table>
+                  </el-table>
+                </div>
                 <div v-if="(row._convPages || 0) > 1" class="batch-bar">
                   <span class="batch-hint">
                     {{ t('共', 'Total') }} {{ row._convTotal || 0 }} {{ t('条对话', 'conversations') }}
@@ -953,7 +957,7 @@
       size="min(560px, 92vw)"
       direction="rtl"
     >
-      <div class="msg-drawer" v-loading="msgDrawerLoading">
+      <div ref="msgDrawerBodyRef" class="msg-drawer" v-loading="msgDrawerLoading">
         <div v-if="msgDrawerData.conversation" class="md-head">
           <div class="md-title">{{ msgDrawerData.conversation.title || t('(无标题)', '(Untitled)') }}</div>
           <div class="md-meta">
@@ -964,6 +968,9 @@
             <el-tag v-if="msgDrawerData.conversation.deleted_at" size="small" effect="plain" type="warning">
               {{ t('用户已移除该对话', 'Removed by user') }}
             </el-tag>
+            <el-button size="small" plain :icon="Refresh" @click="refreshConversationMessages">
+              {{ t('刷新最新', 'Refresh latest') }}
+            </el-button>
           </div>
         </div>
 
@@ -985,7 +992,9 @@
           <div v-if="m.model || m.total_tokens" class="md-msg-meta">
             <span v-if="m.model">{{ m.model }}</span>
             <span v-if="m.total_tokens">
-              Token {{ formatCount(m.total_tokens) }}
+              {{ t('消耗', 'Used') }} {{ formatCount(m.total_tokens) }} tokens
+              <template v-if="m.prompt_tokens != null"> · 输入 {{ formatCount(m.prompt_tokens) }}</template>
+              <template v-if="m.completion_tokens != null"> · 输出 {{ formatCount(m.completion_tokens) }}</template>
               <template v-if="m.cached_tokens"> · 缓存 {{ formatCount(m.cached_tokens) }}</template>
             </span>
           </div>
@@ -1232,6 +1241,7 @@ const personaDetailData = ref(null)
 const msgDrawerVisible = ref(false)
 const msgDrawerLoading = ref(false)
 const msgDrawerData = ref({ conversation: null, messages: [] })
+const msgDrawerBodyRef = ref(null)
 
 // 用户详情
 const userDetailVisible = ref(false)
@@ -1500,6 +1510,16 @@ async function exportConversation(conv) {
 }
 
 // 点击「消息数」或「查看」直接查看该对话的完整消息记录
+function _msgDrawerScrollEl() {
+  return msgDrawerBodyRef.value?.closest('.el-drawer__body') || null
+}
+
+async function _scrollMessageDrawerToBottom() {
+  await nextTick()
+  const el = _msgDrawerScrollEl()
+  if (el) el.scrollTop = el.scrollHeight
+}
+
 async function viewConversation(conv) {
   msgDrawerData.value = {
     conversation: { id: conv.id, title: conv.title },
@@ -1525,12 +1545,16 @@ async function viewConversation(conv) {
     ElMessage.error(t('加载消息失败', 'Failed to load messages'))
   } finally {
     msgDrawerLoading.value = false
+    await _scrollMessageDrawerToBottom()
   }
 }
 
 async function loadOlderMessages() {
   const current = msgDrawerData.value
   if (msgDrawerLoading.value || !current.hasMore || !current.nextBeforeId) return
+  const scrollEl = _msgDrawerScrollEl()
+  const prevHeight = scrollEl?.scrollHeight || 0
+  const prevTop = scrollEl?.scrollTop || 0
   msgDrawerLoading.value = true
   try {
     const res = await adminApi.conversationMessages(current.conversation.id, {
@@ -1544,8 +1568,32 @@ async function loadOlderMessages() {
     current.hasMore = !!res.data.has_more
     current.nextBeforeId = res.data.next_before_id || null
     current.total = res.data.total || current.total
+    await nextTick()
+    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight - prevHeight + prevTop
   } catch (e) {
     ElMessage.error(t('加载更早消息失败', 'Failed to load older messages'))
+  } finally {
+    msgDrawerLoading.value = false
+  }
+}
+
+async function refreshConversationMessages() {
+  const current = msgDrawerData.value
+  if (!current.conversation?.id || msgDrawerLoading.value) return
+  msgDrawerLoading.value = true
+  try {
+    const res = await adminApi.conversationMessages(current.conversation.id, { limit: 100 })
+    if (res.code !== 200) return
+    msgDrawerData.value = {
+      conversation: res.data.conversation || current.conversation,
+      messages: res.data.messages || [],
+      total: res.data.total || 0,
+      hasMore: !!res.data.has_more,
+      nextBeforeId: res.data.next_before_id || null,
+    }
+    await _scrollMessageDrawerToBottom()
+  } catch (e) {
+    ElMessage.error(t('刷新消息失败', 'Failed to refresh messages'))
   } finally {
     msgDrawerLoading.value = false
   }
@@ -2143,9 +2191,28 @@ function onTabChange(name) {
 
 .inner-table {
   width: calc(100% - 24px);
+  min-width: 1320px;
   margin: 8px 12px;
   border: 1px solid var(--border-color, #e9e0d4);
   border-radius: 8px;
+}
+
+.inner-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+  padding-bottom: 6px;
+  scrollbar-gutter: stable;
+}
+
+.inner-table-scroll::-webkit-scrollbar {
+  height: 9px;
+  width: 9px;
+}
+
+.inner-table-scroll::-webkit-scrollbar-thumb {
+  background: rgba(176, 106, 46, 0.35);
+  border-radius: 999px;
 }
 
 .msg-panel {

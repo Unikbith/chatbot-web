@@ -27,6 +27,14 @@ from datetime import datetime, timedelta
 
 conversation_bp = Blueprint('conversation', __name__, url_prefix='/api/conversations')
 
+DEFAULT_REPLY_TEMPLATE = json.dumps({
+    'preset': 'blush',
+    'name': '脸红',
+    'protocol': 'full',
+    'length': 'long',
+    'enhance': True,
+}, ensure_ascii=False)
+
 
 @conversation_bp.route('', methods=['GET'])
 @jwt_required()
@@ -138,7 +146,9 @@ def create_conversation():
         model_id=model_id,
         persona_id=persona_id,
         system_prompt=system_prompt,
-        temperature=temperature
+        temperature=temperature,
+        rich_marker_enabled=bool(data.get('rich_marker_enabled', True)),
+        reply_template=data.get('reply_template') or DEFAULT_REPLY_TEMPLATE,
     )
     db.session.add(conv)
     db.session.commit()

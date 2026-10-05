@@ -432,12 +432,12 @@ const form = reactive({
   append_prompt_enabled: false,
   // 界面标记默认开启（与后端 RICH_MESSAGE_ENABLED 默认值一致）
   rich_marker_enabled: true,
-  // 回复渲染模板：默认使用档案风（不再有"不使用"这一档）
-  reply_template_id: 'archive',
+  // 回复渲染模板：默认使用脸红（不再有"不使用"这一档）
+  reply_template_id: DEFAULT_TEMPLATE_ID,
   // 提示词增强：默认开启，把「每轮输出结构」接进系统提示词
   prompt_enhance: true,
-  // 回复长度：short / medium / long
-  reply_length_id: 'medium',
+  // 回复长度：默认长文
+  reply_length_id: DEFAULT_LENGTH,
 })
 
 // 参数微调的量表定义：模板用 v-for 渲染，避免三段结构重复

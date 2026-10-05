@@ -113,11 +113,12 @@
               placeholder="简短描述角色特点"
               maxlength="1000"
             />
+            <div class="form-hint">仅用于卡片列表和详情展示，不参与模型请求；重要设定请写进下方 AI 角色设定。</div>
           </el-form-item>
         </div>
 
         <div class="form-card">
-          <el-form-item label="AI扮演角色设定">
+          <el-form-item label="AI角色设定">
             <el-input
               v-model="form.system_prompt"
               type="textarea"
@@ -127,6 +128,7 @@
               placeholder="详细的角色设定，指导 AI 如何扮演这个角色..."
               maxlength="10000"
             />
+            <div class="form-hint">这是 AI 真正遵循的系统提示词。角色名称会作为身份提示一并发送；简介不会。</div>
           </el-form-item>
           <!-- 玩家侧设定：与 AI 提示词同卡绑定，换卡即换整套角色关系 -->
           <el-form-item label="玩家设定">
@@ -153,6 +155,7 @@
               placeholder="角色第一次打招呼时说的话（可选）"
               maxlength="1000"
             />
+            <div class="form-hint">不会作为系统规则注入；新建对话时会作为第一条 AI 问候展示并保存。</div>
           </el-form-item>
         </div>
 

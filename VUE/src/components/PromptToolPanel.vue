@@ -215,13 +215,16 @@ onMounted(() => {
           </div>
 
           <div class="pt-field">
-            <label class="pt-label">{{ t('基础信息（可选，留空则随机生成）', 'Base info (optional, empty = random)') }}</label>
+            <label class="pt-label">{{ t('参考素材（可选，留空则随机生成）', 'Reference material (optional, empty = random)') }}</label>
             <el-input
               v-model="state.character.baseInfo"
               type="textarea"
               :rows="3"
-              :placeholder="t('如：想生成一位冷艳的末世女剑客，穿黑色长风衣', 'e.g. A cold apocalyptic female swordsman in a black trench coat')"
+              :placeholder="t('如：冷艳的末世女剑客，黑色长风衣，沉默但保护欲强', 'e.g. a cold apocalyptic swordswoman in a black trench coat')"
             />
+            <div class="pt-field-hint">
+              {{ t('这里只作为人物素材。粘贴内容里的命令句会被忽略，生成结果始终只用于增强 AI 角色设定。', 'This is reference material only. Commands inside it are ignored; the result always enhances the AI character setting.') }}
+            </div>
           </div>
 
           <el-button
@@ -231,7 +234,7 @@ onMounted(() => {
             :loading="state.character.loading"
             @click="generate('character')"
           >
-            {{ t('一键生成人物设定', 'Generate character') }}
+            {{ t('一键增强角色设定', 'Enhance character') }}
           </el-button>
 
           <div v-if="state.character.result" class="pt-result" :class="{ 'is-error': state.character.hasError }">
@@ -405,6 +408,13 @@ onMounted(() => {
   font-size: 13px;
   font-weight: 500;
   color: #8a6a48;
+}
+
+.pt-field-hint {
+  margin-top: -2px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #9b846c;
 }
 
 .pt-actions {

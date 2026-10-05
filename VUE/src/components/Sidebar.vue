@@ -846,6 +846,9 @@ function handleCommand(cmd) {
 
 /* 移动端：底部用户卡片避开底部安全区（Home Indicator），避免“贴底”错位 */
 @media (max-width: 768px) {
+  .sidebar-header {
+    padding-top: calc(16px + env(safe-area-inset-top, 0px));
+  }
   .sidebar-footer {
     padding-left: 16px;
     padding-right: 16px;

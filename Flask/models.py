@@ -362,7 +362,7 @@ class Conversation(db.Model):
     # 这样新建对话的初始状态与 .env 一致，且「会话设置」里显示的开关不会与实际行为不符。
     # 用户可在会话设置里单独覆盖（写入显式 True/False）。
     rich_marker_enabled = db.Column(
-        db.Boolean, default=lambda: RICH_MESSAGE_ENABLED, nullable=True
+        db.Boolean, default=True, nullable=True
     )
     # 回复渲染模板（JSON 文本）：决定这个话题的回复"长什么样"。
     # 形如 {"preset":"archive","name":"档案风","prompt":"…标记说明…"}：

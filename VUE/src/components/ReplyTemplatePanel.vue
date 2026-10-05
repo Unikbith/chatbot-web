@@ -52,12 +52,12 @@
 import { computed, ref } from 'vue'
 import { t } from '../i18n'
 import RichMessage from './RichMessage.vue'
-import { TEMPLATE_PRESET_LIST } from '../utils/replyTemplates'
+import { TEMPLATE_PRESET_LIST, DEFAULT_TEMPLATE_ID } from '../utils/replyTemplates'
 import { renderProse } from '../utils/proseRender'
 
 const props = defineProps({
   /** 当前选中的预设 id */
-  modelValue: { type: String, default: 'archive' },
+  modelValue: { type: String, default: DEFAULT_TEMPLATE_ID },
 })
 const emit = defineEmits(['update:modelValue', 'change'])
 

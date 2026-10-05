@@ -2,14 +2,14 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import logger from '@/utils/logger';
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Menu, ZoomIn, ChatLineRound } from '@element-plus/icons-vue'
+import { ZoomIn, ChatLineRound } from '@element-plus/icons-vue'
 import {
   authApi, providersApi, personaApi, settingsApi, conversationApi, chatApi, marketplaceApi
 } from '../utils/resAi'
 import { applyTheme, bindSystemThemeListener } from '../utils/theme'
 import { tokenStore } from '../utils/tokenStore'
 import { t, setLocale } from '../i18n'
-import { resolveTemplate } from '../utils/replyTemplates'
+import { resolveTemplate, buildDefaultReplyTemplateJson } from '../utils/replyTemplates'
 
 import Sidebar from '../components/Sidebar.vue'
 import ChatArea from '../components/ChatArea.vue'
@@ -681,6 +681,8 @@ async function _doCreateConversation(personaId, forceDelete = false) {
     persona_id: personaId,
     system_prompt: systemPrompt.value,
     temperature: userSettings.temperature,
+    rich_marker_enabled: true,
+    reply_template: buildDefaultReplyTemplateJson(),
   }
   if (forceDelete) payload.force_delete = true
 
@@ -1082,10 +1084,6 @@ async function handleConvoSettingsSaved(payload) {
 
     <!-- 侧边栏（仅登录后展示；入口页隐藏） -->
     <template v-if="isLoggedIn">
-    <!-- 移动端：收起时显示的菜单按钮 -->
-    <button v-if="isMobile && sidebarCollapsed" class="mobile-menu-btn" @click="toggleSidebar">
-      <el-icon><Menu /></el-icon>
-    </button>
     <!-- 移动端：侧边栏展开时的遮罩 -->
     <div v-if="isMobile && !sidebarCollapsed" class="sidebar-backdrop" @click="toggleSidebar"></div>
     <Sidebar
@@ -1342,6 +1340,7 @@ async function handleConvoSettingsSaved(payload) {
       v-if="isLoggedIn"
       ref="chatAreaRef"
       class="chat-wrap"
+      :mobile-menu="isMobile && sidebarCollapsed"
       :conversation-id="currentConvId"
       :conversation-title="currentConvTitle"
       :provider-id="currentProviderId"
@@ -1365,6 +1364,7 @@ async function handleConvoSettingsSaved(payload) {
       @open-settings="requireLogin(openSettings)"
       @open-provider="requireLogin(() => providerPanelVisible = true)"
       @open-conversation-settings="openConversationSettings"
+      @toggle-sidebar="toggleSidebar"
       @model-change="handleModelChange"
       @require-login="requireLogin"
       @title-change="handleTitleChange"
@@ -2244,27 +2244,6 @@ async function handleConvoSettingsSaved(payload) {
 }
 
 /* ===== 移动端响应式 ===== */
-.mobile-menu-btn {
-  position: fixed;
-  top: 12px;
-  left: 14px;
-  z-index: 60;
-  width: 40px;
-  height: 40px;
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  background: var(--surface);
-  color: var(--text-primary);
-  box-shadow: var(--shadow-soft);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  font-size: 20px;
-  transition: transform 0.15s ease, background 0.2s;
-}
-
-.mobile-menu-btn:active { transform: scale(0.92); }
 
 .sidebar-backdrop {
   position: fixed;
@@ -2285,8 +2264,11 @@ async function handleConvoSettingsSaved(payload) {
     height: 100vh;
     height: 100dvh;
     z-index: 60;
+    overflow: hidden;
     border-right: none;
-    box-shadow: 0 0 60px rgba(15, 8, 3, 0.3);
+    border-radius: 0 18px 18px 0;
+    box-shadow: 0 18px 70px rgba(15, 8, 3, 0.34);
+    overscroll-behavior: contain;
     transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 

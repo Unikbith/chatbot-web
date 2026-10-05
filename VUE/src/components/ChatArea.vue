@@ -4,7 +4,7 @@ import logger from '@/utils/logger';
 import { ElMessage, ElInput } from 'element-plus';
 import { 
   Setting, RefreshLeft, Lightning, 
-  Bell, VideoPause, CircleClose, Upload, Edit, MagicStick, Picture, Notebook
+  Bell, VideoPause, CircleClose, Upload, Edit, MagicStick, Picture, Notebook, Menu
 } from '@element-plus/icons-vue';
 import { readStream, chatApi, audioApi, imageApi, providersApi, conversationApi, uploadApi } from '@/utils/resAi';
 import auth from '@/utils/auth';
@@ -58,7 +58,8 @@ const props = defineProps({
   loggedIn: { type: Boolean, default: false },
   personaGreeting: { type: String, default: '' },
   backgroundImage: { type: String, default: '' },
-  backgroundCover: { type: String, default: 'cover' }
+  backgroundCover: { type: String, default: 'cover' },
+  mobileMenu: { type: Boolean, default: false }
 });
 
 const emit = defineEmits([
@@ -72,7 +73,8 @@ const emit = defineEmits([
   'requireLogin',
   'modelChange',
   // 本轮回复结束：父组件借此刷新长期记忆（记忆回廊）等派生数据
-  'reply-done'
+  'reply-done',
+  'toggleSidebar'
 ]);
 
 const opacityVal = computed(() => {
@@ -1206,6 +1208,9 @@ onUnmounted(() => {
     <!-- 顶部栏 -->
     <div class="chat-header">
       <div class="header-left">
+        <button v-if="mobileMenu" class="chat-menu-btn" type="button" @click="emit('toggleSidebar')">
+          <el-icon><Menu /></el-icon>
+        </button>
         <div class="chat-title" @click="startEditTitle" v-if="!editingTitle">
           <span class="title-text">{{ conversationTitle || '新对话' }}</span>
           <el-icon class="edit-icon"><Edit /></el-icon>
@@ -1550,6 +1555,21 @@ onUnmounted(() => {
   align-items: center;
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.chat-menu-btn {
+  display: none;
+  width: 36px;
+  height: 36px;
+  margin-right: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--text-primary);
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
 }
 
 .chat-title {
@@ -2304,7 +2324,11 @@ onUnmounted(() => {
 /* 响应式 */
 @media (max-width: 768px) {
   .chat-header {
-    padding: 10px 16px 10px 58px;
+    padding: 10px 12px;
+  }
+
+  .chat-menu-btn {
+    display: inline-flex;
   }
   .chat-header .header-actions {
     gap: 2px;
@@ -2327,6 +2351,13 @@ onUnmounted(() => {
   
   .message-item {
     gap: 10px;
+  }
+
+  @supports (content-visibility: auto) {
+    .message-item {
+      content-visibility: auto;
+      contain-intrinsic-size: 120px;
+    }
   }
   
   .avatar-circle {
@@ -2438,7 +2469,7 @@ onUnmounted(() => {
 /* 超窄屏（iPhone SE 等）再收紧一档 */
 @media (max-width: 420px) {
   .chat-header {
-    padding: 8px 12px 8px 54px;
+    padding: 8px 10px;
   }
 
   .message-container {
