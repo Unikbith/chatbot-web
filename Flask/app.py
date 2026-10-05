@@ -367,6 +367,8 @@ def _ensure_schema_columns(app):
                     'summary_threshold': 'INTEGER',
                     'summary': 'TEXT',
                     'summary_upto_id': 'INTEGER',
+                    # 用户导入的长期记忆（与滚动摘要分开存，避免被压缩器改写成短摘要）
+                    'imported_memory': 'TEXT',
                     # 提示词兜底开关
                     'append_prompt_enabled': 'BOOLEAN',
                     # 界面标记（富消息）开关

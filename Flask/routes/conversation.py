@@ -427,7 +427,8 @@ def update_conversation_memory(conv_id):
     if len(memory_text) > 8000:
         return jsonify({'code': 400, 'message': '记忆文本最多 8000 字'}), 400
     last_message = Message.query.filter_by(conversation_id=conv.id).order_by(Message.id.desc()).first()
-    conv.summary = memory_text
+    # 写入「导入记忆」字段（与滚动摘要分开），保证不被压缩器改写成短摘要
+    conv.imported_memory = memory_text
     conv.summary_upto_id = last_message.id if last_message else 0
     seq = ConversationSummary.query.filter_by(conversation_id=conv.id).count() + 1
     db.session.add(ConversationSummary(

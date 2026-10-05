@@ -6,7 +6,8 @@
 
 检查点：
   1. 导入成功，且记忆以「用户消息」写入对话（界面可见）
-  2. 导入同时写入长记忆：conv.summary 含记忆全文、summary_upto_id 指向该导入消息
+  2. 导入同时写入独立的「导入记忆」字段 conv.imported_memory（原样保留、每轮注入，
+     不会被滚动摘要压缩器改写成 200 字短摘要），summary_upto_id 指向该导入消息
   3. AI 以角色口吻确认记住（回复作为 assistant 消息落库）
   4. 后续对话时，前端上送的完整历史里虽然仍带导入原文，
      但模型实际收到的上下文中该原文已被摘要切片丢弃
@@ -104,8 +105,10 @@ try:
         check('AI 已以角色口吻回复并落库', len(ai_msgs) >= 1,
               repr((ai_msgs[-1].get('content') or '')[:40]) if ai_msgs else '无')
 
-        print('== 2. 长记忆写入记忆宫殿 ==')
-        check('conv.summary 含记忆全文', MARK in (detail.get('summary') or ''))
+        print('== 2. 导入记忆写入记忆宫殿 ==')
+        check('conv.imported_memory 含记忆全文', MARK in (detail.get('imported_memory') or ''))
+        check('导入记忆不被滚动摘要字段混用（summary 未被写入）',
+              MARK not in (detail.get('summary') or ''))
         imported_user = [m for m in user_msgs if MARK in (m.get('content') or '')]
         check('summary_upto_id 指向导入的那条用户消息',
               bool(imported_user) and detail.get('summary_upto_id') == imported_user[-1]['id'],
@@ -135,13 +138,13 @@ try:
             check('前端上送的历史里确实带着导入原文（前提成立）', uploaded_has_token)
             check('模型实收上下文中已无该原文（被摘要切片丢弃）', not token_in_ctx,
                   f'出现在 {token_in_ctx}' if token_in_ctx else '')
-            check('记忆标记出现在 system 消息（长记忆注入）', token_in_sys)
+            check('记忆标记出现在 system 消息（导入记忆注入）', token_in_sys)
 
-            print('== 4. 负向对照：清空长记忆后标记应消失 ==')
+            print('== 4. 负向对照：清空导入记忆后标记应消失 ==')
             with app.app_context():
                 c = db.session.get(Conversation, conv_id)
-                saved = c.summary
-                c.summary = None
+                saved = c.imported_memory
+                c.imported_memory = None
                 db.session.commit()
             CAPTURED.clear()
             client.post('/api/chat', headers=H, json={
@@ -151,9 +154,9 @@ try:
                 MARK in (m.get('content') or '') for m in CAPTURED[0] if m['role'] == 'system')
             with app.app_context():
                 c = db.session.get(Conversation, conv_id)
-                c.summary = saved
+                c.imported_memory = saved
                 db.session.commit()
-            check('清空长记忆后标记不再出现（证明来自长记忆而非上下文）', not still)
+            check('清空导入记忆后标记不再出现（证明来自记忆而非上下文）', not still)
 finally:
     print('== 5. 清理测试数据 ==')
     if conv_id:

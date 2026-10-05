@@ -461,7 +461,12 @@ def _get_user_settings(user_id):
 CONTEXT_MAX_MESSAGES = 16  # 送入模型的历史消息滑动窗口上限（不含系统提示词）
 CONTEXT_MAX_CHARS = 5000   # 历史正文总字数预算：在保留近期上下文的前提下进一步压低输入 token
 CONTEXT_MIN_KEEP = 6       # 字符预算收窄时至少保留最近几条原文，避免刚说的话也被砍掉
-MAX_LONG_MEMORY_CHARS = 200  # 长期记忆注入上限：50-200 字，只保留关键且不重复的信息
+MAX_LONG_MEMORY_CHARS = 200  # 滚动摘要注入上限：压缩器按设计只输出 50-200 字的关键点
+# 导入记忆注入上限：导入档案是用户明确指定的长期记忆，必须原样带上；
+# 上限与导入接口的 8000 字校验对齐，保证「导入多少就记住多少」。
+# 它是每轮都完全相同的前缀内容，可被厂商前缀缓存命中（见 _log_cache_hit），
+# 实际成本远低于名义 token 数。
+MAX_IMPORTED_MEMORY_CHARS = 8000
 
 DEFAULT_REPLY_TEMPLATE_JSON = json.dumps({
     'preset': 'blush',
@@ -668,6 +673,28 @@ def _memory_summary_block(conv):
         '\n\n【历史对话摘要】以下是较早之前对话的浓缩记录，'
         '请据此保持人设与剧情连贯（不要向用户提及本摘要的存在）：\n'
         + summary
+    )
+
+
+def _imported_memory_block(conv):
+    """拼进系统提示词的「用户导入的长期记忆」；没导入过返回空串。
+
+    与 _memory_summary_block 的区别：滚动摘要是自动压缩、刻意有损的；
+    导入记忆是用户明确指定的档案，必须原样、完整地长期生效，
+    因此单独存放（conv.imported_memory）、单独注入，且不被压缩器改写。
+    """
+    if not conv:
+        return ''
+    memory = (conv.imported_memory or '').strip()
+    if not memory:
+        return ''
+    if len(memory) > MAX_IMPORTED_MEMORY_CHARS:
+        memory = memory[:MAX_IMPORTED_MEMORY_CHARS] + '\n……（导入记忆过长，已截断）'
+    return (
+        '\n\n【用户导入的长期记忆】这是用户为你导入的、你们之间的过往经历与设定，'
+        '视同你已经历过并牢记在心，对话中请自然地依此保持连贯'
+        '（不要向用户提及"导入""记忆档案"等字眼）：\n'
+        + memory
     )
 
 
@@ -1081,9 +1108,11 @@ def chat():
         else:
             formatted_messages = formatted_messages[summarized_count:]
 
-    # 插入系统提示词（历史摘要一并拼入，位于输出格式约定之前）
+    # 插入系统提示词（导入记忆与历史摘要一并拼入，位于输出格式约定之前）
     final_prompt = _get_system_prompt(conv, user_id, persona_id, system_prompt)
-    final_prompt = final_prompt + _memory_summary_block(conv)
+    # 顺序刻意如此：人设 > 导入记忆 > 滚动摘要 —— 越靠前越稳定，
+    # 稳定的前缀更容易命中厂商的提示词前缀缓存。
+    final_prompt = final_prompt + _imported_memory_block(conv) + _memory_summary_block(conv)
 
     # 世界书：按最近对话命中关键词，按需注入设定条目（无条目时返回空串，行为不变）
     effective_persona_id = conv.persona.id if (conv and conv.persona) else persona_id
@@ -1840,9 +1869,10 @@ def import_memory():
 
     1) 把记忆文本作为一条用户消息写入对话（聊天界面可见）
     2) 调用 AI 以当前角色口吻简要总结这段记忆并回复确认
-    3) 把记忆内容存入记忆宫殿长记忆（conv.summary + 压缩留档），后续对话自动参考
+    3) 把记忆存入「导入记忆」字段（conv.imported_memory），每轮原样注入系统提示词，
+       后续对话据此保持连贯；不会被滚动摘要压缩器改写
 
-    导入永不阻断：即使 AI 总结失败，用户消息与长记忆也已写入，仅回复降级为固定提示。
+    导入永不阻断：即使 AI 总结失败，用户消息与导入记忆也已写入，仅回复降级为固定提示。
     """
     user_id = int(get_jwt_identity())
     data = request.get_json(silent=True) or {}
@@ -1866,9 +1896,11 @@ def import_memory():
     db.session.add(user_msg)
     db.session.flush()
 
-    # 2) 存入记忆宫殿长记忆并留档。summary_upto_id 指向导入消息，
-    #    后续上下文的「近期消息」窗口不再重复携带大段记忆文本
-    conv.summary = memory_text
+    # 2) 存入「导入记忆」（与滚动摘要分开的字段，原样长期保留、每轮注入）。
+    #    不写 conv.summary：滚动摘要会被压缩器改写成 200 字短摘要，导入档案放进去会被吃掉。
+    #    summary_upto_id 指向导入消息，让这条大段原文不再重复进入上下文窗口
+    #    （其内容由 imported_memory 承载，避免同一份内容在 prompt 里出现两次）。
+    conv.imported_memory = memory_text
     conv.summary_upto_id = user_msg.id
     seq = ConversationSummary.query.filter_by(conversation_id=conv.id).count() + 1
     db.session.add(ConversationSummary(

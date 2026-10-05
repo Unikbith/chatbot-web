@@ -353,6 +353,9 @@ class Conversation(db.Model):
     summary_threshold = db.Column(db.Integer, default=7, nullable=True)  # 触发阈值，1-20 轮，默认 7
     summary = db.Column(db.Text, nullable=True)             # 当前滚动摘要正文（最新一次压缩结果）
     summary_upto_id = db.Column(db.Integer, nullable=True)  # 已摘要到的最后一条 message id
+    # 用户导入的长期记忆（记忆档案原文）：与滚动摘要分开存，避免被压缩器改写成 200 字短摘要。
+    # 滚动摘要是「自动压缩、刻意有损」的，而导入记忆是用户明确指定的档案，必须原样长期保留。
+    imported_memory = db.Column(db.Text, nullable=True)
     # 提示词兜底：开启后，后端写死的 GLOBAL_APPEND_PROMPT 才会接在人物设定之后。
     # 默认关闭 —— 那段兜底词有几千 token，默认带上会显著抬高每轮输入成本，
     # 只有在「AI 生成不出想要的内容」时才由用户自行打开。
@@ -408,6 +411,7 @@ class Conversation(db.Model):
             'summary_threshold': self.summary_threshold,
             'summary': self.summary,
             'summary_upto_id': self.summary_upto_id,
+            'imported_memory': self.imported_memory,
             'append_prompt_enabled': bool(self.append_prompt_enabled),
             # NULL 与「未存过」同义：回落到全局默认值，
             # 与 rich_marker.resolve_rich_marker_enabled 的判定保持一致，
