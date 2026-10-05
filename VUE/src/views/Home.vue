@@ -52,7 +52,6 @@ const supportChatVisible = ref(false)
 const memoryTransferVisible = ref(false)
 const newChatPersonaVisible = ref(false)
 const supportUnread = ref(0)
-let supportPollTimer = null
 // 新用户使用教程弹窗（新用户注册后首次登录自动弹出一次）
 const tutorialVisible = ref(false)
 
@@ -436,6 +435,7 @@ onMounted(async () => {
   updateViewport()
   window.addEventListener('resize', updateViewport)
   window.addEventListener('focus', loadSupportUnread)
+  document.addEventListener('visibilitychange', handleSupportVisibility)
 
   const token = tokenStore.getAccess()
   if (token) {
@@ -443,7 +443,6 @@ onMounted(async () => {
       await loadUserInfo()
       await loadAllData()
       await loadSupportUnread()
-      startSupportPolling()
       await ensureInitialConversation()
       // 新用户注册后若直接刷新页面，这里兜底再判一次（已看过则不会弹）
       maybeShowTutorial()
@@ -482,9 +481,9 @@ watch(providerPanelVisible, (val) => {
 onUnmounted(() => {
   window.removeEventListener('resize', updateViewport)
   window.removeEventListener('focus', loadSupportUnread)
+  document.removeEventListener('visibilitychange', handleSupportVisibility)
   window.removeEventListener('auth:expired', handleAuthExpired)
   if (unbindSystemTheme) unbindSystemTheme()
-  stopSupportPolling()
 })
 
 function handleAuthExpired() {
@@ -682,7 +681,8 @@ async function createConversationWithPersona(personaId) {
 }
 
 async function handleMemoryImported() {
-  if (currentConvId.value) await handleSelectConversation(currentConvId.value)
+  // 导入会写入当前对话摘要；同一会话必须强制重载，否则记忆回廊不会刷新。
+  if (currentConvId.value) await handleSelectConversation(currentConvId.value, true)
 }
 
 // 会话切换令牌：每次切换/新建都自增。
@@ -751,6 +751,33 @@ function onReplyDone(convId) {
   loadLongTermMemory()
 }
 
+// 后端在三轮后自动关闭「提示词兜底」，同步当前会话对象，让设置抽屉里的开关跟着关闭
+function onFallbackDisabled(convId) {
+  if (convId != null && convId != currentConvId.value) return
+  if (currentConv.value) currentConv.value.append_prompt_enabled = false
+}
+
+// 后端在一轮后自动关闭「丰富面板内容」，同步当前会话对象并弹窗提示
+function onPromptEnhanceDisabled(convId) {
+  if (convId != null && convId != currentConvId.value) return
+  if (currentConv.value) {
+    // 更新 reply_template 中的 enhance 字段
+    try {
+      const tpl = typeof currentConv.value.reply_template === 'string'
+        ? JSON.parse(currentConv.value.reply_template)
+        : currentConv.value.reply_template || {}
+      tpl.enhance = false
+      currentConv.value.reply_template = JSON.stringify(tpl)
+    } catch (e) { /* ignore */ }
+  }
+  // 弹窗提示用户
+  ElMessageBox.alert(
+    '已完成一轮对话，「丰富面板内容」已自动关闭，以减少后续 Token 消耗。',
+    '功能已自动关闭',
+    { confirmButtonText: '知道了', type: 'info' }
+  )
+}
+
 async function loadLongTermMemory() {
   if (!currentConvId.value) { longTermMemory.value = []; return }
   try {
@@ -765,8 +792,8 @@ async function loadLongTermMemory() {
   }
 }
 
-async function handleSelectConversation(convId) {
-  if (!convId || convId === currentConvId.value) return
+async function handleSelectConversation(convId, force = false) {
+  if (!convId || (!force && convId === currentConvId.value)) return
   const seq = ++convSwitchSeq
   try {
     const res = await conversationApi.get(convId)
@@ -872,7 +899,6 @@ async function handleLoginSuccess(userData) {
   isLoggedIn.value = true
   authModalVisible.value = false
   loadSupportUnread()
-  startSupportPolling()
   // 清空旧人设，让 loadPersonas 按新登录用户的性别重新挑默认人物卡
   currentPersona.value = null
   // 登录/注册响应只有用户信息，不含用户设置：这里补拉一次，
@@ -917,18 +943,12 @@ async function loadSupportUnread() {
   if (!isLoggedIn.value) return
   try {
     const res = await supportApi.status()
-    if (res.code === 200) supportUnread.value = res.data?.unread || 0
+    if (res.code === 200) supportUnread.value = Number(res.data?.unread || 0)
   } catch (e) { /* 静默 */ }
 }
 
-function startSupportPolling() {
-  if (supportPollTimer) return
-  supportPollTimer = setInterval(loadSupportUnread, 15000)
-}
-
-function stopSupportPolling() {
-  if (supportPollTimer) clearInterval(supportPollTimer)
-  supportPollTimer = null
+function handleSupportVisibility() {
+  if (!document.hidden) loadSupportUnread()
 }
 
 function handleLogout() {
@@ -936,7 +956,6 @@ function handleLogout() {
   isLoggedIn.value = false
   user.value = null
   supportUnread.value = 0
-  stopSupportPolling()
   currentConv.value = null
   currentConvId.value = null
   currentConvTitle.value = '新对话'
@@ -1403,6 +1422,8 @@ async function handleConvoSettingsSaved(payload) {
       :reply-template="replyTemplate"
       :long-term-memory="longTermMemory"
       @reply-done="onReplyDone"
+      @fallback-disabled="onFallbackDisabled"
+      @prompt-enhance-disabled="onPromptEnhanceDisabled"
       :is-free-api="chatStatus.is_free"
       :logged-in="isLoggedIn"
       :persona-greeting="currentPersona?.greeting || ''"
@@ -1411,6 +1432,7 @@ async function handleConvoSettingsSaved(payload) {
       @open-settings="requireLogin(openSettings)"
       @open-provider="requireLogin(() => providerPanelVisible = true)"
       @open-conversation-settings="openConversationSettings"
+      @open-memory-transfer="requireLogin(() => memoryTransferVisible = true)"
       @toggle-sidebar="toggleSidebar"
       @model-change="handleModelChange"
       @require-login="requireLogin"

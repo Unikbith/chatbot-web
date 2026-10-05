@@ -2,7 +2,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
-from models import PersonaTemplate, MarketplaceAdopt, WorldBookEntry
+from models import PersonaTemplate, MarketplaceAdopt, WorldBookEntry, local_now
 
 persona_bp = Blueprint('persona', __name__, url_prefix='/api/personas')
 
@@ -53,7 +53,9 @@ def list_personas():
     except Exception:
         db.session.rollback()
 
-    personas = PersonaTemplate.query.filter_by(user_id=user_id).order_by(
+    personas = PersonaTemplate.query.filter_by(user_id=user_id).filter(
+        PersonaTemplate.deleted_at.is_(None)
+    ).order_by(
         PersonaTemplate.is_default.desc(),
         PersonaTemplate.weight.desc(),
         PersonaTemplate.created_at.desc()
@@ -95,6 +97,9 @@ def create_persona():
     """创建角色模板"""
     user_id = int(get_jwt_identity())
     data = request.get_json() or {}
+    worldbook_entries, worldbook_error = _normalize_persona_worldbook(data.get('worldbook'))
+    if worldbook_error:
+        return jsonify({'code': 400, 'message': worldbook_error}), 400
     
     name = data.get('name', '').strip()
     system_prompt = data.get('system_prompt', '').strip()
@@ -140,17 +145,31 @@ def create_persona():
         persona_type=persona_type,
     )
     db.session.add(persona)
+    db.session.flush()
     
     # 如果是第一个角色，自动设为默认
     if PersonaTemplate.query.filter_by(user_id=user_id).count() == 1:
         persona.is_default = True
+
+    # 新建人物卡时允许同一次请求提交世界书草稿，避免先建卡再逐条写入导致半成功。
+    for entry in worldbook_entries:
+        db.session.add(WorldBookEntry(
+            user_id=user_id,
+            persona_id=persona.id,
+            title=entry['title'],
+            keywords=entry['keywords'],
+            content=entry['content'],
+            always_on=entry['always_on'],
+            enabled=entry['enabled'],
+            weight=entry['weight'],
+        ))
     
     db.session.commit()
     
     return jsonify({
         'code': 200,
         'message': '创建成功',
-        'data': persona.to_dict()
+        'data': {**persona.to_dict(), 'worldbook_count': len(worldbook_entries)}
     })
 
 
@@ -225,10 +244,12 @@ def update_persona(persona_id):
 @persona_bp.route('/<int:persona_id>', methods=['DELETE'])
 @jwt_required()
 def delete_persona(persona_id):
-    """删除角色模板"""
+    """删除角色模板（软删除，管理员后台仍可查看）"""
     user_id = int(get_jwt_identity())
-    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first()
-    
+    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).filter(
+        PersonaTemplate.deleted_at.is_(None)
+    ).first()
+
     if not persona:
         return jsonify({'code': 404, 'message': '角色不存在'}), 404
 
@@ -240,20 +261,20 @@ def delete_persona(persona_id):
         template_id=persona.id, user_id=user_id
     ).delete()
 
-    db.session.delete(persona)
+    # 软删除：设置 deleted_at 时间戳，管理员后台仍保留完整记录
+    persona.deleted_at = local_now()
     db.session.commit()
-    
-    # 如果删的是默认角色，将第一个设为默认
+
+    # 如果删的是默认角色，将第一个未删除的设为默认
     if was_default:
-        first = PersonaTemplate.query.filter_by(user_id=user_id).first()
+        first = PersonaTemplate.query.filter_by(user_id=user_id).filter(
+            PersonaTemplate.deleted_at.is_(None)
+        ).first()
         if first:
             first.is_default = True
             db.session.commit()
-    
-    return jsonify({
-        'code': 200,
-        'message': '删除成功'
-    })
+
+    return jsonify({'code': 200, 'message': '已删除'})
 
 
 @persona_bp.route('/<int:persona_id>/default', methods=['PUT'])
@@ -288,6 +309,46 @@ MAX_WB_TITLE_LEN = 200
 MAX_WB_KEYWORDS_LEN = 1000
 MAX_WB_CONTENT_LEN = 4000
 MAX_WB_ENTRIES_PER_PERSONA = 50
+
+
+def _normalize_persona_worldbook(raw):
+    """校验并整理新建人物卡时一并提交的世界书条目。"""
+    if raw is None:
+        return [], None
+    if not isinstance(raw, list):
+        return None, '世界书格式不正确'
+    if len(raw) > MAX_WB_ENTRIES_PER_PERSONA:
+        return None, f'每个角色最多 {MAX_WB_ENTRIES_PER_PERSONA} 条设定'
+
+    entries = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        content = (item.get('content') or '').strip()
+        if not content:
+            continue
+        if len(content) > MAX_WB_CONTENT_LEN:
+            return None, f'设定内容过长（最多 {MAX_WB_CONTENT_LEN} 字）'
+        keywords = (item.get('keywords') or '').strip()
+        if len(keywords) > MAX_WB_KEYWORDS_LEN:
+            return None, f'关键词过长（最多 {MAX_WB_KEYWORDS_LEN} 字）'
+        title = (item.get('title') or '').strip()[:MAX_WB_TITLE_LEN]
+        always_on = bool(item.get('always_on', False))
+        if not always_on and not keywords:
+            return None, '非常驻条目请至少填写一个触发词'
+        try:
+            weight = int(item.get('weight') or 0)
+        except (TypeError, ValueError):
+            weight = 0
+        entries.append({
+            'title': title,
+            'keywords': keywords,
+            'content': content,
+            'always_on': always_on,
+            'enabled': bool(item.get('enabled', True)),
+            'weight': weight,
+        })
+    return entries, None
 
 
 def _wb_entry_of(entry_id, user_id):

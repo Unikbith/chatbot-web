@@ -19,7 +19,7 @@ from services.markdown_streamer import (
     strip_html_to_text,
     render_markdown,
     render_stream_delta,
-    sse_content, sse_reasoning, sse_done, sse_html, sse_tokens
+    sse_content, sse_reasoning, sse_done, sse_html, sse_tokens, sse_settings
 )
 from services.upload_guard import check_upload, detect_image_type, MAX_IMAGE_SIZE
 from services.rate_limit import rate_limit
@@ -458,17 +458,17 @@ def _get_user_settings(user_id):
     return settings
 
 
-CONTEXT_MAX_MESSAGES = 20  # 送入模型的历史消息滑动窗口上限（不含系统提示词）
-CONTEXT_MAX_CHARS = 6000   # 历史正文总字数预算：长回复场景下条数窗口不够用时的第二道闸
+CONTEXT_MAX_MESSAGES = 16  # 送入模型的历史消息滑动窗口上限（不含系统提示词）
+CONTEXT_MAX_CHARS = 5000   # 历史正文总字数预算：在保留近期上下文的前提下进一步压低输入 token
 CONTEXT_MIN_KEEP = 6       # 字符预算收窄时至少保留最近几条原文，避免刚说的话也被砍掉
-MAX_LONG_MEMORY_CHARS = 200  # 长期记忆注入上限，只保留关键且不重复的信息
+MAX_LONG_MEMORY_CHARS = 200  # 长期记忆注入上限：50-200 字，只保留关键且不重复的信息
 
 DEFAULT_REPLY_TEMPLATE_JSON = json.dumps({
     'preset': 'blush',
     'name': '脸红',
     'protocol': 'full',
-    'length': 'long',
-    'enhance': True,
+    'length': 'medium',
+    'enhance': False,
 }, ensure_ascii=False)
 
 
@@ -678,8 +678,8 @@ def _memory_summary_block(conv):
 # 把设定拆成小条目，只在最近对话命中关键词时才注入 —— 省 token 且能写更多设定。
 # 对用户是零配置的：一个条目都没有时，下面这段逻辑直接返回空串，行为与以前完全一致。
 WORLDBOOK_SCAN_MESSAGES = 4   # 只看最近几条消息来判定是否命中关键词
-WORLDBOOK_MAX_ENTRIES = 8     # 单次最多注入几条（预算上限，防条目爆炸）
-WORLDBOOK_MAX_CHARS = 1500    # 单次注入正文总字数上限（约 900+ token 封顶）
+WORLDBOOK_MAX_ENTRIES = 6     # 单次最多注入几条（预算上限，防条目爆炸）
+WORLDBOOK_MAX_CHARS = 1200    # 单次注入正文总字数上限，避免设定条目挤占上下文预算
 
 
 def _split_keywords(raw):
@@ -860,7 +860,7 @@ def _get_system_prompt(conv, user_id, persona_id=None, custom_prompt=None):
     body = (body or '') + _roleplay_subject_block()
     # 提示词兜底默认关闭：那段兜底词有几千 token，默认带上会明显抬高每轮成本
     flag = getattr(conv, 'append_prompt_enabled', None) if conv else None
-    enabled = True if flag is None else bool(flag)
+    enabled = False if flag is None else bool(flag)
     body = _append_global_prompt(body, enabled=enabled)
     return body
 
@@ -1220,9 +1220,24 @@ def chat():
                 if rounds > 3 and getattr(conv, 'append_prompt_enabled', False):
                     conv.append_prompt_enabled = False
                     db.session.commit()
+                    yield sse_settings({'append_prompt_enabled': False})
                     note = '\n\n（已完成三轮对话，提示词兜底已自动关闭，以减少后续 Token 消耗。）'
                     yield sse_content(note)
                     yield sse_html(render_markdown(note))
+                # 丰富面板内容：开启后一轮对话结束自动关闭
+                if rounds > 1 and conv.reply_template:
+                    try:
+                        tpl = json.loads(conv.reply_template)
+                        if tpl.get('enhance') is True:
+                            tpl['enhance'] = False
+                            conv.reply_template = json.dumps(tpl, ensure_ascii=False)
+                            db.session.commit()
+                            yield sse_settings({'prompt_enhance_disabled': True})
+                            note2 = '\n\n（已完成一轮对话，「丰富面板内容」已自动关闭，以减少后续 Token 消耗。）'
+                            yield sse_content(note2)
+                            yield sse_html(render_markdown(note2))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
             # token 用量（有厂商才返回，缺失时前端不展示）
             if prompt_tokens or completion_tokens:
@@ -1414,9 +1429,24 @@ def vision_chat():
                 if rounds > 3 and getattr(conv, 'append_prompt_enabled', False):
                     conv.append_prompt_enabled = False
                     db.session.commit()
+                    yield sse_settings({'append_prompt_enabled': False})
                     note = '\n\n（已完成三轮对话，提示词兜底已自动关闭，以减少后续 Token 消耗。）'
                     yield sse_content(note)
                     yield sse_html(render_markdown(note))
+                # 丰富面板内容：开启后一轮对话结束自动关闭
+                if rounds > 1 and conv.reply_template:
+                    try:
+                        tpl = json.loads(conv.reply_template)
+                        if tpl.get('enhance') is True:
+                            tpl['enhance'] = False
+                            conv.reply_template = json.dumps(tpl, ensure_ascii=False)
+                            db.session.commit()
+                            yield sse_settings({'prompt_enhance_disabled': True})
+                            note2 = '\n\n（已完成一轮对话，「丰富面板内容」已自动关闭，以减少后续 Token 消耗。）'
+                            yield sse_content(note2)
+                            yield sse_html(render_markdown(note2))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
             if usage_holder[0] or usage_holder[1]:
                 yield sse_tokens((usage_holder[0] or 0) + (usage_holder[1] or 0))
@@ -1676,63 +1706,125 @@ def prompt_tool_generate():
 @chat_bp.route('/memory-export', methods=['POST'])
 @jwt_required()
 def export_memory():
-    """只用记忆宫殿摘要和记忆卡生成便携记忆档，不读取全部聊天原文。"""
+    """调用 AI 总结短记忆+长记忆+最新AI回复，生成可移植的记忆档案。"""
     user_id = int(get_jwt_identity())
     data = request.get_json(silent=True) or {}
     conv_id = data.get('conversation_id')
+    provider_id = data.get('provider_id')
+    model_id = data.get('model_id') or ''
+
     conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).filter(
         Conversation.deleted_at.is_(None)
     ).first()
     if not conv:
         return jsonify({'code': 404, 'message': '对话不存在'}), 404
 
-    summaries = ConversationSummary.query.filter_by(
-        conversation_id=conv.id, user_id=user_id
-    ).order_by(ConversationSummary.seq.desc()).limit(6).all()
-    parts = []
-    if conv.summary:
-        parts.append('【当前长期记忆】\n' + conv.summary.strip()[:1200])
-    if summaries:
-        parts.append('【近期压缩记录】\n' + '\n'.join(
-            f'{s.seq}. {(s.content or "").strip()[:500]}' for s in reversed(summaries)
-        ))
-    material = '\n\n'.join(parts).strip()
-    if not material:
-        return jsonify({'code': 400, 'message': '当前还没有可导出的记忆内容'}), 400
+    # 获取长期记忆
+    long_memory = (conv.summary or '').strip()
 
-    provider = _get_chat_provider(user_id, data.get('provider_id'))
+    # 获取短期记忆（最近 10 条消息）
+    recent_msgs = Message.query.filter_by(conversation_id=conv.id).order_by(
+        Message.id.desc()
+    ).limit(10).all()
+    recent_msgs.reverse()
+    short_memory_lines = []
+    for m in recent_msgs:
+        role = '用户' if m.role == 'user' else 'AI'
+        content = (m.content or '').strip()[:500]
+        if content:
+            short_memory_lines.append(f'{role}：{content}')
+    short_memory = '\n'.join(short_memory_lines)
+
+    # 获取最新一条 AI 回复
+    latest_ai_msg = Message.query.filter_by(
+        conversation_id=conv.id, role='assistant'
+    ).order_by(Message.id.desc()).first()
+    latest_ai_reply = (latest_ai_msg.content or '').strip()[:1000] if latest_ai_msg else ''
+
+    # 如果没有任何记忆内容
+    if not long_memory and not short_memory and not latest_ai_reply:
+        return jsonify({'code': 400, 'message': '当前对话还没有可导出的记忆内容'}), 400
+
+    # 构建总结提示词
+    summary_prompt = f"""请将以下记忆内容总结成一份简洁、可移植的记忆档案，要求：
+1. 保留关键信息、重要事件、人物关系、情感线索
+2. 去除重复和冗余内容
+3. 用第一人称或客观叙述均可，保持连贯性
+4. 控制在 500-1500 字以内
+5. 格式清晰，可分段
+
+【长期记忆】
+{long_memory or '（暂无）'}
+
+【近期对话】
+{short_memory or '（暂无）'}
+
+【最新AI回复】
+{latest_ai_reply or '（暂无）'}
+
+请输出总结后的记忆档案："""
+
+    # 获取 provider 和 model
+    provider = None
+    if provider_id:
+        provider = ModelProvider.query.filter_by(id=provider_id, user_id=user_id, is_active=True).first()
     if not provider:
-        return jsonify({'code': 400, 'message': '没有可用的聊天模型'}), 400
-    model = data.get('model_id') or _resolve_chat_model(provider, conv)
-    system_prompt = (
-        '你是一个角色陪伴记忆整理器。请把输入的记忆材料整理成一份可移植的角色记忆档。\n'
-        '要求：50-200 字；只保留角色身份、双方关系变化、用户偏好与雷点、关键事件结果、未完成约定；'
-        '删除寒暄、过程描写、重复内容和临时状态；使用 3-6 个短点；不要编造材料中没有的事件；只输出记忆档正文。'
-    )
+        provider = ModelProvider.query.filter_by(user_id=user_id, is_active=True).first()
+    if not provider:
+        return jsonify({'code': 400, 'message': '请先配置一个模型提供商'}), 400
+
+    model = model_id or provider.default_model or ''
+    if not model:
+        models = AIService.list_models(provider)
+        if models and len(models[0]) > 0:
+            model = models[0][0].get('id', '')
+    if not model:
+        return jsonify({'code': 400, 'message': '未找到可用模型'}), 400
+
+    # 调用 AI 总结
     try:
         response, error = AIService.chat_completions(
             provider=provider,
             messages=[
-                {'role': 'system', 'content': system_prompt},
-                {'role': 'user', 'content': material},
+                {'role': 'system', 'content': '你是一个记忆整理专家，负责将对话记忆总结成简洁、可移植的档案。'},
+                {'role': 'user', 'content': summary_prompt},
             ],
             stream=False,
-            temperature=0.3,
+            temperature=0.5,
             model=model,
         )
     except Exception as e:
-        return jsonify({'code': 500, 'message': f'记忆导出失败：{str(e)}'}), 500
+        current_app.logger.warning(f'[记忆导出] AI总结请求异常: {e}')
+        return jsonify({'code': 500, 'message': f'AI总结请求失败: {str(e)}'}), 500
+
     if response is None or getattr(response, 'status_code', None) != 200:
-        return jsonify({'code': 500, 'message': f'记忆导出失败：{error or "模型无响应"}'}), 500
+        current_app.logger.warning(f'[记忆导出] AI总结失败: {error}')
+        return jsonify({'code': 500, 'message': f'AI总结失败: {error}'}), 500
+
     try:
         content = (response.json()['choices'][0]['message']['content'] or '').strip()
     except (KeyError, IndexError, TypeError, ValueError):
-        return jsonify({'code': 500, 'message': '模型返回格式异常'}), 500
+        return jsonify({'code': 500, 'message': 'AI响应格式异常'}), 500
+
     if not content:
-        return jsonify({'code': 500, 'message': '模型没有返回记忆内容'}), 500
+        return jsonify({'code': 500, 'message': 'AI未生成有效内容'}), 500
+
+    # 截断保护
+    if len(content) > 7800:
+        content = content[:7800] + '\n……（导出内容已按长度上限截断）'
+
+    # 获取 token 消耗
+    token_cost = 0
+    try:
+        usage = response.json().get('usage', {})
+        token_cost = usage.get('total_tokens', 0)
+    except Exception:
+        pass
+
     return jsonify({'code': 200, 'data': {
         'content': content,
         'model': model,
-        'source_chars': len(material),
+        'source_chars': len(long_memory) + len(short_memory) + len(latest_ai_reply),
         'result_chars': len(content),
+        'token_cost': token_cost,
     }})

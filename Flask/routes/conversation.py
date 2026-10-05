@@ -32,8 +32,8 @@ DEFAULT_REPLY_TEMPLATE = json.dumps({
     'preset': 'blush',
     'name': '脸红',
     'protocol': 'full',
-    'length': 'long',
-    'enhance': True,
+    'length': 'medium',
+    'enhance': False,
 }, ensure_ascii=False)
 
 
@@ -148,7 +148,7 @@ def create_conversation():
         persona_id=persona_id,
         system_prompt=system_prompt,
         temperature=temperature,
-        append_prompt_enabled=bool(data.get('append_prompt_enabled', True)),
+        append_prompt_enabled=bool(data.get('append_prompt_enabled', False)),
         rich_marker_enabled=bool(data.get('rich_marker_enabled', True)),
         reply_template=data.get('reply_template') or DEFAULT_REPLY_TEMPLATE,
     )
@@ -333,7 +333,7 @@ def list_summaries(conv_id):
         'code': 200,
         'data': {
             'conversation_id': conv.id,
-            'threshold': conv.summary_threshold or 10,
+            'threshold': conv.summary_threshold or 7,
             'compress_count': len(rows),
             'current_summary': conv.summary,
             'summary_upto_id': conv.summary_upto_id,
@@ -413,7 +413,7 @@ def clear_messages(conv_id):
 @conversation_bp.route('/<int:conv_id>/memory', methods=['PUT'])
 @jwt_required()
 def update_conversation_memory(conv_id):
-    """把外部记忆档写入当前对话的记忆宫殿。"""
+    """把外部记忆档写入当前对话的记忆宫殿，并通知 AI。"""
     user_id = int(get_jwt_identity())
     conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).filter(
         Conversation.deleted_at.is_(None)
@@ -439,6 +439,13 @@ def update_conversation_memory(conv_id):
         msg_to=last_message.id if last_message else None,
         message_count=0,
     ))
+    # 添加一条系统消息通知 AI 记忆已导入，让 AI 明确知道并可以确认
+    notify_content = f'[系统提示] 用户刚刚导入了新的记忆档案到你的记忆宫殿中。请在后续对话中参考这些记忆内容。'
+    db.session.add(Message(
+        conversation_id=conv.id,
+        role='system',
+        content=notify_content,
+    ))
     conv.updated_at = local_now()
     db.session.commit()
-    return jsonify({'code': 200, 'message': '记忆已导入当前对话'})
+    return jsonify({'code': 200, 'message': '记忆已导入当前对话，AI 已获知'})

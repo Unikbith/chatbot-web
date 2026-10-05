@@ -72,7 +72,7 @@
         <span class="sfb-tutorial-icon"><el-icon><ChatDotRound /></el-icon></span>
         <span class="sfb-tutorial-text">{{ t('与管理员对话并提出建议', 'Chat with Admin') }}</span>
         <span class="sfb-tutorial-anon">{{ t('匿名', 'Anonymous') }}</span>
-        <el-badge v-if="supportUnread" :value="supportUnread" class="feedback-unread-badge" />
+        <span v-if="supportUnread" class="feedback-unread-dot" :title="t('有新的管理员回复', 'New admin reply')">{{ supportUnread > 99 ? '99+' : supportUnread }}</span>
       </div>
       
       <div class="new-chat-row">
@@ -644,15 +644,29 @@ function handleCommand(cmd) {
 .sfb-tutorial-icon { display: inline-flex; color: var(--brand); font-size: 15px; flex-shrink: 0; }
 .sfb-tutorial-text { flex: 1; min-width: 0; font-weight: 600; color: var(--text-primary); }
 .sfb-tutorial-anon { color: var(--text-muted); font-size: 11px; }
-.feedback-unread-badge {
+.feedback-unread-dot {
   position: absolute;
-  top: -7px;
-  right: -6px;
+  top: -8px;
+  right: -7px;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #e5484d;
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 700;
+  box-shadow: 0 0 0 2px var(--sidebar-bg), 0 3px 8px rgba(229, 72, 77, .28);
+  animation: support-dot-pop .22s ease-out;
 }
 
-.feedback-unread-badge :deep(.el-badge__content) {
-  background: #e5484d;
-  border: 2px solid var(--sidebar-bg);
+@keyframes support-dot-pop {
+  from { transform: scale(.55); opacity: .2; }
+  to { transform: scale(1); opacity: 1; }
 }
 
 .btn-icon {

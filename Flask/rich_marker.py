@@ -65,8 +65,8 @@ def rich_marker_rule(conv=None):
     if not resolve_rich_marker_enabled(conv):
         return ''
     opts = template_prompt(conv)
-    # enhance 未设置时默认开启（与前端开关默认值一致）
-    enhance = opts.get('enhance', True) is not False
+    # enhance 未设置时默认关闭（与前端开关默认值一致），需要时由用户手动开启
+    enhance = opts.get('enhance') is True
     protocol = opts.get('protocol') or reply_spec.DEFAULT_PROTOCOL
     length = opts.get('length') or reply_spec.DEFAULT_LENGTH
     return reply_spec.compose_reply_spec(protocol=protocol, length=length, enhance=enhance)

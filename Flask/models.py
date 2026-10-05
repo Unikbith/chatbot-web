@@ -183,6 +183,7 @@ class PersonaTemplate(db.Model):
     weight = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=local_now)
     updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
+    deleted_at = db.Column(db.DateTime, nullable=True)  # 软删除时间戳
 
     def to_dict(self):
         return {
@@ -355,7 +356,7 @@ class Conversation(db.Model):
     # 提示词兜底：开启后，后端写死的 GLOBAL_APPEND_PROMPT 才会接在人物设定之后。
     # 默认关闭 —— 那段兜底词有几千 token，默认带上会显著抬高每轮输入成本，
     # 只有在「AI 生成不出想要的内容」时才由用户自行打开。
-    append_prompt_enabled = db.Column(db.Boolean, default=True, nullable=True)
+    append_prompt_enabled = db.Column(db.Boolean, default=False, nullable=True)
     # 界面标记（富消息）：开启后把「【状态】【进度】【选项】」等标记约定接在系统提示词后，
     # 模型输出的标记由前端 RichMessage.vue 渲染成状态栏/进展条/可点选项。
     # 默认值跟随全局开关 RICH_MESSAGE_ENABLED（见 rich_marker.py）：

@@ -919,28 +919,54 @@
 
           <el-tab-pane :label="`${t('人物卡', 'Personas')} (${userDetailPersonas.length})`" name="personas">
             <el-empty v-if="!userDetailPersonas.length" :description="t('暂无人物卡', 'No personas')" />
-            <el-collapse v-else>
-              <el-collapse-item v-for="p in userDetailPersonas" :key="p.id" :name="p.id">
-                <template #title>
-                  <span>{{ p.name }}</span>
-                  <el-tag v-if="p.is_default" size="small" type="success" effect="plain" class="detail-inline-tag">{{ t('默认', 'Default') }}</el-tag>
-                  <el-tag size="small" effect="plain" class="detail-inline-tag">{{ p.persona_type === 'user' ? t('用户人设', 'User') : t('AI人设', 'AI') }}</el-tag>
-                  <span class="detail-muted">{{ t('世界书', 'Worldbook') }} {{ p.worldbook_count || 0 }}</span>
-                </template>
-                <div class="pl-detail-block">
-                  <div class="pl-detail-label">{{ t('AI 提示词', 'System prompt') }}</div>
-                  <pre class="pl-detail-text">{{ p.system_prompt || '-' }}</pre>
+            <template v-else>
+              <div v-if="selectedPersonaIds.length" class="batch-bar" style="margin-bottom: 10px;">
+                <span class="batch-hint">{{ t('已选', 'Selected') }} {{ selectedPersonaIds.length }} {{ t('项', 'items') }}</span>
+                <div class="batch-actions">
+                  <el-button size="small" plain @click="selectedPersonaIds = []">{{ t('取消选择', 'Clear') }}</el-button>
+                  <el-button size="small" type="danger" :loading="batchDeletingPersonas" @click="batchDeletePersonas">
+                    {{ t('批量删除', 'Delete selected') }} ({{ selectedPersonaIds.length }})
+                  </el-button>
                 </div>
-                <div class="pl-detail-block">
-                  <div class="pl-detail-label">{{ t('玩家设定', 'Player persona') }}</div>
-                  <pre class="pl-detail-text">{{ p.user_prompt || '-' }}</pre>
-                </div>
-                <div v-if="p.greeting" class="pl-detail-block">
-                  <div class="pl-detail-label">{{ t('开场白', 'Greeting') }}</div>
-                  <pre class="pl-detail-text">{{ p.greeting }}</pre>
-                </div>
-              </el-collapse-item>
-            </el-collapse>
+              </div>
+              <el-table :data="userDetailPersonas" size="small" class="admin-table" @selection-change="onPersonaSelectChange">
+                <el-table-column type="selection" width="42" />
+                <el-table-column prop="name" :label="t('名称', 'Name')" min-width="120" show-overflow-tooltip />
+                <el-table-column :label="t('类型', 'Type')" width="90">
+                  <template #default="{ row }">
+                    <el-tag size="small" effect="plain">{{ row.persona_type === 'user' ? t('用户', 'User') : t('AI', 'AI') }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column :label="t('世界书', 'Worldbook')" width="80" align="center">
+                  <template #default="{ row }">{{ row.worldbook_count || 0 }}</template>
+                </el-table-column>
+                <el-table-column :label="t('操作', 'Actions')" width="100" align="center">
+                  <template #default="{ row }">
+                    <el-button size="small" text type="primary" @click="showPersonaDetailFromList(row)">{{ t('查看', 'View') }}</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <!-- 展开详情区 -->
+              <el-collapse v-model="expandedPersonaIds" style="margin-top: 10px;">
+                <el-collapse-item v-for="p in userDetailPersonas" :key="p.id" :name="p.id">
+                  <template #title>
+                    <span style="font-size: 12px; color: var(--text-muted);">{{ p.name }} - {{ t('点击展开详情', 'Click to expand') }}</span>
+                  </template>
+                  <div class="pl-detail-block">
+                    <div class="pl-detail-label">{{ t('AI 提示词', 'System prompt') }}</div>
+                    <pre class="pl-detail-text">{{ p.system_prompt || '-' }}</pre>
+                  </div>
+                  <div class="pl-detail-block">
+                    <div class="pl-detail-label">{{ t('玩家设定', 'Player persona') }}</div>
+                    <pre class="pl-detail-text">{{ p.user_prompt || '-' }}</pre>
+                  </div>
+                  <div v-if="p.greeting" class="pl-detail-block">
+                    <div class="pl-detail-label">{{ t('开场白', 'Greeting') }}</div>
+                    <pre class="pl-detail-text">{{ p.greeting }}</pre>
+                  </div>
+                </el-collapse-item>
+              </el-collapse>
+            </template>
           </el-tab-pane>
 
           <el-tab-pane :label="t('Token 用量', 'Token Usage')" name="usage">
@@ -1047,6 +1073,7 @@
       width="min(680px, 96vw)"
       align-center
       class="support-admin-dialog"
+      @opened="scrollSupportToLatest(true)"
     >
       <div v-loading="supportDialogLoading" class="support-admin-chat">
         <div class="support-admin-user">
@@ -1057,16 +1084,23 @@
         <div ref="supportAdminMessagesRef" class="support-admin-messages">
           <div v-for="m in supportDetail.messages" :key="m.id" class="support-admin-msg" :class="m.sender">
             <div>{{ m.content }}</div>
-            <el-image v-if="m.image_url" :src="m.image_url" fit="contain" class="support-admin-image" />
+            <el-image v-if="m.image_url" :src="m.image_url" fit="contain" class="support-admin-image" @load="scrollSupportToLatest(true)" />
             <time>{{ formatTime(m.created_at) }}<template v-if="m.sender === 'admin'"> · {{ m.read_by_user ? t('已读', 'Read') : t('未读', 'Unread') }}</template></time>
           </div>
         </div>
         <div class="support-admin-reply">
           <el-upload :show-file-list="false" :before-upload="uploadSupportReplyImage" accept="image/*">
-            <el-button :icon="Picture">{{ t('图片', 'Image') }}</el-button>
+            <el-button circle plain :icon="Picture" />
           </el-upload>
-          <el-input v-model="supportReply" type="textarea" :rows="2" maxlength="2000" :placeholder="t('回复用户', 'Reply to user')" />
-          <el-button type="primary" @click="replySupport">{{ t('发送回复', 'Send reply') }}</el-button>
+          <el-input
+            v-model="supportReply"
+            type="textarea"
+            :autosize="{ minRows: 2, maxRows: 6 }"
+            resize="none"
+            maxlength="2000"
+            :placeholder="t('输入回复内容，可附带图片', 'Write a reply, or attach an image')"
+          />
+          <el-button type="primary" :disabled="!canReplySupport" :loading="supportReplying" @click="replySupport">{{ t('发送回复', 'Send reply') }}</el-button>
         </div>
         <div v-if="supportReplyImage" class="support-admin-image-preview"><el-image :src="supportReplyImage" fit="contain" /></div>
       </div>
@@ -1186,7 +1220,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Back, SwitchButton, Monitor, View, Download, Delete, Edit, ChatLineRound, Document, Search, Picture } from '@element-plus/icons-vue'
@@ -1220,6 +1254,11 @@ const batchDeleting = ref(false)
 // 内层对话表格 ref：批量勾选/取消时同步表格选中状态
 const convTableRef = ref(null)
 const activeTab = ref('users')
+
+// 人物卡批量选择与删除
+const selectedPersonaIds = ref([])
+const batchDeletingPersonas = ref(false)
+const expandedPersonaIds = ref([])
 
 // 混合筛选条件（每个条件都可单独使用，也可任意叠加）
 const emptyFilters = () => ({
@@ -1555,6 +1594,41 @@ async function batchDeleteRemoved(row) {
     ElMessage.error(t('批量删除失败', 'Batch delete failed'))
   } finally {
     batchDeleting.value = false
+  }
+}
+
+// ---- 人物卡批量选择与删除 ----
+function onPersonaSelectChange(selection) {
+  selectedPersonaIds.value = (selection || []).map(p => p.id)
+}
+
+async function batchDeletePersonas() {
+  const ids = selectedPersonaIds.value
+  if (!ids.length) return
+  try {
+    await ElMessageBox.confirm(
+      t(`确定彻底删除选中的 ${ids.length} 个人物卡吗？该操作不可恢复。`,
+        `Permanently delete ${ids.length} selected persona(s)? This cannot be undone.`),
+      t('确认删除', 'Confirm delete'),
+      { type: 'warning', confirmButtonText: t('删除', 'Delete'), cancelButtonText: t('取消', 'Cancel') }
+    )
+  } catch (e) {
+    return // 用户取消
+  }
+
+  batchDeletingPersonas.value = true
+  try {
+    const res = await adminApi.batchDeletePersonas(ids)
+    if (res.code === 200) {
+      ElMessage.success(res.message || t('删除成功', 'Deleted'))
+      selectedPersonaIds.value = []
+      // 重新拉取人物卡列表和统计
+      await Promise.all([loadUserDetailPersonas(), loadStats()])
+    }
+  } catch (e) {
+    ElMessage.error(t('批量删除失败', 'Batch delete failed'))
+  } finally {
+    batchDeletingPersonas.value = false
   }
 }
 
@@ -1910,7 +1984,9 @@ const supportDialogLoading = ref(false)
 const supportDetail = ref({ thread: null, user: null, messages: [] })
 const supportReply = ref('')
 const supportReplyImage = ref('')
+const supportReplying = ref(false)
 const supportAdminMessagesRef = ref(null)
+const canReplySupport = computed(() => !!supportReply.value.trim() || !!supportReplyImage.value)
 const mediaPage = ref(1)
 const mediaPerPage = 20
 const mediaTotal = ref(0)
@@ -1929,15 +2005,23 @@ async function loadSupportChats() {
   }
 }
 
+async function scrollSupportToLatest(force = false) {
+  await nextTick()
+  const el = supportAdminMessagesRef.value
+  if (!el) return
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  if (force || el.scrollHeight - el.scrollTop - el.clientHeight < 96) {
+    el.scrollTop = el.scrollHeight
+  }
+}
+
 async function openSupportChat(row) {
   supportDialogVisible.value = true
   supportDialogLoading.value = true
   try {
     const res = await adminApi.supportThread(row.id)
     if (res.code === 200) supportDetail.value = res.data
-    await nextTick()
-    const el = supportAdminMessagesRef.value
-    if (el) el.scrollTop = el.scrollHeight
+    await scrollSupportToLatest(true)
   } catch (e) {
     ElMessage.error(t('加载会话失败', 'Failed to load thread'))
   } finally {
@@ -1947,16 +2031,21 @@ async function openSupportChat(row) {
 
 async function replySupport() {
   const content = supportReply.value.trim()
-  if (!content || !supportDetail.value.thread?.id) return
+  if ((!content && !supportReplyImage.value) || !supportDetail.value.thread?.id || supportReplying.value) return
+  supportReplying.value = true
   try {
     const res = await adminApi.replySupportThread(supportDetail.value.thread.id, content, supportReplyImage.value)
     if (res.code === 200) {
       supportReply.value = ''
       supportReplyImage.value = ''
       await openSupportChat({ id: supportDetail.value.thread.id })
+    } else {
+      ElMessage.warning(res.message || t('回复失败', 'Reply failed'))
     }
   } catch (e) {
-    ElMessage.error(t('回复失败', 'Reply failed'))
+    ElMessage.error(e.response?.data?.message || t('回复失败', 'Reply failed'))
+  } finally {
+    supportReplying.value = false
   }
 }
 
@@ -2109,6 +2198,19 @@ function showPersonaDetail(conv, kind = 'ai') {
   personaDetailVisible.value = true
 }
 
+function showPersonaDetailFromList(persona) {
+  personaDetailData.value = {
+    persona_name: persona.name,
+    persona_avatar: persona.avatar,
+    persona_description: persona.description,
+    persona_system_prompt: persona.system_prompt,
+    persona_user_prompt: persona.user_prompt,
+    persona_greeting: persona.greeting,
+    persona_kind: persona.persona_type || 'ai',
+  }
+  personaDetailVisible.value = true
+}
+
 async function openUserDetail(row) {
   if (!row) return
   userDetailVisible.value = true
@@ -2139,6 +2241,18 @@ async function openUserDetail(row) {
     userDetailUsage.value = results[3].value.data
   }
   userDetailLoading.value = false
+}
+
+async function loadUserDetailPersonas() {
+  if (!userDetailUser.value) return
+  try {
+    const res = await adminApi.userPersonas(userDetailUser.value.id)
+    if (res.code === 200) {
+      userDetailPersonas.value = res.data.items || []
+    }
+  } catch (e) {
+    console.error('loadUserDetailPersonas failed', e)
+  }
 }
 
 async function loadAll() {
@@ -3179,14 +3293,19 @@ function onTabChange(name) {
 .support-admin-chat { display: flex; flex-direction: column; gap: 14px; }
 .support-admin-user { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: linear-gradient(135deg, rgba(176,106,46,.1), rgba(176,106,46,.02)); border: 1px solid rgba(176,106,46,.14); border-radius: 14px; }
 .support-admin-user span { color: var(--text-muted); }
-.support-admin-messages { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 8px 4px; }
-.support-admin-msg { max-width: 78%; padding: 10px 12px; border-radius: 14px 14px 14px 4px; background: var(--surface-hover); white-space: pre-wrap; box-shadow: 0 4px 14px rgba(0,0,0,.04); }
+.support-admin-messages { height: min(50vh, 420px); min-height: 280px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; display: flex; flex-direction: column; gap: 14px; padding: 8px 7px 8px 4px; }
+.support-admin-msg { max-width: min(78%, 460px); padding: 10px 12px; border-radius: 14px 14px 14px 4px; background: var(--surface-hover); white-space: pre-wrap; box-shadow: 0 4px 14px rgba(0,0,0,.04); }
 .support-admin-msg.admin { align-self: flex-end; border-radius: 14px 14px 4px 14px; background: rgba(176, 106, 46, .14); }
 .support-admin-msg time { display: block; margin-top: 4px; font-size: 10.5px; color: var(--text-muted); }
 .support-admin-image { display: block; max-width: 220px; max-height: 220px; margin-top: 6px; border-radius: 8px; }
 .support-admin-image-preview :deep(.el-image) { max-height: 120px; }
-.support-admin-reply { display: flex; gap: 8px; align-items: flex-end; padding: 10px; border: 1px solid var(--border-color); border-radius: 14px; background: var(--surface-hover); }
-.support-admin-reply :deep(.el-textarea) { flex: 1; }
+.support-admin-reply { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 10px; border-radius: 18px; background: var(--surface); border: 1px solid var(--border-color); box-shadow: 0 8px 28px -18px rgba(44, 31, 22, .48); transition: border-color .18s ease, box-shadow .18s ease; }
+.support-admin-reply:focus-within { border-color: var(--brand); box-shadow: 0 8px 28px -16px rgba(217, 108, 78, .5); }
+.support-admin-reply :deep(.el-upload) { display: flex; }
+.support-admin-reply :deep(.el-upload .el-button) { width: 40px; height: 40px; border-radius: 12px; }
+.support-admin-reply :deep(.el-textarea__inner) { min-height: 64px !important; padding: 10px 12px; border-radius: 12px; background: var(--input-bg); box-shadow: 0 0 0 1px var(--border-color) inset; font-size: 13.5px; line-height: 1.55; color: var(--text-primary); resize: none; }
+.support-admin-reply :deep(.el-textarea__inner:focus) { box-shadow: 0 0 0 1px var(--brand) inset; }
+.support-admin-reply .el-button { min-height: 40px; border-radius: 12px; }
 
 @media (max-width: 900px) {
   .pl-meta-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -3196,5 +3315,7 @@ function onTabChange(name) {
 @media (max-width: 560px) {
   .pl-meta-bar { grid-template-columns: 1fr; }
   .usage-cards { grid-template-columns: 1fr; }
+  .support-admin-reply { grid-template-columns: auto minmax(0, 1fr); }
+  .support-admin-reply .el-button { grid-column: 2; width: 100%; }
 }
 </style>

@@ -719,6 +719,56 @@ def batch_delete_conversations():
     })
 
 
+@admin_bp.route('/personas/batch-delete', methods=['POST'])
+@admin_required
+def batch_delete_personas():
+    """管理员批量彻底删除人物卡。
+
+    用于后台清理用户软删除后残留的人物卡。
+    逐条真删并返回成功/跳过的明细。
+    """
+    data = request.get_json() or {}
+    ids = data.get('ids') or []
+    if not isinstance(ids, list) or not ids:
+        return jsonify({'code': 400, 'message': '请选择要删除的人物卡'}), 400
+    if len(ids) > 200:
+        return jsonify({'code': 400, 'message': '单次最多删除 200 个'}), 400
+    try:
+        ids = [int(i) for i in ids]
+    except (TypeError, ValueError):
+        return jsonify({'code': 400, 'message': '参数不合法'}), 400
+
+    deleted = []
+    skipped = []
+    for persona_id in ids:
+        persona = PersonaTemplate.query.get(persona_id)
+        if not persona:
+            skipped.append({'id': persona_id, 'reason': '不存在'})
+            continue
+        # 解除对话对该人物卡的引用，避免外键残留
+        Conversation.query.filter_by(persona_id=persona_id).update(
+            {Conversation.persona_id: None}, synchronize_session=False
+        )
+        Conversation.query.filter_by(user_persona_id=persona_id).update(
+            {Conversation.user_persona_id: None}, synchronize_session=False
+        )
+        # 同时删除关联的世界书条目
+        WorldBookEntry.query.filter_by(persona_id=persona_id).delete(synchronize_session=False)
+        db.session.delete(persona)
+        deleted.append({'id': persona_id, 'name': persona.name, 'user_id': persona.user_id})
+
+    if deleted:
+        db.session.commit()
+    else:
+        db.session.rollback()
+
+    return jsonify({
+        'code': 200,
+        'message': f'已删除 {len(deleted)} 个' + (f'，跳过 {len(skipped)} 个' if skipped else ''),
+        'data': {'deleted': deleted, 'skipped': skipped},
+    })
+
+
 @admin_bp.route('/conversations/<int:conv_id>/messages', methods=['GET'])
 @admin_required
 def conversation_messages(conv_id):

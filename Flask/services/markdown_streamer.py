@@ -154,4 +154,9 @@ def sse_tokens(total_tokens):
     return f"data: {json.dumps({'choices': [{'delta': {'tokens': total_tokens}}]}, ensure_ascii=False)}\n\n"
 
 
+def sse_settings(payload):
+    """构造对话设置变更的 SSE 消息（前端据此同步开关，如提示词兜底自动关闭）"""
+    return f"data: {json.dumps({'choices': [{'delta': payload}]}, ensure_ascii=False)}\n\n"
+
+
 import json

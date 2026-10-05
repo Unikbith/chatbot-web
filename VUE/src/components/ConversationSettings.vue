@@ -51,7 +51,7 @@
           </header>
           <div class="cv-toggle">
             <div class="cv-toggle__text">
-              <span class="cv-toggle__label">{{ t('开启后生成的内容（你懂的）', 'Enable fallback prompt') }}</span>
+              <span class="cv-toggle__label">{{ t('生成失败后才开启', 'Enable only when generation fails') }}</span>
               <span class="cv-toggle__hint">
                 {{ t('稳定生成内容后可关闭，减少token消耗', 'Enable only when the AI cannot produce what you want; turn it off once generation is stable to save tokens') }}
               </span>
@@ -64,7 +64,7 @@
         <section class="cv-panel">
           <header class="cv-panel__head">
             <span class="cv-tick" aria-hidden="true"></span>
-            <h3 class="cv-panel__title">{{ t('界面标记', 'Rich Markers') }}</h3>
+            <h3 class="cv-panel__title">{{ t('界面标记', 'Rich Markers') }}<span class="cv-panel__subtitle">{{ t('（以下功能开启都会增加token消耗）', '(Enabling these will increase token usage)') }}</span></h3>
           </header>
           <div class="cv-toggle">
             <div class="cv-toggle__text">
@@ -90,7 +90,7 @@
             <!-- 提示词增强：把每轮该输出哪些构件的要求接进系统提示词 -->
             <div class="cv-toggle cv-toggle--sub">
               <div class="cv-toggle__text">
-                <span class="cv-toggle__label">{{ t('提示词增强', 'Prompt Boost') }}</span>
+                <span class="cv-toggle__label">{{ t('丰富面板内容', 'Rich Panel Content') }}</span>
                 <span class="cv-toggle__hint">{{ t('每轮自动带上状态、面板、内心、选项', 'Adds panels every turn') }}</span>
               </div>
               <el-switch v-model="form.prompt_enhance" />
@@ -378,14 +378,14 @@ function readTemplateId(raw) {
   }
 }
 
-/** 取回「提示词增强」开关：老数据没有该字段时默认开启 */
+/** 取回「丰富面板内容」开关：老数据没有该字段时默认关闭 */
 function readPromptEnhance(raw) {
-  if (!raw) return true
+  if (!raw) return false
   try {
     const data = typeof raw === 'string' ? JSON.parse(raw) : raw
-    return data && data.enhance === false ? false : true
+    return data && data.enhance === true ? true : false
   } catch (e) {
-    return true
+    return false
   }
 }
 
@@ -429,14 +429,14 @@ const form = reactive({
   temperature: null, frequency_penalty: null, presence_penalty: null,
   auto_play_voice: false,
   summary_threshold: 7,
-  append_prompt_enabled: true,
+  append_prompt_enabled: false,
   // 界面标记默认开启（与后端 RICH_MESSAGE_ENABLED 默认值一致）
   rich_marker_enabled: true,
   // 回复渲染模板：默认使用脸红（不再有"不使用"这一档）
   reply_template_id: DEFAULT_TEMPLATE_ID,
-  // 提示词增强：默认开启，把「每轮输出结构」接进系统提示词
-  prompt_enhance: true,
-  // 回复长度：默认长文
+  // 丰富面板内容：默认关闭，开启后把「每轮输出结构」接进系统提示词
+  prompt_enhance: false,
+  // 回复长度：默认短文
   reply_length_id: DEFAULT_LENGTH,
 })
 
@@ -474,7 +474,7 @@ function resetForm() {
   form.presence_penalty = (conv.presence_penalty != null && conv.presence_penalty !== '') ? conv.presence_penalty : null
   form.auto_play_voice = !!conv.auto_play_voice
   form.summary_threshold = (conv.summary_threshold != null && conv.summary_threshold !== '') ? Number(conv.summary_threshold) : 7
-  form.append_prompt_enabled = conv.append_prompt_enabled == null ? true : !!conv.append_prompt_enabled
+  form.append_prompt_enabled = conv.append_prompt_enabled == null ? false : !!conv.append_prompt_enabled
   // 未存过（null/undefined）按全局默认「开启」处理：
   // 后端 resolve_rich_marker_enabled 对 NULL 也是回落到全局开关，
   // 这里若按 !!null 显示成关闭，就会出现「界面显示关、实际在注入」的不一致。
@@ -556,7 +556,7 @@ function buildPayload() {
     frequency_penalty: form.frequency_penalty != null ? Number(form.frequency_penalty) : null,
     presence_penalty: form.presence_penalty != null ? Number(form.presence_penalty) : null,
     auto_play_voice: !!form.auto_play_voice,
-    summary_threshold: Number(form.summary_threshold) || 10,
+    summary_threshold: Number(form.summary_threshold) || 7,
     append_prompt_enabled: !!form.append_prompt_enabled,
     rich_marker_enabled: !!form.rich_marker_enabled,
     reply_template: buildReplyTemplate(),
@@ -652,6 +652,13 @@ watch(form, () => {
   font-weight: 650;
   letter-spacing: 0.02em;
   color: var(--text-primary);
+}
+.cv-panel__subtitle {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  letter-spacing: 0;
 }
 .cv-panel__badge {
   margin-left: auto;

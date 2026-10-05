@@ -8,11 +8,11 @@
   >
     <div class="persona-panel">
       <div class="persona-list">
-        <div 
-          v-for="persona in personas" 
+        <div
+          v-for="persona in personas"
           :key="persona.id"
           class="persona-card"
-          :class="{ active: selectedId === persona.id, 'is-default': persona.is_default }"
+          :class="{ active: selectedId === persona.id }"
           @click="editPersona(persona)"
         >
           <el-avatar :size="44" :src="persona.avatar" class="persona-avatar">
@@ -21,23 +21,14 @@
           <div class="persona-info">
             <div class="persona-name">
               {{ persona.name }}
-              <el-tag v-if="persona.is_default" size="small" type="success" effect="light" class="default-tag">默认</el-tag>
               <el-tag v-if="persona.source === 'marketplace'" size="small" type="warning" effect="light" class="source-tag">卡片广场</el-tag>
             </div>
             <div class="persona-desc">{{ persona.description || '暂无描述' }}</div>
           </div>
           <div class="persona-actions" @click.stop>
-            <el-button 
-              v-if="!persona.is_default" 
-              size="small" 
-              text 
-              @click="setDefault(persona.id)"
-            >
-              设为默认
-            </el-button>
-            <el-button 
-              size="small" 
-              text 
+            <el-button
+              size="small"
+              text
               type="primary"
               @click="editPersona(persona)"
             >
@@ -154,8 +145,8 @@
           </el-form-item>
         </div>
 
-        <!-- 世界书：按需注入的设定条目（仅已保存的角色可管理） -->
-        <div v-if="editingPersona" class="form-card wb-card">
+        <!-- 世界书：编辑时立即保存；新建时先作为草稿，随人物卡一起提交 -->
+        <div class="form-card wb-card">
           <div class="wb-head">
             <div>
               <div class="wb-title">世界书（设定条目）</div>
@@ -163,6 +154,7 @@
                 把只在特定话题才用得上的设定拆成条目，聊到相关词才加载 —— 省 token，还能写更多设定。
                 <b>常驻</b>条目每次都加载（放核心人设）；其余按触发词命中才加载。
                 <b>一条都不加也不影响</b>，照常聊天。
+                <span v-if="!editingPersona" class="wb-draft-note">新建模式下，条目会随人物卡一起保存。</span>
               </div>
             </div>
             <el-button size="small" type="primary" plain @click="openWbCreate">
@@ -172,7 +164,7 @@
 
           <div v-if="wbLoading" class="wb-empty">加载中…</div>
           <div v-else-if="!wbEntries.length" class="wb-empty">
-            暂无条目 —— 当前全部设定都在上面的系统提示词里，每次对话都会整块发送
+            {{ editingPersona ? '暂无条目 —— 当前全部设定都在上面的系统提示词里，每次对话都会整块发送' : '暂无条目，可先添加触发词和设定内容，新建人物卡时会一起保存' }}
           </div>
           <div v-else class="wb-list">
             <div v-for="e in wbEntries" :key="e.id" class="wb-item">
@@ -200,9 +192,6 @@
           </div>
         </div>
 
-        <el-form-item>
-          <el-checkbox v-model="form.is_default">设为默认角色</el-checkbox>
-        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editDialogVisible = false">取消</el-button>
@@ -289,7 +278,6 @@ const defaultForm = {
   system_prompt: '',
   user_prompt: '',
   greeting: '',
-  is_default: false,
   persona_type: 'ai',
 }
 
@@ -321,16 +309,6 @@ function selectPersona(persona) {
   emit('persona-changed', persona)
 }
 
-function setDefault(id) {
-  personaApi.setDefault(id).then(res => {
-    if (res.code === 200) {
-      ElMessage.success('已设为默认')
-      loadPersonas()
-      emit('persona-changed', res.data)
-    }
-  })
-}
-
 function editPersona(persona) {
   editingPersona.value = persona
   Object.assign(form, {
@@ -340,7 +318,6 @@ function editPersona(persona) {
     system_prompt: persona.system_prompt,
     user_prompt: persona.user_prompt || '',
     greeting: persona.greeting || '',
-    is_default: persona.is_default,
     persona_type: persona.persona_type || 'ai',
   })
   editDialogVisible.value = true
@@ -377,6 +354,7 @@ const wbLoading = ref(false)
 const wbDialogVisible = ref(false)
 const wbEditing = ref(null)
 const wbSaving = ref(false)
+let wbDraftSeq = 0
 const defaultWbForm = {
   title: '',
   keywords: '',
@@ -416,7 +394,6 @@ function openWbEdit(entry) {
 }
 
 async function saveWbEntry() {
-  if (!editingPersona.value) return
   if (!wbForm.content.trim()) {
     ElMessage.warning('请填写设定内容')
     return
@@ -425,14 +402,32 @@ async function saveWbEntry() {
     ElMessage.warning('非常驻条目请至少填一个触发词（或勾「常驻」）')
     return
   }
+  const payload = {
+    title: wbForm.title.trim(),
+    keywords: wbForm.keywords.trim(),
+    content: wbForm.content.trim(),
+    always_on: !!wbForm.always_on,
+  }
+
+  // 新建人物卡尚未有 id：先保存在表单草稿里，保存人物卡时一次性提交。
+  if (!editingPersona.value) {
+    if (wbEditing.value?._draft) {
+      Object.assign(wbEditing.value, payload)
+    } else {
+      wbEntries.value.push({
+        id: `draft-${++wbDraftSeq}`,
+        ...payload,
+        enabled: true,
+        _draft: true,
+      })
+    }
+    wbDialogVisible.value = false
+    ElMessage.success(wbEditing.value ? '草稿已更新' : '草稿已添加')
+    return
+  }
+
   wbSaving.value = true
   try {
-    const payload = {
-      title: wbForm.title.trim(),
-      keywords: wbForm.keywords.trim(),
-      content: wbForm.content.trim(),
-      always_on: !!wbForm.always_on,
-    }
     const pid = editingPersona.value.id
     const res = wbEditing.value
       ? await personaApi.updateWorldBook(pid, wbEditing.value.id, payload)
@@ -452,7 +447,10 @@ async function saveWbEntry() {
 }
 
 async function toggleWb(entry, val) {
-  if (!editingPersona.value) return
+  if (!editingPersona.value || entry._draft) {
+    entry.enabled = !!val
+    return
+  }
   try {
     await personaApi.updateWorldBook(editingPersona.value.id, entry.id, { enabled: !!val })
   } catch (e) {
@@ -462,7 +460,6 @@ async function toggleWb(entry, val) {
 }
 
 async function removeWb(entry) {
-  if (!editingPersona.value) return
   try {
     await ElMessageBox.confirm(`确定删除条目「${entry.title || '未命名条目'}」吗？`, '确认删除', {
       type: 'warning',
@@ -470,6 +467,11 @@ async function removeWb(entry) {
       cancelButtonText: '取消',
     })
   } catch (e) {
+    return
+  }
+  if (!editingPersona.value || entry._draft) {
+    wbEntries.value = wbEntries.value.filter(item => item !== entry)
+    ElMessage.success('草稿已删除')
     return
   }
   const res = await personaApi.removeWorldBook(editingPersona.value.id, entry.id)
@@ -514,7 +516,20 @@ async function savePersona() {
     if (editingPersona.value) {
       res = await personaApi.update(editingPersona.value.id, form)
     } else {
-      res = await personaApi.create(form)
+      const payload = {
+        ...form,
+        worldbook: wbEntries.value
+          .filter(entry => (entry.content || '').trim())
+          .map(entry => ({
+            title: entry.title || '',
+            keywords: entry.keywords || '',
+            content: entry.content.trim(),
+            always_on: !!entry.always_on,
+            enabled: entry.enabled !== false,
+            weight: Number(entry.weight) || 0,
+          })),
+      }
+      res = await personaApi.create(payload)
     }
     if (res.code === 200) {
       ElMessage.success(editingPersona.value ? '更新成功' : '创建成功')
@@ -745,6 +760,13 @@ function confirmDelete(id) {
 }
 
 .wb-desc b {
+  color: var(--brand, #c98a5a);
+  font-weight: 600;
+}
+
+.wb-draft-note {
+  display: inline-block;
+  margin-top: 4px;
   color: var(--brand, #c98a5a);
   font-weight: 600;
 }

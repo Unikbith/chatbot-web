@@ -790,8 +790,8 @@ export const OUTPUT_LENGTHS = {
 }
 
 export const OUTPUT_LENGTH_LIST = Object.values(OUTPUT_LENGTHS)
-// 默认「长文」：每轮要填场景条 / 三块角色面板 / 全部数值 / 内心 / 记忆 / 推演，短文根本装不下
-export const DEFAULT_LENGTH = 'long'
+// 默认「短文」：更省 token、节奏更快；需要更长的正文时在「回复长度」里切换
+export const DEFAULT_LENGTH = 'short'
 
 /**
  * 取篇幅要求文本；未知 id 回落默认。

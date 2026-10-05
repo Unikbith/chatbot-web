@@ -308,7 +308,7 @@ console.log('\n[16] 状态强度徽标与标题容错')
 console.log('\n[17] 回复长度选项（前端只拥有选项与文案；篇幅正文由后端 reply_spec 负责）')
 {
   check('三档长度齐备', OUTPUT_LENGTH_LIST.length === 3, JSON.stringify(OUTPUT_LENGTH_LIST.map(l => l.id)))
-  check('默认长度为 long（默认开长文）', DEFAULT_LENGTH === 'long', DEFAULT_LENGTH)
+  check('默认长度为 short（默认开短文）', DEFAULT_LENGTH === 'short', DEFAULT_LENGTH)
   check('三档都有名称与说明', OUTPUT_LENGTH_LIST.every(l => l.name && l.nameEn && l.desc && l.descEn))
   check('id 稳定（与后端 LENGTH_PROMPTS 对应）',
     OUTPUT_LENGTH_LIST.map(l => l.id).join(',') === 'short,medium,long',

@@ -387,6 +387,13 @@ def _ensure_schema_columns(app):
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE conversations ADD COLUMN deleted_at DATETIME"))
                     app.logger.info('[迁移] 已为 conversations 增加 deleted_at 字段')
+            # persona_templates.deleted_at - 人物卡软删除
+            if 'persona_templates' in inspector.get_table_names():
+                cols = {c['name'] for c in inspector.get_columns('persona_templates')}
+                if 'deleted_at' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE persona_templates ADD COLUMN deleted_at DATETIME"))
+                    app.logger.info('[迁移] 已为 persona_templates 增加 deleted_at 字段')
             # daily_checkins.checkin_time - 签到时间（24小时冷却制）
             if 'daily_checkins' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('daily_checkins')}
