@@ -403,6 +403,10 @@ const chatApi = {
   async exportMemory(data) {
     return resAi.post('/api/chat/memory-export', data, { timeout: 120000 });
   },
+  async importMemory(data) {
+    // 导入 = 以用户身份把记忆内容发出去 + AI 以角色口吻确认记住 + 写入长记忆
+    return resAi.post('/api/chat/memory-import', data, { timeout: 120000 });
+  },
 };
 
 // ========== 提示词工具 API（一键人物设定 / 生图改图提示词） ==========

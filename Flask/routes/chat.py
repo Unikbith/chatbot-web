@@ -1831,3 +1831,99 @@ def export_memory():
         'result_chars': len(content),
         'token_cost': token_cost,
     }})
+
+
+@chat_bp.route('/memory-import', methods=['POST'])
+@jwt_required()
+def import_memory():
+    """把外部记忆档导入当前对话，效果等同于「以用户身份把内容发出去」：
+
+    1) 把记忆文本作为一条用户消息写入对话（聊天界面可见）
+    2) 调用 AI 以当前角色口吻简要总结这段记忆并回复确认
+    3) 把记忆内容存入记忆宫殿长记忆（conv.summary + 压缩留档），后续对话自动参考
+
+    导入永不阻断：即使 AI 总结失败，用户消息与长记忆也已写入，仅回复降级为固定提示。
+    """
+    user_id = int(get_jwt_identity())
+    data = request.get_json(silent=True) or {}
+    conv_id = data.get('conversation_id')
+    memory_text = (data.get('memory_text') or '').strip()
+    provider_id = data.get('provider_id')
+    model_id = data.get('model_id') or ''
+
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).filter(
+        Conversation.deleted_at.is_(None)
+    ).first()
+    if not conv:
+        return jsonify({'code': 404, 'message': '对话不存在'}), 404
+    if len(memory_text) < 10:
+        return jsonify({'code': 400, 'message': '记忆文本太短'}), 400
+    if len(memory_text) > 8000:
+        return jsonify({'code': 400, 'message': '记忆文本最多 8000 字'}), 400
+
+    # 1) 以用户身份写入导入内容：AI 与用户都能在对话里看到这段记忆
+    user_msg = Message(conversation_id=conv.id, role='user', content=memory_text)
+    db.session.add(user_msg)
+    db.session.flush()
+
+    # 2) 存入记忆宫殿长记忆并留档。summary_upto_id 指向导入消息，
+    #    后续上下文的「近期消息」窗口不再重复携带大段记忆文本
+    conv.summary = memory_text
+    conv.summary_upto_id = user_msg.id
+    seq = ConversationSummary.query.filter_by(conversation_id=conv.id).count() + 1
+    db.session.add(ConversationSummary(
+        conversation_id=conv.id,
+        user_id=user_id,
+        seq=seq,
+        content=memory_text,
+        msg_from=user_msg.id,
+        msg_to=user_msg.id,
+        message_count=1,
+    ))
+    conv.updated_at = local_now()
+
+    # 3) 调用 AI 以角色口吻确认记住记忆（失败则降级为固定提示，不阻断导入）
+    ai_reply = None
+    try:
+        provider = _get_chat_provider(user_id, provider_id)
+        if provider:
+            model = _resolve_chat_model(provider, conv, model_id) or ''
+            if model:
+                persona_prompt = _resolve_system_prompt(conv, user_id)
+                system = (
+                    (persona_prompt + '\n\n') if persona_prompt else ''
+                ) + (
+                    '现在，用户刚刚导入了一段关于你们之间关系/经历的记忆内容。'
+                    '请以你的角色口吻，用 1-3 句话简要总结你记住的关键信息，'
+                    '并自然表明你已经记住、可以继续对话。不要机械复述全文，不要用列表。'
+                )
+                response, error = AIService.chat_completions(
+                    provider=provider,
+                    messages=[
+                        {'role': 'system', 'content': system},
+                        {'role': 'user', 'content': f'这是我导入的记忆内容：\n{memory_text}'},
+                    ],
+                    stream=False,
+                    temperature=0.6,
+                    model=model,
+                )
+                if response is not None and getattr(response, 'status_code', None) == 200:
+                    try:
+                        ai_reply = (response.json()['choices'][0]['message']['content'] or '').strip()
+                    except (KeyError, IndexError, TypeError, ValueError):
+                        ai_reply = None
+                    if not ai_reply:
+                        ai_reply = None
+                else:
+                    current_app.logger.warning(f'[记忆导入] AI 总结失败: {error}')
+    except Exception as e:
+        current_app.logger.warning(f'[记忆导入] AI 总结请求异常: {e}')
+
+    db.session.add(Message(
+        conversation_id=conv.id,
+        role='assistant',
+        content=ai_reply or '我已经记住这段记忆了，我们可以接着往下聊。',
+    ))
+    db.session.commit()
+
+    return jsonify({'code': 200, 'message': '记忆已导入，AI 已记住并回复'})

@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Download, Upload, Document, CopyDocument } from '@element-plus/icons-vue'
-import { conversationApi, chatApi } from '@/utils/resAi'
+import { chatApi } from '@/utils/resAi'
 import { t } from '../i18n'
 
 const props = defineProps({
@@ -103,7 +103,8 @@ function readFile(file) {
       ElMessage.warning(t('记忆文本最多 8000 字，请先精简后再导入', 'Memory text is limited to 8,000 characters'))
       return
     }
-    importMemory()
+    // 只载入到预览，不直接发送：由用户确认内容后点击「导入」再发出
+    ElMessage.success(t('文件已载入，确认无误后点击下方按钮导入', 'File loaded. Review it, then click Import below.'))
   }
   reader.onerror = () => ElMessage.error(t('文件读取失败', 'Failed to read file'))
   reader.readAsText(file)
@@ -123,9 +124,17 @@ async function importMemory() {
 
   loading.value = true
   try {
-    const res = await conversationApi.replaceMemory(props.conversationId, text)
+    // 导入 = 以用户身份把记忆内容发出去，AI 以角色口吻记住并回复，同时写入长记忆
+    const res = await chatApi.importMemory({
+      conversation_id: props.conversationId,
+      memory_text: text,
+      provider_id: props.providerId,
+      model_id: props.modelId,
+    })
     if (res.code === 200) {
-      ElMessage.success(t('记忆已导入当前对话', 'Memory imported into this chat'))
+      ElMessage.success(t('记忆已导入，AI 已记住并回复', 'Memory imported. The AI has memorized it and replied.'))
+      importText.value = ''
+      importFileName.value = ''
       emit('imported')
       visible.value = false
     } else {
@@ -201,7 +210,7 @@ async function importMemory() {
       <section v-else class="memory-pane">
         <div class="memory-pane__intro">
           <h4>{{ t('导入记忆文本', 'Import memory text') }}</h4>
-          <p>{{ t('支持 .txt / text 文件。导入后会替换当前对话的长期记忆，不会删除聊天记录。', 'Supports .txt / text files. Import replaces this chat’s long-term memory without deleting messages.') }}</p>
+          <p>{{ t('支持 .txt / text 文件。导入后会以你的身份把这段记忆发出去，AI 会阅读并记住，随后就能顺着这段记忆继续聊。', 'Supports .txt files. On import the memory is sent as your message; the AI reads and memorizes it, then continues from there.') }}</p>
         </div>
         <div v-if="!hasConversation" class="memory-notice">
           {{ t('请先从聊天列表打开一个对话，再导入记忆。', 'Open a conversation before importing memory.') }}
@@ -227,7 +236,7 @@ async function importMemory() {
             <span>{{ t('导入预览（可编辑）', 'Preview (editable)') }}</span>
             <span :class="{ 'is-over': importTooLong }">{{ importText.length }} / {{ MAX_IMPORT_CHARS }}</span>
           </div>
-          <el-input v-model="importText" type="textarea" :rows="13" maxlength="9000" />
+          <el-input v-model="importText" type="textarea" resize="none" maxlength="9000" />
         </div>
         <el-button
           class="memory-import-btn"
@@ -236,7 +245,7 @@ async function importMemory() {
           :loading="loading"
           :disabled="!hasConversation || !importText.trim() || importTooLong"
           @click="importMemory"
-        >{{ t('导入到当前对话记忆', 'Import into this chat') }}</el-button>
+        >{{ t('导入并发送给 AI', 'Import & send to AI') }}</el-button>
       </section>
     </div>
   </el-drawer>
@@ -257,8 +266,8 @@ async function importMemory() {
 }
 .memory-drawer-head strong { display: block; color: var(--text-primary); font-size: 15px; }
 .memory-drawer-head small { display: block; margin-top: 2px; color: var(--text-muted); font-size: 11.5px; }
-.memory-drawer { height: 100%; display: flex; flex-direction: column; gap: 18px; }
-.memory-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.memory-drawer { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 18px; }
+.memory-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; flex: none; }
 .memory-choice button {
   display: flex;
   align-items: center;
@@ -280,16 +289,21 @@ async function importMemory() {
   background: var(--brand-soft, rgba(217, 108, 78, .1));
   box-shadow: 0 7px 20px -16px rgba(217, 108, 78, .8);
 }
-.memory-pane { display: flex; flex-direction: column; gap: 13px; min-height: 0; }
+.memory-pane { flex: 1 1 auto; display: flex; flex-direction: column; gap: 13px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.memory-pane__intro { flex: none; }
 .memory-pane__intro h4 { margin: 0 0 5px; font-size: 14px; color: var(--text-primary); }
 .memory-pane__intro p { margin: 0; color: var(--text-secondary); line-height: 1.65; font-size: 12.5px; }
-.memory-notice { padding: 10px 12px; border-radius: 10px; color: #b36a16; background: rgba(217, 151, 59, .12); font-size: 12.5px; }
-.memory-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.memory-notice { flex: none; padding: 10px 12px; border-radius: 10px; color: #b36a16; background: rgba(217, 151, 59, .12); font-size: 12.5px; }
+.memory-actions { display: flex; flex-wrap: wrap; gap: 8px; flex: none; }
 .memory-actions .el-button { margin-left: 0; }
-.memory-preview { min-height: 0; display: flex; flex-direction: column; gap: 6px; }
-.memory-preview__bar { display: flex; justify-content: space-between; color: var(--text-muted); font-size: 11.5px; }
+/* 预览区吃掉剩余空间、内部自行滚动，保证下方按钮永远可见、不被遮挡 */
+.memory-preview { flex: 1 1 auto; min-height: 150px; display: flex; flex-direction: column; gap: 6px; }
+.memory-preview :deep(.el-textarea) { flex: 1 1 auto; min-height: 0; display: flex; }
+.memory-preview__bar { display: flex; justify-content: space-between; flex: none; color: var(--text-muted); font-size: 11.5px; }
 .memory-preview__bar .is-over { color: #d94e4e; font-weight: 600; }
 .memory-preview :deep(.el-textarea__inner) {
+  height: 100%;
+  overflow-y: auto;
   background: var(--input-bg);
   border-radius: 12px;
   font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
@@ -298,7 +312,8 @@ async function importMemory() {
   color: var(--text-primary);
 }
 .memory-empty {
-  min-height: 180px;
+  flex: 1 1 auto;
+  min-height: 140px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -311,7 +326,7 @@ async function importMemory() {
   font-size: 12.5px;
 }
 .memory-empty .el-icon { font-size: 30px; color: var(--brand); opacity: .6; }
-.memory-upload { display: block; }
+.memory-upload { display: block; flex: none; }
 .memory-upload :deep(.el-upload) { width: 100%; }
 .memory-upload :deep(.el-upload-dragger) {
   width: 100%;
@@ -325,9 +340,9 @@ async function importMemory() {
 .memory-upload__icon { font-size: 28px; color: var(--brand); }
 .memory-upload__title { margin-top: 7px; color: var(--text-primary); font-size: 13px; font-weight: 600; }
 .memory-upload__hint { margin-top: 4px; color: var(--text-muted); font-size: 11.5px; }
-.memory-file { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--surface-hover); color: var(--text-secondary); font-size: 12px; }
+.memory-file { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex: none; padding: 8px 10px; border-radius: 10px; background: var(--surface-hover); color: var(--text-secondary); font-size: 12px; }
 .memory-file span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.memory-import-btn { width: 100%; height: 40px; }
+.memory-import-btn { width: 100%; height: 40px; flex: none; }
 
 @media (max-width: 560px) {
   .memory-drawer { gap: 12px; }
@@ -365,6 +380,7 @@ async function importMemory() {
 }
 .memory-transfer-drawer .el-drawer__body {
   height: calc(100% - 76px);
+  box-sizing: border-box;
   padding: 0 20px 20px;
   overflow-y: auto;
   overscroll-behavior: contain;
