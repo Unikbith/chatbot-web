@@ -275,6 +275,27 @@ server {
 > 部署在 Nginx/网关之后时，将 `Flask/.env` 的 `TRUST_PROXY_HEADERS` 设为 `true`，
 > 并把 `CORS_ORIGINS` 改为你的真实域名。
 
+### 数据库选型与迁移建议
+
+默认 SQLite 适合单机、低到中等写入量的部署；当前代码会自动启用 WAL、`busy_timeout`
+和 `foreign_keys`，管理后台也已改为分页查询。以下情况建议迁移到 MySQL 8 或 PostgreSQL：
+
+- 多个写入进程同时高频写消息，或开始出现 `database is locked`；
+- 需要定时备份、在线扩容、主从、监控和更细粒度的用户权限；
+- 单表数据达到百万级，后台统计和复合查询开始明显变慢。
+
+迁移前必须先备份 `Flask/instance/chatbot.db`。配置示例：
+
+```text
+DATABASE_URL=mysql+pymysql://user:password@127.0.0.1:3306/confide?charset=utf8mb4
+APP_TIMEZONE=Asia/Shanghai
+```
+
+数据库类型切换只通过 `DATABASE_URL` 完成，但历史数据不会自动搬迁；生产环境应先做
+“停写 → 备份 → 数据导出/导入 → 校验行数和 Token 汇总 → 切换 DNS/环境变量 → 回滚演练”。
+时间字段历史数据存在“旧 UTC + 新应用时区”混用，切库前应按实际部署切换时间做一次
+离线校准，不能在新库里直接对所有时间统一加固定偏移。
+
 ### ⚠️ 上线前安全清单
 
 1. **轮换密钥**：`.env` 中若曾填写过真实密钥，上线前务必在对应平台重置
@@ -430,6 +451,11 @@ SENDER_NAME=心语
 | GET | `/api/admin/stats` | 平台概览统计 |
 | GET | `/api/admin/users` | 用户列表 |
 | GET | `/api/admin/users/:user_id/conversations` | 指定用户的对话列表 |
+| GET | `/api/admin/users/:user_id/summary` | 用户概览与 Token 汇总 |
+| GET | `/api/admin/users/:user_id/personas` | 用户人物卡与玩家设定 |
+| GET | `/api/admin/users/:user_id/providers` | 用户模型配置（Key 掩码） |
+| GET | `/api/admin/users/:user_id/settings` | 用户设置只读视图 |
+| GET | `/api/admin/users/:user_id/usage` | 按天/模型/对话聚合 Token 用量 |
 | DELETE | `/api/admin/conversations/:conv_id` | 删除指定对话 |
 | POST | `/api/admin/conversations/batch-delete` | 批量删除对话 |
 | GET | `/api/admin/conversations/:conv_id/messages` | 指定对话的消息内容 |

@@ -13,7 +13,7 @@ from rich_marker import (
 )
 from models import (ModelProvider, Conversation, Message, PersonaTemplate,
                     UserSettings, PromptToolLog, ConversationSummary,
-                    WorldBookEntry)
+                    WorldBookEntry, AiUsageLog, User, local_now)
 from services.ai_service import AIService, FreeAPIProvider
 from services.markdown_streamer import (
     strip_html_to_text,
@@ -847,7 +847,8 @@ def _get_system_prompt(conv, user_id, persona_id=None, custom_prompt=None):
 
 def _save_ai_message(conversation_id, user_id, content, reasoning=None,
                      model_name=None, title_source=None, model_id=None,
-                     prompt_tokens=None, completion_tokens=None):
+                     prompt_tokens=None, completion_tokens=None,
+                     cached_tokens=None, provider_id=None, is_free_api=False):
     """将 AI 回复落库（普通聊天与识图共用）。
 
     独立于流式生成器之外可复用：正常流结束调用一次；
@@ -867,7 +868,8 @@ def _save_ai_message(conversation_id, user_id, content, reasoning=None,
             reasoning_content=reasoning or None,
             model=model_name,
             prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens
+            completion_tokens=completion_tokens,
+            cached_tokens=cached_tokens,
         )
         db.session.add(ai_msg)
 
@@ -878,7 +880,26 @@ def _save_ai_message(conversation_id, user_id, content, reasoning=None,
         if model_id and not conv.model_id:
             conv.model_id = model_id
 
-        conv.updated_at = db.func.now()
+        conv.updated_at = local_now()
+        owner = User.query.get(user_id)
+        if owner:
+            owner.last_chat_at = conv.updated_at
+        db.session.flush()
+        db.session.add(AiUsageLog(
+            user_id=user_id,
+            conversation_id=conv.id,
+            message_id=ai_msg.id,
+            provider_id=provider_id,
+            model=model_name,
+            is_free_api=bool(is_free_api),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cached_tokens=cached_tokens,
+            total_tokens=((prompt_tokens or 0) + (completion_tokens or 0)
+                          if prompt_tokens is not None or completion_tokens is not None
+                          else None),
+            status='success',
+        ))
         db.session.commit()
     except Exception as e:
         current_app.logger.error('保存消息失败: %s: %s', type(e).__name__, e)
@@ -1167,6 +1188,9 @@ def chat():
                     model_id=effective_model,
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
+                    cached_tokens=usage_holder[2],
+                    provider_id=getattr(provider, 'id', None),
+                    is_free_api=is_free_api,
                 )
                 saved = True
 
@@ -1187,6 +1211,9 @@ def chat():
                     model_id=effective_model,
                     prompt_tokens=usage_holder[0],
                     completion_tokens=usage_holder[1],
+                    cached_tokens=usage_holder[2],
+                    provider_id=getattr(provider, 'id', None),
+                    is_free_api=is_free_api,
                 )
             current_app.logger.info('用户停止，生成被中断 user=%s', user_id)
             raise
@@ -1348,6 +1375,9 @@ def vision_chat():
                     title_source=text,
                     prompt_tokens=usage_holder[0],
                     completion_tokens=usage_holder[1],
+                    cached_tokens=usage_holder[2],
+                    provider_id=getattr(provider, 'id', None),
+                    is_free_api=isinstance(provider, FreeAPIProvider),
                 )
                 saved = True
 
@@ -1365,6 +1395,9 @@ def vision_chat():
                     title_source=text,
                     prompt_tokens=usage_holder[0],
                     completion_tokens=usage_holder[1],
+                    cached_tokens=usage_holder[2],
+                    provider_id=getattr(provider, 'id', None),
+                    is_free_api=isinstance(provider, FreeAPIProvider),
                 )
             current_app.logger.info('用户停止，识图生成被中断 user=%s', user_id)
             raise

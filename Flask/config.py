@@ -22,6 +22,14 @@ class Config:
         'sqlite:///' + str(Path(__file__).resolve().parent / 'instance' / 'chatbot.db').replace('\\', '/')
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ENGINE_OPTIONS = (
+        {'connect_args': {'timeout': 15}}
+        if SQLALCHEMY_DATABASE_URI.startswith('sqlite:')
+        else {'pool_pre_ping': True, 'pool_recycle': 280}
+    )
+
+    # 时间写库统一使用该时区的 naive datetime，API 输出带对应 UTC 偏移。
+    APP_TIMEZONE = os.getenv('APP_TIMEZONE', 'Asia/Shanghai')
 
     # 免费 API 配置（用户未配置时使用）
     FREE_API_ENABLED = os.getenv('FREE_API_ENABLED', 'true').lower() == 'true'

@@ -1,19 +1,32 @@
+import os
 from datetime import datetime, timedelta, date
+from zoneinfo import ZoneInfo
 from werkzeug.security import generate_password_hash, check_password_hash
 from extensions import db
 from rich_marker import RICH_MESSAGE_ENABLED
 import json
 
 
-def local_now():
-    """返回服务器所在时区的「现实世界」时间（naive datetime）。
+APP_TIMEZONE = ZoneInfo(os.getenv('APP_TIMEZONE', 'Asia/Shanghai'))
 
-    历史实现统一使用 datetime.utcnow() 写入 UTC，但序列化成 ISO 字符串时不带时区后缀，
-    前端 `new Date(iso)` 会按浏览器本地时区解析，导致管理后台的「注册时间 / 最近活跃」
-    与实际时间相差一个时区偏移（中国为 -8 小时）。统一改为写入本地时间，
-    前后端对同一字符串的解读即保持一致。
+
+def local_now():
+    """返回应用统一时区的当前时间（naive datetime，落库格式）。
+
+    应用不依赖部署机器的系统时区，默认固定为 Asia/Shanghai。
+    API 输出一律通过 iso_time() 附带时区偏移，避免浏览器把无时区字符串
+    误按本地时间解析。
     """
-    return datetime.now()
+    return datetime.now(APP_TIMEZONE).replace(tzinfo=None)
+
+
+def iso_time(value):
+    """把数据库中的 naive 时间按应用时区序列化为带偏移的 ISO 字符串。"""
+    if not value:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=APP_TIMEZONE)
+    return value.isoformat()
 
 
 class User(db.Model):
@@ -30,6 +43,8 @@ class User(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     deleted_at = db.Column(db.DateTime, nullable=True)
     token_version = db.Column(db.Integer, default=0)  # 令牌版本：改密/注销时自增以吊销旧 token
+    last_login_at = db.Column(db.DateTime, nullable=True)
+    last_chat_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=local_now)
     updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
 
@@ -54,7 +69,9 @@ class User(db.Model):
             'ai_avatar': self.ai_avatar,
             'gender': self.gender,
             'is_active': self.is_active,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'last_login_at': iso_time(self.last_login_at),
+            'last_chat_at': iso_time(self.last_chat_at),
+            'created_at': iso_time(self.created_at)
         }
 
 
@@ -358,6 +375,11 @@ class Conversation(db.Model):
     created_at = db.Column(db.DateTime, default=local_now)
     updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
 
+    __table_args__ = (
+        db.Index('idx_conversations_user_deleted_updated',
+                 'user_id', 'deleted_at', 'updated_at', 'id'),
+    )
+
     messages = db.relationship('Message', backref='conversation', lazy='dynamic',
                                cascade='all, delete-orphan', order_by='Message.created_at')
     persona = db.relationship('PersonaTemplate', backref='conversations', foreign_keys=[persona_id])
@@ -397,8 +419,8 @@ class Conversation(db.Model):
             'reply_template': self.reply_template,
             'persona_name': self.persona.name if self.persona else None,
             'persona_avatar': self.persona.avatar if self.persona else None,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'created_at': iso_time(self.created_at),
+            'updated_at': iso_time(self.updated_at)
         }
 
 
@@ -513,7 +535,14 @@ class Message(db.Model):
     # 本次回复的 token 消耗（厂商 usage 缺失时为 None，前端不展示）
     prompt_tokens = db.Column(db.Integer, nullable=True)
     completion_tokens = db.Column(db.Integer, nullable=True)
+    cached_tokens = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, default=local_now)
+
+    __table_args__ = (
+        db.Index('idx_messages_conversation_created_id',
+                 'conversation_id', 'created_at', 'id'),
+        db.Index('idx_messages_conversation_id', 'conversation_id', 'id'),
+    )
 
     def to_dict(self):
         return {
@@ -525,9 +554,10 @@ class Message(db.Model):
             'model': self.model,
             'prompt_tokens': self.prompt_tokens,
             'completion_tokens': self.completion_tokens,
+            'cached_tokens': self.cached_tokens,
             'total_tokens': ((self.prompt_tokens or 0) + (self.completion_tokens or 0)
                              or None),
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'created_at': iso_time(self.created_at)
         }
 
 
@@ -847,4 +877,54 @@ class ConversationMediaLog(db.Model):
             }.get(self.media_type, self.media_type),
             'value': self.value,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class AiUsageLog(db.Model):
+    """模型调用用量审计。
+
+    与最终消息解耦，保留模型、供应商、Token、缓存命中和耗时等信息，
+    便于后台按用户、模型、对话和时间聚合。
+    """
+    __tablename__ = 'ai_usage_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=True, index=True)
+    message_id = db.Column(db.Integer, db.ForeignKey('messages.id'), nullable=True, index=True)
+    provider_id = db.Column(db.Integer, nullable=True, index=True)
+    model = db.Column(db.String(200), nullable=True)
+    is_free_api = db.Column(db.Boolean, default=False, nullable=False)
+    prompt_tokens = db.Column(db.Integer, nullable=True)
+    completion_tokens = db.Column(db.Integer, nullable=True)
+    cached_tokens = db.Column(db.Integer, nullable=True)
+    total_tokens = db.Column(db.Integer, nullable=True)
+    latency_ms = db.Column(db.Integer, nullable=True)
+    status = db.Column(db.String(20), default='success', nullable=False, index=True)
+    error_type = db.Column(db.String(100), nullable=True)
+    created_at = db.Column(db.DateTime, default=local_now, index=True)
+
+    __table_args__ = (
+        db.Index('idx_ai_usage_user_created', 'user_id', 'created_at'),
+        db.Index('idx_ai_usage_model_created', 'model', 'created_at'),
+        db.Index('idx_ai_usage_conversation_created', 'conversation_id', 'created_at'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'conversation_id': self.conversation_id,
+            'message_id': self.message_id,
+            'provider_id': self.provider_id,
+            'model': self.model,
+            'is_free_api': bool(self.is_free_api),
+            'prompt_tokens': self.prompt_tokens,
+            'completion_tokens': self.completion_tokens,
+            'cached_tokens': self.cached_tokens,
+            'total_tokens': self.total_tokens,
+            'latency_ms': self.latency_ms,
+            'status': self.status,
+            'error_type': self.error_type,
+            'created_at': iso_time(self.created_at),
         }

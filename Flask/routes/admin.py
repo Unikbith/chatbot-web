@@ -6,16 +6,36 @@
 """
 from flask import Blueprint, request, jsonify, current_app, Response
 from flask_jwt_extended import jwt_required, get_jwt, create_access_token
-from sqlalchemy import func, or_ as _or
+from sqlalchemy import case, func, or_ as _or
+from sqlalchemy.orm import joinedload, selectinload
 from functools import wraps
+from datetime import datetime, time, timedelta
 from extensions import db
 from services.rate_limit import limiter
 from models import (
-    User, Conversation, Message, ModelProvider, PersonaTemplate, local_now,
-    PromptToolLog, ConversationMediaLog,
+    AiUsageLog, Conversation, ConversationMediaLog, DailyCheckIn, ImageUsage,
+    Message, ModelProvider, PersonaTemplate, PromptToolLog, User, UserSettings,
+    WorldBookEntry, iso_time, local_now,
 )
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
+
+
+def _arg_int(name, default, *, minimum=None, maximum=None):
+    """读取并限制整数 query 参数，非法值回落到默认值。"""
+    try:
+        value = int(request.args.get(name, default))
+    except (TypeError, ValueError):
+        value = default
+    if minimum is not None:
+        value = max(value, minimum)
+    if maximum is not None:
+        value = min(value, maximum)
+    return value
+
+
+def _arg_values(name):
+    return [v.strip() for v in (request.args.get(name) or '').split(',') if v.strip()]
 
 
 def _client_ip():
@@ -116,90 +136,137 @@ def platform_stats():
 @admin_bp.route('/users', methods=['GET'])
 @admin_required
 def list_users():
-    """用户列表及各用户的数据量汇总（支持关键词搜索 + 后端分页）。
-
-    query 参数：
-      page     页码（默认 1）
-      per_page 每页条数（默认 50，上限 200）
-      q        关键词（匹配用户名 / 邮箱）
-    """
-    page = max(int(request.args.get('page', 1) or 1), 1)
-    per_page = min(max(int(request.args.get('per_page', 50) or 50), 1), 200)
+    """用户列表：服务端筛选、排序、分页和用量汇总。"""
+    page = _arg_int('page', 1, minimum=1)
+    per_page = _arg_int('per_page', 50, minimum=1, maximum=100)
     keyword = (request.args.get('q') or '').strip()
+    genders = _arg_values('gender')
+    statuses = _arg_values('status')
+    has_config = _arg_values('has_config')
+    activity = (request.args.get('activity') or '').strip()
+    sort = (request.args.get('sort') or 'created_at').strip()
+    order = (request.args.get('order') or 'desc').strip().lower()
+
+    conv_count_sq = (
+        db.session.query(func.count(Conversation.id))
+        .filter(Conversation.user_id == User.id,
+                Conversation.deleted_at.is_(None))
+        .correlate(User)
+        .scalar_subquery()
+    )
+    msg_count_sq = (
+        db.session.query(func.count(Message.id))
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .filter(Conversation.user_id == User.id,
+                Conversation.deleted_at.is_(None))
+        .correlate(User)
+        .scalar_subquery()
+    )
+    provider_count_sq = (
+        db.session.query(func.count(ModelProvider.id))
+        .filter(ModelProvider.user_id == User.id)
+        .correlate(User)
+        .scalar_subquery()
+    )
+    persona_count_sq = (
+        db.session.query(func.count(PersonaTemplate.id))
+        .filter(PersonaTemplate.user_id == User.id)
+        .correlate(User)
+        .scalar_subquery()
+    )
+    token_sum_sq = (
+        db.session.query(func.coalesce(func.sum(
+            func.coalesce(Message.prompt_tokens, 0)
+            + func.coalesce(Message.completion_tokens, 0)
+        ), 0))
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .filter(Conversation.user_id == User.id,
+                Conversation.deleted_at.is_(None))
+        .correlate(User)
+        .scalar_subquery()
+    )
+    latest_msg_sq = (
+        db.session.query(func.max(Message.created_at))
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .filter(Conversation.user_id == User.id,
+                Conversation.deleted_at.is_(None))
+        .correlate(User)
+        .scalar_subquery()
+    )
+    latest_conv_sq = (
+        db.session.query(func.max(Conversation.updated_at))
+        .filter(Conversation.user_id == User.id,
+                Conversation.deleted_at.is_(None))
+        .correlate(User)
+        .scalar_subquery()
+    )
+    last_active_expr = func.coalesce(
+        User.last_chat_at, latest_msg_sq, latest_conv_sq,
+        User.last_login_at, User.created_at,
+    )
 
     query = User.query
     if keyword:
         like = f'%{keyword}%'
         query = query.filter(_or(User.username.ilike(like), User.email.ilike(like)))
-    query = query.order_by(User.created_at.desc())
+    if genders:
+        query = query.filter(User.gender.in_(genders))
+    if statuses:
+        status_conditions = []
+        if 'active' in statuses:
+            status_conditions.append((User.deleted_at.is_(None)) & User.is_active.is_(True))
+        if 'disabled' in statuses:
+            status_conditions.append((User.deleted_at.is_(None)) & User.is_active.is_(False))
+        if 'deleted' in statuses:
+            status_conditions.append(User.deleted_at.is_not(None))
+        if status_conditions:
+            query = query.filter(_or(*status_conditions))
+    if 'provider' in has_config:
+        query = query.filter(provider_count_sq > 0)
+    if 'persona' in has_config:
+        query = query.filter(persona_count_sq > 0)
+    if 'avatar' in has_config:
+        query = query.filter(User.avatar.is_not(None), User.avatar != '')
 
-    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-    users = pagination.items
-    user_ids = [u.id for u in users]
+    now = local_now()
+    today_start = datetime.combine(now.date(), time.min)
+    if activity == 'has_conversation':
+        query = query.filter(conv_count_sq > 0)
+    elif activity == 'has_message':
+        query = query.filter(msg_count_sq > 0)
+    elif activity == 'no_conversation':
+        query = query.filter(conv_count_sq == 0)
+    elif activity == 'today':
+        query = query.filter(last_active_expr >= today_start)
+    elif activity == 'week':
+        query = query.filter(last_active_expr >= today_start - timedelta(days=7))
 
-    # 仅聚合当前页用户的数据量，避免全表扫描 + 逐用户触发 N+1
-    conv_counts = {}
-    msg_counts_by_user = {}
-    prov_counts = {}
-    persona_counts = {}
-    if user_ids:
-        conv_counts = dict(
-            db.session.query(Conversation.user_id, func.count(Conversation.id))
-            .filter(Conversation.deleted_at.is_(None), Conversation.user_id.in_(user_ids))
-            .group_by(Conversation.user_id).all()
-        )
-        # 消息数：一次 JOIN 聚合到 user_id，避免逐用户/逐对话查询
-        msg_counts_by_user = dict(
-            db.session.query(Conversation.user_id, func.count(Message.id))
-            .join(Message, Message.conversation_id == Conversation.id)
-            .filter(Conversation.deleted_at.is_(None), Conversation.user_id.in_(user_ids))
-            .group_by(Conversation.user_id).all()
-        )
-        prov_counts = dict(
-            db.session.query(ModelProvider.user_id, func.count(ModelProvider.id))
-            .filter(ModelProvider.user_id.in_(user_ids))
-            .group_by(ModelProvider.user_id).all()
-        )
-        persona_counts = dict(
-            db.session.query(PersonaTemplate.user_id, func.count(PersonaTemplate.id))
-            .filter(PersonaTemplate.user_id.in_(user_ids))
-            .group_by(PersonaTemplate.user_id).all()
-        )
+    sort_columns = {
+        'created_at': User.created_at,
+        'last_active': last_active_expr,
+        'message_count': msg_count_sq,
+        'conversation_count': conv_count_sq,
+        'total_tokens': token_sum_sq,
+        'username': User.username,
+    }
+    sort_column = sort_columns.get(sort, User.created_at)
+    if order == 'asc':
+        query = query.order_by(sort_column.asc(), User.id.asc())
+    else:
+        query = query.order_by(sort_column.desc(), User.id.desc())
 
-    # 每个用户最新一条消息时间 = 最近活跃（排除已软删除的对话）
-    latest_msg_by_user = {}
-    latest_conv_by_user = {}
-    if user_ids:
-        latest_rows = (
-            db.session.query(Conversation.user_id, func.max(Message.created_at))
-            .join(Message, Message.conversation_id == Conversation.id)
-            .filter(Conversation.deleted_at.is_(None),
-                    Conversation.user_id.in_(user_ids))
-            .group_by(Conversation.user_id).all()
-        )
-        for uid, ts in latest_rows:
-            latest_msg_by_user[uid] = ts
-
-        # 没有消息但有对话（如刚建对话就离开）的用户，退化为对话更新时间
-        latest_conv_by_user = dict(
-            db.session.query(Conversation.user_id, func.max(Conversation.updated_at))
-            .filter(Conversation.deleted_at.is_(None),
-                    Conversation.user_id.in_(user_ids))
-            .group_by(Conversation.user_id).all()
-        )
-
-    def _pick(u):
-        ts = latest_msg_by_user.get(u.id)
-        alt = latest_conv_by_user.get(u.id)
-        for candidate in (ts, alt, u.created_at):
-            if candidate:
-                return candidate
-        return None
+    pagination = query.add_columns(
+        conv_count_sq.label('conversation_count'),
+        msg_count_sq.label('message_count'),
+        provider_count_sq.label('provider_count'),
+        persona_count_sq.label('persona_count'),
+        last_active_expr.label('last_active'),
+        token_sum_sq.label('total_tokens'),
+    ).paginate(page=page, per_page=per_page, error_out=False)
 
     result = []
-    for u in users:
-        conv_count = conv_counts.get(u.id, 0)
-        last = _pick(u)
+    for row in pagination.items:
+        u = row[0]
         result.append({
             'id': u.id,
             'username': u.username,
@@ -208,13 +275,16 @@ def list_users():
             'ai_avatar': u.ai_avatar,
             'gender': u.gender,
             'is_active': u.is_active,
-            'deleted_at': u.deleted_at.isoformat() if u.deleted_at else None,
-            'created_at': u.created_at.isoformat() if u.created_at else None,
-            'conversation_count': conv_count,
-            'message_count': msg_counts_by_user.get(u.id, 0),
-            'provider_count': prov_counts.get(u.id, 0),
-            'persona_count': persona_counts.get(u.id, 0),
-            'last_active': last.isoformat() if last else None,
+            'deleted_at': iso_time(u.deleted_at),
+            'created_at': iso_time(u.created_at),
+            'last_login_at': iso_time(u.last_login_at),
+            'last_chat_at': iso_time(u.last_chat_at),
+            'conversation_count': row.conversation_count or 0,
+            'message_count': row.message_count or 0,
+            'provider_count': row.provider_count or 0,
+            'persona_count': row.persona_count or 0,
+            'total_tokens': int(row.total_tokens or 0),
+            'last_active': iso_time(row.last_active),
         })
 
     return jsonify({
@@ -224,6 +294,8 @@ def list_users():
             'total': pagination.total,
             'page': page,
             'pages': pagination.pages,
+            'sort': sort,
+            'order': order,
         }
     })
 
@@ -231,65 +303,353 @@ def list_users():
 @admin_bp.route('/users/<int:user_id>/conversations', methods=['GET'])
 @admin_required
 def user_conversations(user_id):
-    """某用户的对话列表及消息数。"""
-    convs = Conversation.query.filter_by(user_id=user_id).order_by(
-        Conversation.updated_at.desc()
-    ).all()
-    msg_counts = {}
-    if convs:
-        ids = [c.id for c in convs]
-        msg_counts = dict(
-            db.session.query(Message.conversation_id, func.count(Message.id))
-            .filter(Message.conversation_id.in_(ids))
-            .group_by(Message.conversation_id).all()
-        )
+    """某用户的对话列表：服务端分页、筛选和排序。"""
+    if not User.query.get(user_id):
+        return jsonify({'code': 404, 'message': '用户不存在'}), 404
+
+    page = _arg_int('page', 1, minimum=1)
+    per_page = _arg_int('per_page', 20, minimum=1, maximum=100)
+    keyword = (request.args.get('q') or '').strip()
+    status = (request.args.get('status') or 'all').strip()
+    sort = (request.args.get('sort') or 'updated_at').strip()
+    order = (request.args.get('order') or 'desc').strip().lower()
+
+    msg_count_sq = (
+        db.session.query(func.count(Message.id))
+        .filter(Message.conversation_id == Conversation.id)
+        .correlate(Conversation)
+        .scalar_subquery()
+    )
+    token_sum_sq = (
+        db.session.query(func.coalesce(func.sum(
+            func.coalesce(Message.prompt_tokens, 0)
+            + func.coalesce(Message.completion_tokens, 0)
+        ), 0))
+        .filter(Message.conversation_id == Conversation.id)
+        .correlate(Conversation)
+        .scalar_subquery()
+    )
+
+    query = Conversation.query.options(
+        joinedload(Conversation.persona),
+        joinedload(Conversation.user_persona),
+    ).filter(Conversation.user_id == user_id)
+    if keyword:
+        query = query.filter(Conversation.title.ilike(f'%{keyword}%'))
+    if status == 'active':
+        query = query.filter(Conversation.deleted_at.is_(None))
+    elif status == 'removed':
+        query = query.filter(Conversation.deleted_at.is_not(None))
+
+    sort_columns = {
+        'updated_at': Conversation.updated_at,
+        'created_at': Conversation.created_at,
+        'message_count': msg_count_sq,
+        'total_tokens': token_sum_sq,
+        'title': Conversation.title,
+    }
+    sort_column = sort_columns.get(sort, Conversation.updated_at)
+    if order == 'asc':
+        query = query.order_by(sort_column.asc(), Conversation.id.asc())
+    else:
+        query = query.order_by(sort_column.desc(), Conversation.id.desc())
+
+    pagination = query.add_columns(
+        msg_count_sq.label('message_count'),
+        token_sum_sq.label('total_tokens'),
+    ).paginate(page=page, per_page=per_page, error_out=False)
 
     def _persona_block(p):
-        """抽取人设展示字段（AI 人设 / 用户人设共用）"""
+        """抽取人设展示字段，玩家设定单独返回 user_prompt。"""
         if not p:
             return {
                 'persona_name': None, 'persona_avatar': None,
                 'persona_description': None, 'persona_system_prompt': None,
-                'persona_greeting': None,
+                'persona_user_prompt': None, 'persona_greeting': None,
+                'persona_type': None,
             }
         return {
             'persona_name': p.name,
             'persona_avatar': p.avatar,
             'persona_description': p.description,
             'persona_system_prompt': p.system_prompt,
+            'persona_user_prompt': p.user_prompt,
             'persona_greeting': p.greeting,
+            'persona_type': p.persona_type or 'ai',
         }
 
     data = []
-    for c in convs:
-        row = {
+    for row in pagination.items:
+        c = row[0]
+        item = {
             'id': c.id,
             'title': c.title,
             'is_pinned': c.is_pinned,
-            'message_count': msg_counts.get(c.id, 0),
+            'message_count': row.message_count or 0,
+            'total_tokens': int(row.total_tokens or 0),
             'background_image': c.background_image,
             'background_cover': c.background_cover,
             'ai_avatar': c.ai_avatar,
             'user_avatar': c.user_avatar,
             'provider_id': c.provider_id,
-            # 用户是否在自己的对话面板里删掉了这条对话（软删除即视为「已移除」）
-            'deleted_at': c.deleted_at.isoformat() if c.deleted_at else None,
+            'deleted_at': iso_time(c.deleted_at),
             'exists': c.deleted_at is None,
-            'created_at': c.created_at.isoformat() if c.created_at else None,
-            'updated_at': c.updated_at.isoformat() if c.updated_at else None,
+            'created_at': iso_time(c.created_at),
+            'updated_at': iso_time(c.updated_at),
         }
-        row.update(_persona_block(c.persona))
-        up = _persona_block(c.user_persona)
-        row.update({
-            'user_persona_name': up['persona_name'],
-            'user_persona_avatar': up['persona_avatar'],
-            'user_persona_description': up['persona_description'],
-            'user_persona_system_prompt': up['persona_system_prompt'],
-            'user_persona_greeting': up['persona_greeting'],
+        item.update(_persona_block(c.persona))
+        legacy = _persona_block(c.user_persona)
+        item.update({
+            'user_persona_name': legacy['persona_name'],
+            'user_persona_avatar': legacy['persona_avatar'],
+            'user_persona_description': legacy['persona_description'],
+            'user_persona_system_prompt': legacy['persona_system_prompt'],
+            'user_persona_user_prompt': legacy['persona_user_prompt'],
+            'user_persona_greeting': legacy['persona_greeting'],
         })
-        data.append(row)
+        data.append(item)
 
-    return jsonify({'code': 200, 'data': data})
+    return jsonify({
+        'code': 200,
+        'data': {
+            'items': data,
+            'total': pagination.total,
+            'page': page,
+            'pages': pagination.pages,
+            'sort': sort,
+            'order': order,
+        }
+    })
+
+
+@admin_bp.route('/users/<int:user_id>/summary', methods=['GET'])
+@admin_required
+def user_summary(user_id):
+    """用户详情概览，包含账号、人设、模型和 Token 汇总。"""
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'code': 404, 'message': '用户不存在'}), 404
+
+    conv_count, msg_count, prompt_total, completion_total, cached_total = (
+        db.session.query(
+            func.count(func.distinct(Conversation.id)),
+            func.count(Message.id),
+            func.coalesce(func.sum(Message.prompt_tokens), 0),
+            func.coalesce(func.sum(Message.completion_tokens), 0),
+            func.coalesce(func.sum(Message.cached_tokens), 0),
+        )
+        .select_from(Conversation)
+        .outerjoin(Message, Message.conversation_id == Conversation.id)
+        .filter(Conversation.user_id == user_id)
+        .one()
+    )
+    last_message_at = (
+        db.session.query(func.max(Message.created_at))
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .filter(Conversation.user_id == user_id)
+        .scalar()
+    )
+    image_usage = ImageUsage.query.filter_by(user_id=user_id).first()
+    last_checkin = DailyCheckIn.query.filter_by(user_id=user_id).order_by(
+        DailyCheckIn.checkin_time.desc()
+    ).first()
+
+    return jsonify({
+        'code': 200,
+        'data': {
+            **user.to_dict(),
+            'deleted_at': iso_time(user.deleted_at),
+            'conversation_count': int(conv_count or 0),
+            'message_count': int(msg_count or 0),
+            'provider_count': ModelProvider.query.filter_by(user_id=user_id).count(),
+            'persona_count': PersonaTemplate.query.filter_by(user_id=user_id).count(),
+            'prompt_tokens': int(prompt_total or 0),
+            'completion_tokens': int(completion_total or 0),
+            'cached_tokens': int(cached_total or 0),
+            'total_tokens': int((prompt_total or 0) + (completion_total or 0)),
+            'last_message_at': iso_time(last_message_at),
+            'free_images_remaining': image_usage.free_count if image_usage else None,
+            'last_checkin_at': iso_time(last_checkin.checkin_time) if last_checkin else None,
+        }
+    })
+
+
+@admin_bp.route('/users/<int:user_id>/personas', methods=['GET'])
+@admin_required
+def user_personas(user_id):
+    """用户的人物卡完整列表，包含 AI 提示词与玩家设定。"""
+    if not User.query.get(user_id):
+        return jsonify({'code': 404, 'message': '用户不存在'}), 404
+    worldbook_counts = dict(
+        db.session.query(WorldBookEntry.persona_id, func.count(WorldBookEntry.id))
+        .filter(WorldBookEntry.user_id == user_id)
+        .group_by(WorldBookEntry.persona_id).all()
+    )
+    rows = PersonaTemplate.query.filter_by(user_id=user_id).order_by(
+        PersonaTemplate.is_default.desc(),
+        PersonaTemplate.updated_at.desc(),
+        PersonaTemplate.id.desc(),
+    ).all()
+    return jsonify({
+        'code': 200,
+        'data': {
+            'items': [{
+                **p.to_dict(),
+                'created_at': iso_time(p.created_at),
+                'updated_at': iso_time(p.updated_at),
+                'worldbook_count': worldbook_counts.get(p.id, 0),
+            } for p in rows]
+        }
+    })
+
+
+@admin_bp.route('/users/<int:user_id>/providers', methods=['GET'])
+@admin_required
+def user_providers(user_id):
+    """用户模型配置列表；API Key 仅返回掩码。"""
+    if not User.query.get(user_id):
+        return jsonify({'code': 404, 'message': '用户不存在'}), 404
+    rows = ModelProvider.query.options(
+        selectinload(ModelProvider.models)
+    ).filter_by(user_id=user_id).order_by(
+        ModelProvider.is_default.desc(),
+        ModelProvider.created_at.desc(),
+        ModelProvider.id.desc(),
+    ).all()
+    return jsonify({
+        'code': 200,
+        'data': {'items': [p.to_dict(include_models=True) for p in rows]}
+    })
+
+
+@admin_bp.route('/users/<int:user_id>/settings', methods=['GET'])
+@admin_required
+def user_settings(user_id):
+    """用户设置只读视图。"""
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'code': 404, 'message': '用户不存在'}), 404
+    settings = UserSettings.query.filter_by(user_id=user_id).first()
+    return jsonify({
+        'code': 200,
+        'data': settings.to_dict() if settings else UserSettings().to_dict()
+    })
+
+
+@admin_bp.route('/users/<int:user_id>/usage', methods=['GET'])
+@admin_required
+def user_usage(user_id):
+    """按天、模型和对话聚合用户 Token 用量。"""
+    if not User.query.get(user_id):
+        return jsonify({'code': 404, 'message': '用户不存在'}), 404
+    days = _arg_int('days', 30, minimum=1, maximum=3650)
+    cutoff = local_now() - timedelta(days=days)
+    prompt_total, completion_total, cached_total, message_count = (
+        db.session.query(
+            func.coalesce(func.sum(Message.prompt_tokens), 0),
+            func.coalesce(func.sum(Message.completion_tokens), 0),
+            func.coalesce(func.sum(Message.cached_tokens), 0),
+            func.count(Message.id),
+        )
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .filter(Conversation.user_id == user_id, Message.created_at >= cutoff)
+        .one()
+    )
+    daily_rows = (
+        db.session.query(
+            func.date(Message.created_at).label('usage_date'),
+            func.coalesce(func.sum(Message.prompt_tokens), 0),
+            func.coalesce(func.sum(Message.completion_tokens), 0),
+            func.coalesce(func.sum(Message.cached_tokens), 0),
+            func.count(Message.id),
+        )
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .filter(Conversation.user_id == user_id, Message.created_at >= cutoff)
+        .group_by(func.date(Message.created_at))
+        .order_by(func.date(Message.created_at).desc())
+        .all()
+    )
+    model_rows = (
+        db.session.query(
+            Message.model,
+            func.coalesce(func.sum(Message.prompt_tokens), 0),
+            func.coalesce(func.sum(Message.completion_tokens), 0),
+            func.coalesce(func.sum(Message.cached_tokens), 0),
+            func.count(Message.id),
+        )
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .filter(Conversation.user_id == user_id, Message.created_at >= cutoff)
+        .group_by(Message.model)
+        .order_by(func.coalesce(func.sum(Message.prompt_tokens), 0).desc())
+        .all()
+    )
+    conversation_rows = (
+        db.session.query(
+            Conversation.id,
+            Conversation.title,
+            func.coalesce(func.sum(Message.prompt_tokens), 0),
+            func.coalesce(func.sum(Message.completion_tokens), 0),
+            func.coalesce(func.sum(Message.cached_tokens), 0),
+            func.count(Message.id),
+        )
+        .join(Message, Message.conversation_id == Conversation.id)
+        .filter(Conversation.user_id == user_id, Message.created_at >= cutoff)
+        .group_by(Conversation.id, Conversation.title)
+        .order_by(func.coalesce(func.sum(Message.prompt_tokens), 0).desc())
+        .limit(50)
+        .all()
+    )
+    usage_request_count, free_tokens = (
+        db.session.query(
+            func.count(AiUsageLog.id),
+            func.coalesce(func.sum(case(
+                (AiUsageLog.is_free_api.is_(True), AiUsageLog.total_tokens),
+                else_=0,
+            )), 0),
+        )
+        .filter(AiUsageLog.user_id == user_id, AiUsageLog.created_at >= cutoff)
+        .one()
+    )
+    return jsonify({
+        'code': 200,
+        'data': {
+            'days': days,
+            'totals': {
+                'message_count': int(message_count or 0),
+                'prompt_tokens': int(prompt_total or 0),
+                'completion_tokens': int(completion_total or 0),
+                'cached_tokens': int(cached_total or 0),
+                'total_tokens': int((prompt_total or 0) + (completion_total or 0)),
+                'request_count': int(usage_request_count or 0),
+                'free_api_tokens': int(free_tokens or 0),
+            },
+            'daily': [{
+                'date': row[0],
+                'prompt_tokens': int(row[1] or 0),
+                'completion_tokens': int(row[2] or 0),
+                'cached_tokens': int(row[3] or 0),
+                'total_tokens': int((row[1] or 0) + (row[2] or 0)),
+                'message_count': int(row[4] or 0),
+            } for row in daily_rows],
+            'by_model': [{
+                'model': row[0] or 'unknown',
+                'prompt_tokens': int(row[1] or 0),
+                'completion_tokens': int(row[2] or 0),
+                'cached_tokens': int(row[3] or 0),
+                'total_tokens': int((row[1] or 0) + (row[2] or 0)),
+                'message_count': int(row[4] or 0),
+            } for row in model_rows],
+            'by_conversation': [{
+                'conversation_id': row[0],
+                'title': row[1],
+                'prompt_tokens': int(row[2] or 0),
+                'completion_tokens': int(row[3] or 0),
+                'cached_tokens': int(row[4] or 0),
+                'total_tokens': int((row[2] or 0) + (row[3] or 0)),
+                'message_count': int(row[5] or 0),
+            } for row in conversation_rows],
+        }
+    })
 
 
 @admin_bp.route('/conversations/<int:conv_id>', methods=['DELETE'])
@@ -362,14 +722,31 @@ def batch_delete_conversations():
 @admin_bp.route('/conversations/<int:conv_id>/messages', methods=['GET'])
 @admin_required
 def conversation_messages(conv_id):
-    """某对话的消息记录（管理员监控用，正文截断避免过于冗长）。"""
-    conv = Conversation.query.get(conv_id)
+    """某对话的消息记录：游标分页，默认返回最新的 N 条。"""
+    conv = Conversation.query.options(
+        joinedload(Conversation.user), joinedload(Conversation.persona)
+    ).filter(Conversation.id == conv_id).first()
     if not conv:
         return jsonify({'code': 404, 'message': '对话不存在'}), 404
 
-    msgs = Message.query.filter_by(conversation_id=conv_id).order_by(
-        Message.created_at.asc()
-    ).all()
+    limit = _arg_int('limit', 100, minimum=1, maximum=500)
+    before_id = request.args.get('before_id', type=int)
+    role = (request.args.get('role') or '').strip()
+    keyword = (request.args.get('q') or '').strip()
+
+    base_query = Message.query.filter(Message.conversation_id == conv_id)
+    if role in ('user', 'assistant', 'system'):
+        base_query = base_query.filter(Message.role == role)
+    if keyword:
+        base_query = base_query.filter(Message.content.ilike(f'%{keyword}%'))
+
+    total = base_query.count()
+    query = base_query
+    if before_id:
+        query = query.filter(Message.id < before_id)
+    rows = query.order_by(Message.id.desc()).limit(limit + 1).all()
+    has_more = len(rows) > limit
+    rows = list(reversed(rows[:limit]))
 
     # 管理员需要看到接近完整的对话记录，仅对超长单条做保护性截断
     MAX_LEN = 4000
@@ -389,15 +766,26 @@ def conversation_messages(conv_id):
                 'user_id': conv.user_id,
                 'username': conv.user.username if conv.user else None,
                 'persona_name': conv.persona.name if conv.persona else None,
-                'deleted_at': conv.deleted_at.isoformat() if conv.deleted_at else None,
+                'persona_user_prompt': conv.persona.user_prompt if conv.persona else None,
+                'deleted_at': iso_time(conv.deleted_at),
             },
             'messages': [{
                 'id': m.id,
                 'role': m.role,
                 'content': _short(m.content),
+                'reasoning_content': _short(m.reasoning_content),
                 'image_url': m.image_url,
-                'created_at': m.created_at.isoformat() if m.created_at else None,
-            } for m in msgs]
+                'model': m.model,
+                'prompt_tokens': m.prompt_tokens,
+                'completion_tokens': m.completion_tokens,
+                'cached_tokens': m.cached_tokens,
+                'total_tokens': ((m.prompt_tokens or 0) + (m.completion_tokens or 0)
+                                 or None),
+                'created_at': iso_time(m.created_at),
+            } for m in rows],
+            'total': total,
+            'has_more': has_more,
+            'next_before_id': rows[0].id if rows and has_more else None,
         }
     })
 
@@ -418,7 +806,7 @@ def export_conversation(conv_id):
     lines = []
     lines.append(f'# 对话标题：{conv.title}')
     lines.append(f'# 角色：{conv.persona.name if conv.persona else "默认"}')
-    lines.append(f'# 更新时间：{conv.updated_at.isoformat() if conv.updated_at else ""}')
+    lines.append(f'# 更新时间：{iso_time(conv.updated_at) or ""}')
     lines.append(f'# 消息数：{len(msgs)}')
     lines.append('')
     for m in msgs:
@@ -538,7 +926,7 @@ def get_marketplace_card(pid):
             'likes': c.likes,
             'username': user.username if user else None,
             'user_id': user.id if user else None,
-            'created_at': c.created_at.isoformat() if c.created_at else None,
+            'created_at': iso_time(c.created_at),
         }
 
     d['comments'] = [_pack(c) for c in rows]

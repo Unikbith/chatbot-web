@@ -110,7 +110,18 @@
               <el-option :label="t('有头像', 'Has avatar')" value="avatar" />
             </el-select>
             <el-button size="small" plain @click="resetFilters">{{ t('重置', 'Reset') }}</el-button>
-            <span class="filter-count">{{ t('命中', 'Matched') }} {{ users.length }} / {{ allUsers.length }}</span>
+            <el-select
+              v-model="userSort"
+              size="small"
+              class="filter-select"
+              @change="onUserSortChange"
+            >
+              <el-option :label="t('按注册时间', 'Registered')" value="created_at" />
+              <el-option :label="t('按最近活跃', 'Last active')" value="last_active" />
+              <el-option :label="t('按消息数', 'Messages')" value="message_count" />
+              <el-option :label="t('按 Token', 'Tokens')" value="total_tokens" />
+            </el-select>
+            <span class="filter-count">{{ t('命中', 'Matched') }} {{ userTotal }}</span>
           </div>
 
           <el-table
@@ -202,6 +213,9 @@
                   <el-table-column :label="t('更新时间', 'Updated')" width="150">
                     <template #default="{ row: conv }">{{ formatTime(conv.updated_at) }}</template>
                   </el-table-column>
+                  <el-table-column :label="t('Token', 'Tokens')" width="90" align="center">
+                    <template #default="{ row: conv }">{{ formatCount(conv.total_tokens) }}</template>
+                  </el-table-column>
                   <el-table-column :label="t('操作', 'Actions')" width="120" align="center">
                     <template #default="{ row: conv }">
                       <div class="mp-actions">
@@ -218,6 +232,19 @@
                     </template>
                   </el-table-column>
                 </el-table>
+                <div v-if="(row._convPages || 0) > 1" class="batch-bar">
+                  <span class="batch-hint">
+                    {{ t('共', 'Total') }} {{ row._convTotal || 0 }} {{ t('条对话', 'conversations') }}
+                  </span>
+                  <el-pagination
+                    small
+                    layout="prev, pager, next"
+                    :current-page="row._convPage || 1"
+                    :page-size="20"
+                    :total="row._convTotal || 0"
+                    @current-change="(p) => loadConversationPage(row, p)"
+                  />
+                </div>
                 <!-- 批量清理：只允许勾选「已移除」的对话（消息已被用户删除，数据库里是残留） -->
                 <div v-if="removedConvsOf(row).length" class="batch-bar">
                   <span class="batch-hint">
@@ -292,13 +319,32 @@
             <el-table-column prop="message_count" :label="t('消息', 'Msgs')" width="80" align="center" />
             <el-table-column prop="provider_count" :label="t('模型配置', 'Cfgs')" width="90" align="center" />
             <el-table-column prop="persona_count" :label="t('角色', 'Personas')" width="80" align="center" />
+            <el-table-column :label="t('Token', 'Tokens')" width="95" align="center">
+              <template #default="{ row }">{{ formatCount(row.total_tokens) }}</template>
+            </el-table-column>
             <el-table-column :label="t('最近活跃', 'Last Active')" width="150">
               <template #default="{ row }">{{ row.last_active ? formatTime(row.last_active) : '-' }}</template>
             </el-table-column>
             <el-table-column :label="t('注册时间', 'Registered')" width="150">
               <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
             </el-table-column>
+            <el-table-column :label="t('操作', 'Actions')" width="90" align="center" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" type="primary" plain @click.stop="openUserDetail(row)">
+                  {{ t('详情', 'Detail') }}
+                </el-button>
+              </template>
+            </el-table-column>
           </el-table>
+          <el-pagination
+            v-if="userTotal > 0"
+            v-model:current-page="userPage"
+            :page-size="userPerPage"
+            :total="userTotal"
+            layout="total, prev, pager, next"
+            class="pl-pagination"
+            @current-change="() => loadUsers({ keepSelection: true })"
+          />
         </el-tab-pane>
 
         <!-- 用户反馈 Tab -->
@@ -771,6 +817,10 @@
           <div class="pdm-label">{{ t('人设提示词', 'System Prompt') }}</div>
           <div class="pdm-box">{{ personaDetailData.persona_system_prompt }}</div>
         </div>
+        <div v-if="personaDetailData.persona_user_prompt" class="pdm-section">
+          <div class="pdm-label">{{ t('玩家设定', 'Player Persona') }}</div>
+          <div class="pdm-box">{{ personaDetailData.persona_user_prompt }}</div>
+        </div>
         <div v-if="personaDetailData.persona_greeting" class="pdm-section">
           <div class="pdm-label">{{ t('开场白', 'Greeting') }}</div>
           <div class="pdm-box">{{ personaDetailData.persona_greeting }}</div>
@@ -796,15 +846,103 @@
               <p>{{ personaDetailData.user_persona.description || t('暂无简介', 'No description') }}</p>
             </div>
           </div>
-          <div v-if="personaDetailData.user_persona.system_prompt" class="pdm-section">
-            <div class="pdm-label">{{ t('人设提示词', 'System Prompt') }}</div>
-            <div class="pdm-box">{{ personaDetailData.user_persona.system_prompt }}</div>
+          <div v-if="personaDetailData.user_persona.user_prompt" class="pdm-section">
+            <div class="pdm-label">{{ t('玩家设定', 'Player Persona') }}</div>
+            <div class="pdm-box">{{ personaDetailData.user_persona.user_prompt }}</div>
           </div>
           <div v-if="personaDetailData.user_persona.greeting" class="pdm-section">
             <div class="pdm-label">{{ t('开场白', 'Greeting') }}</div>
             <div class="pdm-box">{{ personaDetailData.user_persona.greeting }}</div>
           </div>
         </template>
+      </div>
+    </el-dialog>
+
+    <!-- 用户详情：人设、Token 用量和模型配置 -->
+    <el-dialog
+      v-model="userDetailVisible"
+      :title="userDetailUser ? `${userDetailUser.username} · ${userDetailUser.email}` : t('用户详情', 'User Detail')"
+      width="min(920px, 94vw)"
+      align-center
+    >
+      <div v-loading="userDetailLoading" class="user-detail">
+        <el-tabs v-model="userDetailTab">
+          <el-tab-pane :label="t('概览', 'Overview')" name="overview">
+            <el-descriptions v-if="userDetailSummary" :column="2" border>
+              <el-descriptions-item :label="t('用户 ID', 'User ID')">{{ userDetailSummary.id }}</el-descriptions-item>
+              <el-descriptions-item :label="t('状态', 'Status')">{{ userDetailSummary.is_active ? t('正常', 'Active') : t('停用', 'Disabled') }}</el-descriptions-item>
+              <el-descriptions-item :label="t('注册时间', 'Registered')">{{ formatTime(userDetailSummary.created_at) }}</el-descriptions-item>
+              <el-descriptions-item :label="t('最近登录', 'Last login')">{{ formatTime(userDetailSummary.last_login_at) }}</el-descriptions-item>
+              <el-descriptions-item :label="t('最近聊天', 'Last chat')">{{ formatTime(userDetailSummary.last_chat_at || userDetailSummary.last_message_at) }}</el-descriptions-item>
+              <el-descriptions-item :label="t('对话数', 'Conversations')">{{ userDetailSummary.conversation_count }}</el-descriptions-item>
+              <el-descriptions-item :label="t('消息数', 'Messages')">{{ userDetailSummary.message_count }}</el-descriptions-item>
+              <el-descriptions-item :label="t('人物卡', 'Personas')">{{ userDetailSummary.persona_count }}</el-descriptions-item>
+              <el-descriptions-item :label="t('模型配置', 'Providers')">{{ userDetailSummary.provider_count }}</el-descriptions-item>
+              <el-descriptions-item :label="t('总 Token', 'Total tokens')">{{ formatCount(userDetailSummary.total_tokens) }}</el-descriptions-item>
+              <el-descriptions-item :label="t('输入 Token', 'Prompt tokens')">{{ formatCount(userDetailSummary.prompt_tokens) }}</el-descriptions-item>
+              <el-descriptions-item :label="t('输出 Token', 'Completion tokens')">{{ formatCount(userDetailSummary.completion_tokens) }}</el-descriptions-item>
+              <el-descriptions-item :label="t('缓存命中', 'Cached tokens')">{{ formatCount(userDetailSummary.cached_tokens) }}</el-descriptions-item>
+              <el-descriptions-item :label="t('剩余免费生图', 'Free images')">{{ userDetailSummary.free_images_remaining ?? '-' }}</el-descriptions-item>
+            </el-descriptions>
+          </el-tab-pane>
+
+          <el-tab-pane :label="`${t('人物卡', 'Personas')} (${userDetailPersonas.length})`" name="personas">
+            <el-empty v-if="!userDetailPersonas.length" :description="t('暂无人物卡', 'No personas')" />
+            <el-collapse v-else>
+              <el-collapse-item v-for="p in userDetailPersonas" :key="p.id" :name="p.id">
+                <template #title>
+                  <span>{{ p.name }}</span>
+                  <el-tag v-if="p.is_default" size="small" type="success" effect="plain" class="detail-inline-tag">{{ t('默认', 'Default') }}</el-tag>
+                  <el-tag size="small" effect="plain" class="detail-inline-tag">{{ p.persona_type === 'user' ? t('用户人设', 'User') : t('AI人设', 'AI') }}</el-tag>
+                  <span class="detail-muted">{{ t('世界书', 'Worldbook') }} {{ p.worldbook_count || 0 }}</span>
+                </template>
+                <div class="pl-detail-block">
+                  <div class="pl-detail-label">{{ t('AI 提示词', 'System prompt') }}</div>
+                  <pre class="pl-detail-text">{{ p.system_prompt || '-' }}</pre>
+                </div>
+                <div class="pl-detail-block">
+                  <div class="pl-detail-label">{{ t('玩家设定', 'Player persona') }}</div>
+                  <pre class="pl-detail-text">{{ p.user_prompt || '-' }}</pre>
+                </div>
+                <div v-if="p.greeting" class="pl-detail-block">
+                  <div class="pl-detail-label">{{ t('开场白', 'Greeting') }}</div>
+                  <pre class="pl-detail-text">{{ p.greeting }}</pre>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+          </el-tab-pane>
+
+          <el-tab-pane :label="t('Token 用量', 'Token Usage')" name="usage">
+            <template v-if="userDetailUsage">
+              <div class="usage-cards">
+                <div class="usage-card"><b>{{ formatCount(userDetailUsage.totals.total_tokens) }}</b><span>{{ t('总 Token', 'Total') }}</span></div>
+                <div class="usage-card"><b>{{ formatCount(userDetailUsage.totals.prompt_tokens) }}</b><span>{{ t('输入', 'Prompt') }}</span></div>
+                <div class="usage-card"><b>{{ formatCount(userDetailUsage.totals.completion_tokens) }}</b><span>{{ t('输出', 'Completion') }}</span></div>
+                <div class="usage-card"><b>{{ formatCount(userDetailUsage.totals.cached_tokens) }}</b><span>{{ t('缓存命中', 'Cached') }}</span></div>
+              </div>
+              <div class="detail-subtitle">{{ t('按模型', 'By model') }}</div>
+              <el-table :data="userDetailUsage.by_model" size="small" class="admin-table">
+                <el-table-column prop="model" :label="t('模型', 'Model')" min-width="160" show-overflow-tooltip />
+                <el-table-column :label="t('总 Token', 'Tokens')" width="100"><template #default="{ row }">{{ formatCount(row.total_tokens) }}</template></el-table-column>
+                <el-table-column :label="t('缓存', 'Cached')" width="90"><template #default="{ row }">{{ formatCount(row.cached_tokens) }}</template></el-table-column>
+                <el-table-column prop="message_count" :label="t('消息数', 'Msgs')" width="80" align="center" />
+              </el-table>
+            </template>
+          </el-tab-pane>
+
+          <el-tab-pane :label="`${t('模型配置', 'Providers')} (${userDetailProviders.length})`" name="providers">
+            <el-empty v-if="!userDetailProviders.length" :description="t('暂无模型配置', 'No providers')" />
+            <el-table v-else :data="userDetailProviders" size="small" class="admin-table">
+              <el-table-column prop="name" :label="t('名称', 'Name')" min-width="130" show-overflow-tooltip />
+              <el-table-column prop="brand" :label="t('品牌', 'Brand')" width="100" />
+              <el-table-column prop="api_url" :label="t('接口地址', 'API URL')" min-width="220" show-overflow-tooltip />
+              <el-table-column prop="api_key_masked" :label="t('API Key', 'API Key')" width="130" />
+              <el-table-column :label="t('模型数', 'Models')" width="80" align="center">
+                <template #default="{ row }">{{ row.models?.length || 0 }}</template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+        </el-tabs>
       </div>
     </el-dialog>
 
@@ -819,7 +957,7 @@
         <div v-if="msgDrawerData.conversation" class="md-head">
           <div class="md-title">{{ msgDrawerData.conversation.title || t('(无标题)', '(Untitled)') }}</div>
           <div class="md-meta">
-            <el-tag size="small" effect="plain">{{ t('共', 'Total') }} {{ msgDrawerData.messages.length }} {{ t('条', 'msgs') }}</el-tag>
+            <el-tag size="small" effect="plain">{{ t('共', 'Total') }} {{ msgDrawerData.total || msgDrawerData.messages.length }} {{ t('条', 'msgs') }}</el-tag>
             <el-tag v-if="msgDrawerData.conversation.username" size="small" effect="plain" type="info">
               {{ msgDrawerData.conversation.username }}
             </el-tag>
@@ -827,6 +965,12 @@
               {{ t('用户已移除该对话', 'Removed by user') }}
             </el-tag>
           </div>
+        </div>
+
+        <div v-if="msgDrawerData.hasMore" class="md-load-more">
+          <el-button size="small" plain :loading="msgDrawerLoading" @click="loadOlderMessages">
+            {{ t('加载更早消息', 'Load older messages') }}
+          </el-button>
         </div>
 
         <div v-if="!msgDrawerLoading && msgDrawerData.messages.length === 0" class="md-empty">
@@ -838,7 +982,15 @@
             <span class="md-role">{{ roleLabel(m.role) }}</span>
             <span class="md-time">{{ formatTime(m.created_at) }}</span>
           </div>
+          <div v-if="m.model || m.total_tokens" class="md-msg-meta">
+            <span v-if="m.model">{{ m.model }}</span>
+            <span v-if="m.total_tokens">
+              Token {{ formatCount(m.total_tokens) }}
+              <template v-if="m.cached_tokens"> · 缓存 {{ formatCount(m.cached_tokens) }}</template>
+            </span>
+          </div>
           <div class="md-content">{{ m.content }}</div>
+          <div v-if="m.reasoning_content" class="md-reasoning">{{ m.reasoning_content }}</div>
           <el-image
             v-if="m.image_url"
             :src="m.image_url"
@@ -985,7 +1137,14 @@ const users = ref([])
 const statsLoading = ref(false)
 const usersLoading = ref(false)
 const allUsers = ref([])
+const userPage = ref(1)
+const userPerPage = ref(50)
+const userTotal = ref(0)
+const userPages = ref(0)
+const userSort = ref('created_at')
+const userOrder = ref('desc')
 const userTableRef = ref(null)
+let userFilterTimer = null
 // 当前展开的用户 id 集合：刷新列表后据此恢复展开状态，避免展开区白屏
 const expandedUserIds = ref(new Set())
 // 每个用户展开区里被勾选的对话 id（key = userId）：仅允许勾选「已移除」的对话
@@ -1074,6 +1233,16 @@ const msgDrawerVisible = ref(false)
 const msgDrawerLoading = ref(false)
 const msgDrawerData = ref({ conversation: null, messages: [] })
 
+// 用户详情
+const userDetailVisible = ref(false)
+const userDetailLoading = ref(false)
+const userDetailTab = ref('overview')
+const userDetailUser = ref(null)
+const userDetailSummary = ref(null)
+const userDetailPersonas = ref([])
+const userDetailProviders = ref([])
+const userDetailUsage = ref(null)
+
 function avatarPreviewList(row) {
   return [row.avatar, row.ai_avatar].filter(Boolean)
 }
@@ -1089,41 +1258,9 @@ function _startOfToday() {
 }
 
 function applyFilters() {
-  const kw = (filters.value.keyword || '').trim().toLowerCase()
-  const today0 = _startOfToday()
-  const weekAgo = today0 - 7 * 86400000
-
-  users.value = allUsers.value.filter((u) => {
-    // 1) 关键词（用户名 / 邮箱）
-    if (kw) {
-      const hay = `${u.username || ''} ${u.email || ''}`.toLowerCase()
-      if (!hay.includes(kw)) return false
-    }
-    // 2) 性别（多选：任一命中即可）
-    if (filters.value.genders.length && !filters.value.genders.includes(u.gender)) return false
-    // 3) 账号状态（多选）
-    if (filters.value.statuses.length) {
-      const status = u.deleted_at ? 'deleted' : (u.is_active ? 'active' : 'disabled')
-      if (!filters.value.statuses.includes(status)) return false
-    }
-    // 4) 活跃度
-    const act = filters.value.activity
-    if (act) {
-      const ts = u.last_active ? new Date(u.last_active).getTime() : NaN
-      if (act === 'has_conversation' && !(u.conversation_count > 0)) return false
-      if (act === 'has_message' && !(u.message_count > 0)) return false
-      if (act === 'no_conversation' && u.conversation_count > 0) return false
-      if (act === 'today' && !(Number.isFinite(ts) && ts >= today0)) return false
-      if (act === 'week' && !(Number.isFinite(ts) && ts >= weekAgo)) return false
-    }
-    // 5) 配置情况（多选：需全部满足）
-    for (const cfg of filters.value.hasConfig) {
-      if (cfg === 'provider' && !(u.provider_count > 0)) return false
-      if (cfg === 'persona' && !(u.persona_count > 0)) return false
-      if (cfg === 'avatar' && !u.avatar) return false
-    }
-    return true
-  })
+  userPage.value = 1
+  clearTimeout(userFilterTimer)
+  userFilterTimer = setTimeout(() => loadUsers(), 300)
 }
 
 function resetFilters() {
@@ -1131,12 +1268,25 @@ function resetFilters() {
   applyFilters()
 }
 
+function onUserSortChange() {
+  userPage.value = 1
+  loadUsers({ keepSelection: true })
+}
+
 function formatTime(iso) {
   if (!iso) return '-'
   const d = new Date(iso)
   if (isNaN(d.getTime())) return iso
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(d)
 }
 
 // 千位 k 计数：1000 -> 1k，1500 -> 1.5k，10000 -> 10k，百万及以上用 m
@@ -1166,11 +1316,23 @@ async function loadStats() {
 async function loadUsers(opts = {}) {
   usersLoading.value = true
   try {
-    const res = await adminApi.users()
+    const res = await adminApi.users({
+      page: userPage.value,
+      perPage: userPerPage.value,
+      keyword: (filters.value.keyword || '').trim(),
+      genders: filters.value.genders,
+      statuses: filters.value.statuses,
+      hasConfig: filters.value.hasConfig,
+      activity: filters.value.activity,
+      sort: userSort.value,
+      order: userOrder.value,
+    })
     if (res.code === 200) {
-      // 后端已支持分页：返回 { items, total, page, pages }；兼容旧版直接返回数组
       const payload = res.data
       const list = Array.isArray(payload) ? payload : (payload?.items || [])
+      userTotal.value = Array.isArray(payload) ? list.length : (payload?.total || 0)
+      userPages.value = Array.isArray(payload) ? 1 : (payload?.pages || 0)
+      userPage.value = Array.isArray(payload) ? 1 : (payload?.page || userPage.value)
       // 关键：不能整体替换行对象。el-table 以 row 对象身份维护展开状态
       //（expandedRows.includes(row)），换成新对象会让所有展开行失效，
       // 表现为「刷新后展开区白屏」。这里按 id 复用旧行对象，保留
@@ -1180,11 +1342,11 @@ async function loadUsers(opts = {}) {
         const old = oldById.get(u.id)
         return old ? Object.assign(old, u) : { ...u, _conversations: null, _loading: false }
       })
+      users.value = allUsers.value
       if (!opts.keepSelection) {
         // 普通刷新：清空已勾选的对话（行数据可能已变），下次展开重新勾选
         selectedConvIds.value = {}
       }
-      applyFilters()
       await restoreExpandedRows()
     } else if (res.code === 403) {
       ElMessage.warning(t('无管理员权限', 'No admin permission'))
@@ -1211,13 +1373,23 @@ async function restoreExpandedRows() {
   }
 }
 
-async function loadConversations(user) {
-  if (user._conversations) return
+async function loadConversations(user, page = 1, force = false) {
+  if (user._conversations && !force && user._convPage === page) return
   user._loading = true
   try {
-    const res = await adminApi.userConversations(user.id)
+    const res = await adminApi.userConversations(user.id, {
+      page,
+      perPage: 20,
+      sort: 'updated_at',
+      order: 'desc',
+    })
     if (res.code === 200) {
-      user._conversations = (res.data || []).map(c => ({ ...c }))
+      const payload = res.data || {}
+      const items = Array.isArray(payload) ? payload : (payload.items || [])
+      user._conversations = items.map(c => ({ ...c }))
+      user._convPage = Array.isArray(payload) ? 1 : (payload.page || page)
+      user._convPages = Array.isArray(payload) ? 1 : (payload.pages || 0)
+      user._convTotal = Array.isArray(payload) ? items.length : (payload.total || 0)
     }
   } catch (e) {
     ElMessage.error(t('加载对话失败', 'Failed to load conversations'))
@@ -1226,13 +1398,17 @@ async function loadConversations(user) {
   }
 }
 
+function loadConversationPage(user, page) {
+  loadConversations(user, page, true)
+}
+
 // 外层用户表展开时加载该用户对话（修复展开无数据 bug）
 // 同时记录展开状态，供列表刷新后恢复（见 restoreExpandedRows）
 function onUserExpand(row, expandedRows) {
   const isExpanded = expandedRows && expandedRows.includes(row)
   if (isExpanded) {
     expandedUserIds.value.add(row.id)
-    loadConversations(row)
+    loadConversations(row, row._convPage || 1)
   } else {
     expandedUserIds.value.delete(row.id)
   }
@@ -1325,19 +1501,51 @@ async function exportConversation(conv) {
 
 // 点击「消息数」或「查看」直接查看该对话的完整消息记录
 async function viewConversation(conv) {
-  msgDrawerData.value = { conversation: { id: conv.id, title: conv.title }, messages: [] }
+  msgDrawerData.value = {
+    conversation: { id: conv.id, title: conv.title },
+    messages: [],
+    total: conv.message_count || 0,
+    hasMore: false,
+    nextBeforeId: null,
+  }
   msgDrawerVisible.value = true
   msgDrawerLoading.value = true
   try {
-    const res = await adminApi.conversationMessages(conv.id)
+    const res = await adminApi.conversationMessages(conv.id, { limit: 100 })
     if (res.code === 200) {
       msgDrawerData.value = {
         conversation: res.data.conversation || { id: conv.id, title: conv.title },
         messages: res.data.messages || [],
+        total: res.data.total || 0,
+        hasMore: !!res.data.has_more,
+        nextBeforeId: res.data.next_before_id || null,
       }
     }
   } catch (e) {
     ElMessage.error(t('加载消息失败', 'Failed to load messages'))
+  } finally {
+    msgDrawerLoading.value = false
+  }
+}
+
+async function loadOlderMessages() {
+  const current = msgDrawerData.value
+  if (msgDrawerLoading.value || !current.hasMore || !current.nextBeforeId) return
+  msgDrawerLoading.value = true
+  try {
+    const res = await adminApi.conversationMessages(current.conversation.id, {
+      limit: 100,
+      beforeId: current.nextBeforeId,
+    })
+    if (res.code !== 200) return
+    const existing = new Set(current.messages.map(m => m.id))
+    const older = (res.data.messages || []).filter(m => !existing.has(m.id))
+    current.messages = [...older, ...current.messages]
+    current.hasMore = !!res.data.has_more
+    current.nextBeforeId = res.data.next_before_id || null
+    current.total = res.data.total || current.total
+  } catch (e) {
+    ElMessage.error(t('加载更早消息失败', 'Failed to load older messages'))
   } finally {
     msgDrawerLoading.value = false
   }
@@ -1715,6 +1923,7 @@ function showPersonaDetail(conv, kind = 'ai') {
     persona_avatar: conv.persona_avatar,
     persona_description: conv.persona_description,
     persona_system_prompt: conv.persona_system_prompt,
+    persona_user_prompt: conv.persona_user_prompt,
     persona_greeting: conv.persona_greeting,
     persona_kind: 'ai',
     // 对话中设置的用户人设：表格已去掉该列，统一在弹窗里一并展示
@@ -1722,11 +1931,43 @@ function showPersonaDetail(conv, kind = 'ai') {
       name: conv.user_persona_name,
       avatar: conv.user_persona_avatar,
       description: conv.user_persona_description,
-      system_prompt: conv.user_persona_system_prompt,
+      user_prompt: conv.user_persona_user_prompt,
       greeting: conv.user_persona_greeting,
     } : null,
   }
   personaDetailVisible.value = true
+}
+
+async function openUserDetail(row) {
+  if (!row) return
+  userDetailVisible.value = true
+  userDetailLoading.value = true
+  userDetailTab.value = 'overview'
+  userDetailUser.value = row
+  userDetailSummary.value = null
+  userDetailPersonas.value = []
+  userDetailProviders.value = []
+  userDetailUsage.value = null
+
+  const results = await Promise.allSettled([
+    adminApi.userSummary(row.id),
+    adminApi.userPersonas(row.id),
+    adminApi.userProviders(row.id),
+    adminApi.userUsage(row.id, 30),
+  ])
+  if (results[0].status === 'fulfilled' && results[0].value.code === 200) {
+    userDetailSummary.value = results[0].value.data
+  }
+  if (results[1].status === 'fulfilled' && results[1].value.code === 200) {
+    userDetailPersonas.value = results[1].value.data.items || []
+  }
+  if (results[2].status === 'fulfilled' && results[2].value.code === 200) {
+    userDetailProviders.value = results[2].value.data.items || []
+  }
+  if (results[3].status === 'fulfilled' && results[3].value.code === 200) {
+    userDetailUsage.value = results[3].value.data
+  }
+  userDetailLoading.value = false
 }
 
 async function loadAll() {
@@ -2727,11 +2968,26 @@ function onTabChange(name) {
 .pl-dot.is-brand { background: var(--brand, #b06a2e); }
 .pl-dot.is-warn { background: #d9912b; }
 
+/* 用户详情与 Token 用量 */
+.user-detail { min-height: 320px; }
+.detail-inline-tag { margin-left: 8px; }
+.detail-muted { margin-left: auto; color: var(--text-muted, #a9815a); font-size: 12px; }
+.detail-subtitle { margin: 18px 0 8px; font-weight: 700; color: var(--text-primary, #2a2522); }
+.usage-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.usage-card { padding: 14px; border: 1px solid var(--border-color, #e9e0d4); border-radius: 10px; background: var(--surface-hover, #faf3ea); display: flex; flex-direction: column; gap: 4px; }
+.usage-card b { font-size: 20px; color: var(--brand, #b06a2e); }
+.usage-card span { font-size: 12px; color: var(--text-secondary, #6a5d53); }
+.md-load-more { display: flex; justify-content: center; padding: 8px 0 14px; }
+.md-msg-meta { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; color: var(--text-muted, #a9815a); font-size: 11.5px; }
+.md-reasoning { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--brand, #b06a2e); background: rgba(176, 106, 46, 0.06); color: var(--text-secondary, #6a5d53); white-space: pre-wrap; font-size: 12.5px; }
+
 @media (max-width: 900px) {
   .pl-meta-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .usage-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 560px) {
   .pl-meta-bar { grid-template-columns: 1fr; }
+  .usage-cards { grid-template-columns: 1fr; }
 }
 </style>

@@ -507,6 +507,9 @@ def login():
 
     if not user.is_active:
         return jsonify({'code': 403, 'message': '账号已被禁用'}), 403
+
+    user.last_login_at = local_now()
+    db.session.commit()
     
     # 生成 token
     access_token = create_access_token(

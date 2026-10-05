@@ -9,7 +9,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask, jsonify, request
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 from config import config
 from extensions import db, jwt, cors, migrate
 from models import (User, ModelProvider, PersonaTemplate, UserSettings, Conversation,
@@ -35,6 +35,8 @@ def create_app(config_name=None):
 
     # 初始化扩展
     db.init_app(app)
+    with app.app_context():
+        _configure_sqlite_engine(db.engine)
     jwt.init_app(app)
     # CORS 白名单：仅允许本地开发源与配置的生产域名，禁止任意源携带凭据访问
     _cors_origins = app.config.get('CORS_ORIGINS') or [
@@ -143,9 +145,50 @@ def create_app(config_name=None):
     with app.app_context():
         db.create_all()
         _ensure_schema_columns(app)
+        _ensure_runtime_indexes(app)
         _init_default_data(app)
 
     return app
+
+
+def _configure_sqlite_engine(engine):
+    """为 SQLite 连接设置并发与完整性相关的 PRAGMA。"""
+    if engine.url.get_backend_name() != 'sqlite':
+        return
+    if getattr(engine, '_confide_sqlite_configured', False):
+        return
+
+    @event.listens_for(engine, 'connect')
+    def _set_sqlite_pragmas(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute('PRAGMA foreign_keys=ON')
+            cursor.execute('PRAGMA busy_timeout=15000')
+            cursor.execute('PRAGMA journal_mode=WAL')
+            cursor.execute('PRAGMA synchronous=NORMAL')
+        finally:
+            cursor.close()
+
+    engine._confide_sqlite_configured = True
+
+
+def _ensure_runtime_indexes(app):
+    """为已有数据库补齐 SQLAlchemy 模型中声明的复合索引。"""
+    wanted = {
+        'idx_conversations_user_deleted_updated',
+        'idx_messages_conversation_created_id',
+        'idx_messages_conversation_id',
+        'idx_ai_usage_user_created',
+        'idx_ai_usage_model_created',
+        'idx_ai_usage_conversation_created',
+    }
+    try:
+        for table in db.metadata.tables.values():
+            for index in table.indexes:
+                if index.name in wanted:
+                    index.create(bind=db.engine, checkfirst=True)
+    except Exception as e:
+        app.logger.info(f'[迁移] 运行索引检查/创建跳过: {e}')
 
 
 def _assert_production_secrets(app):
@@ -227,6 +270,10 @@ def _ensure_schema_columns(app):
             if 'marketplace_worldbook_entries' not in inspector.get_table_names():
                 db.create_all()
                 app.logger.info('[迁移] 已创建 marketplace_worldbook_entries 表')
+            # ai_usage_logs — 模型调用用量与缓存命中审计
+            if 'ai_usage_logs' not in inspector.get_table_names():
+                db.create_all()
+                app.logger.info('[迁移] 已创建 ai_usage_logs 表')
             # messages.prompt_tokens / completion_tokens - 单条回复的 token 用量
             if 'messages' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('messages')}
@@ -238,6 +285,10 @@ def _ensure_schema_columns(app):
                     with db.engine.begin() as conn:
                         conn.execute(text('ALTER TABLE messages ADD COLUMN completion_tokens INTEGER'))
                     app.logger.info('[迁移] 已为 messages 增加 completion_tokens 字段')
+                if 'cached_tokens' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text('ALTER TABLE messages ADD COLUMN cached_tokens INTEGER'))
+                    app.logger.info('[迁移] 已为 messages 增加 cached_tokens 字段')
             # model_providers.params - 厂商专属参数（STT/TTS）
             if 'model_providers' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('model_providers')}
@@ -265,6 +316,14 @@ def _ensure_schema_columns(app):
                     with db.engine.begin() as conn:
                         conn.execute(text("ALTER TABLE users ADD COLUMN deleted_at DATETIME"))
                     app.logger.info('[迁移] 已为 users 增加 deleted_at 字段')
+                if 'last_login_at' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE users ADD COLUMN last_login_at DATETIME"))
+                    app.logger.info('[迁移] 已为 users 增加 last_login_at 字段')
+                if 'last_chat_at' not in cols:
+                    with db.engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE users ADD COLUMN last_chat_at DATETIME"))
+                    app.logger.info('[迁移] 已为 users 增加 last_chat_at 字段')
             # user_settings.background_cover - 背景展示方式（contain/cover）
             if 'user_settings' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('user_settings')}

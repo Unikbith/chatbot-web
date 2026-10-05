@@ -454,16 +454,52 @@ const adminApi = {
   async stats() {
     return adminReq.get('/api/admin/stats');
   },
-  async users(page = 1, perPage = 200, keyword = '') {
-    const params = new URLSearchParams({ page: String(page), per_page: String(perPage) });
-    if (keyword) params.set('q', keyword);
+  async users(options = {}) {
+    const params = new URLSearchParams({
+      page: String(options.page || 1),
+      per_page: String(options.perPage || 50),
+    });
+    if (options.keyword) params.set('q', options.keyword);
+    if (options.genders?.length) params.set('gender', options.genders.join(','));
+    if (options.statuses?.length) params.set('status', options.statuses.join(','));
+    if (options.hasConfig?.length) params.set('has_config', options.hasConfig.join(','));
+    if (options.activity) params.set('activity', options.activity);
+    if (options.sort) params.set('sort', options.sort);
+    if (options.order) params.set('order', options.order);
     return adminReq.get(`/api/admin/users?${params.toString()}`);
   },
-  async userConversations(userId) {
-    return adminReq.get(`/api/admin/users/${userId}/conversations`);
+  async userConversations(userId, options = {}) {
+    const params = new URLSearchParams({
+      page: String(options.page || 1),
+      per_page: String(options.perPage || 20),
+      status: options.status || 'all',
+      sort: options.sort || 'updated_at',
+      order: options.order || 'desc',
+    });
+    if (options.keyword) params.set('q', options.keyword);
+    return adminReq.get(`/api/admin/users/${userId}/conversations?${params.toString()}`);
   },
-  async conversationMessages(convId) {
-    return adminReq.get(`/api/admin/conversations/${convId}/messages`);
+  async conversationMessages(convId, options = {}) {
+    const params = new URLSearchParams({ limit: String(options.limit || 100) });
+    if (options.beforeId) params.set('before_id', String(options.beforeId));
+    if (options.role) params.set('role', options.role);
+    if (options.keyword) params.set('q', options.keyword);
+    return adminReq.get(`/api/admin/conversations/${convId}/messages?${params.toString()}`);
+  },
+  async userSummary(userId) {
+    return adminReq.get(`/api/admin/users/${userId}/summary`);
+  },
+  async userPersonas(userId) {
+    return adminReq.get(`/api/admin/users/${userId}/personas`);
+  },
+  async userProviders(userId) {
+    return adminReq.get(`/api/admin/users/${userId}/providers`);
+  },
+  async userSettings(userId) {
+    return adminReq.get(`/api/admin/users/${userId}/settings`);
+  },
+  async userUsage(userId, days = 30) {
+    return adminReq.get(`/api/admin/users/${userId}/usage?days=${days}`);
   },
   async deleteConversation(convId) {
     return adminReq.delete(`/api/admin/conversations/${convId}`);
