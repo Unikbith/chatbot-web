@@ -1156,7 +1156,8 @@
             :autosize="{ minRows: 2, maxRows: 6 }"
             resize="none"
             maxlength="2000"
-            :placeholder="t('输入回复内容，可附带图片', 'Write a reply, or attach an image')"
+            :placeholder="t('输入回复内容，Enter 发送，Shift+Enter 换行（可附带图片）', 'Write a reply. Enter to send, Shift+Enter for a new line (image optional)')"
+            @keydown="handleSupportReplyKeydown"
           />
           <el-button type="primary" :disabled="!canReplySupport" :loading="supportReplying" @click="replySupport">{{ t('发送回复', 'Send reply') }}</el-button>
         </div>
@@ -2116,6 +2117,13 @@ async function replySupport() {
   } finally {
     supportReplying.value = false
   }
+}
+
+function handleSupportReplyKeydown(event) {
+  // 与用户端客服框一致：Enter 发送，Shift+Enter 换行，输入法组合期间不触发
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+  event.preventDefault()
+  replySupport()
 }
 
 async function uploadSupportReplyImage(file) {
