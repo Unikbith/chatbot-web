@@ -173,7 +173,7 @@ async function importMemory() {
       <section v-if="mode === 'export'" class="memory-pane">
         <div class="memory-pane__intro">
           <h4>{{ t('生成记忆档案', 'Generate Memory Archive') }}</h4>
-          <p>{{ t('调用当前 AI 总结长短期记忆和最新回复，生成可移植的记忆档案（会消耗少量 token）。', 'AI will summarize long/short-term memory and latest reply into a portable archive (uses some tokens).') }}</p>
+          <p>{{ t('调用当前 AI 汇总记忆宫殿中的长记忆与短记忆，生成可移植的长期记忆档案（会消耗少量 token）。', 'AI will merge long/short-term memory from the memory palace into a portable archive (uses some tokens).') }}</p>
         </div>
         <div v-if="!hasConversation" class="memory-notice">
           {{ t('请先从聊天列表打开一个对话，再导出记忆。', 'Open a conversation before exporting memory.') }}

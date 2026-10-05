@@ -606,12 +606,17 @@ class PersonaMarketplace(db.Model):
                                 lazy='select', cascade='all, delete-orphan',
                                 order_by='MarketplaceWorldbookEntry.id')
 
-    def to_dict(self, include_prompt=False, comment_count=None, worldbook_count=None):
+    def to_dict(self, include_prompt=False, comment_count=None, worldbook_count=None,
+                include_author=False):
         """序列化。comment_count / worldbook_count 可由调用方预先批量聚合传入，
         避免逐卡片执行 count() 造成 N+1 查询。
 
         can_edit 需调用方传入当前请求者是否为管理员（或卡片作者），
-        由接口层判定后回填 —— 前端不自行判断权限，一律以此字段为准。"""
+        由接口层判定后回填 —— 前端不自行判断权限，一律以此字段为准。
+
+        include_author：仅管理员令牌（role=admin）时由接口层置 True，
+        返回真实作者 id/用户名；普通用户与公开接口一律不返回，
+        避免开发者工具 / 抓包直接看到作者真实身份（UI 统一用假名展示）。"""
         data = {
             'id': self.id,
             'name': self.name,
@@ -623,8 +628,6 @@ class PersonaMarketplace(db.Model):
             'likes': self.likes,
             'dislikes': self.dislikes,
             'score': self.likes - self.dislikes,
-            'author_id': self.user_id,
-            'author_name': self.author.username if self.author else None,
             'comment_count': (
                 comment_count if comment_count is not None
                 else (self.comments.count() if self.comments else 0)
@@ -636,6 +639,9 @@ class PersonaMarketplace(db.Model):
             ),
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+        if include_author:
+            data['author_id'] = self.user_id
+            data['author_name'] = self.author.username if self.author else None
         if include_prompt:
             data['system_prompt'] = self.system_prompt
             data['user_prompt'] = self.user_prompt

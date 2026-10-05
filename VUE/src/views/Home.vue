@@ -1529,7 +1529,6 @@ async function handleConvoSettingsSaved(payload) {
     <!-- 卡片广场 -->
     <PersonaMarketplace
       v-model="marketplaceVisible"
-      :current-user-id="user?.id"
       :persona-version="personaVersion"
       @adopted="handleCardAdopted"
     />

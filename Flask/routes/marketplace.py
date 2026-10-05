@@ -282,6 +282,18 @@ def _is_admin():
         return False
 
 
+def _jwt_user_id():
+    """普通用户令牌返回 user id；管理员令牌（identity='admin'）返回 None。
+
+    管理员令牌只用于后台面板，若误用普通广场接口也不该 500：
+    user_id 为 None 时按「无归属用户」处理（投票/已添加恒为空，管理员仍可读）。
+    """
+    identity = get_jwt_identity()
+    if isinstance(identity, bool) or not str(identity).lstrip('-').isdigit():
+        return None
+    return int(identity)
+
+
 def _apply_gender_filter(query, gender_tag):
     """按性别标签筛选人物卡。
 
@@ -516,7 +528,7 @@ def list_marketplace():
 
     sort: hot / new / most_likes / most_comments / most_disliked
     """
-    user_id = int(get_jwt_identity())
+    user_id = _jwt_user_id()
     sort = request.args.get('sort', 'hot')
     page = int(request.args.get('page', 1))
     per_page = min(int(request.args.get('per_page', 20)), 50)
@@ -606,7 +618,8 @@ def list_marketplace():
     is_admin = _is_admin()
     for p in page_items:
         d = p.to_dict(comment_count=comment_counts.get(p.id, 0),
-                      worldbook_count=wb_counts.get(p.id, 0))
+                      worldbook_count=wb_counts.get(p.id, 0),
+                      include_author=is_admin)
         d['comment_count'] = comment_counts.get(p.id, 0)
         d['user_vote'] = user_votes.get(p.id)
         d['is_adopted'] = p.id in adopted_ids
@@ -629,11 +642,11 @@ def list_marketplace():
 @marketplace_bp.route('/<int:pid>', methods=['GET'])
 @jwt_required()
 def get_marketplace_persona(pid):
-    user_id = int(get_jwt_identity())
+    user_id = _jwt_user_id()
     persona = PersonaMarketplace.query.get(pid)
     if not persona:
         return jsonify({'code': 404, 'message': '人设不存在'}), 404
-    d = persona.to_dict(include_prompt=True)
+    d = persona.to_dict(include_prompt=True, include_author=_is_admin())
     vote = MarketplaceVote.query.filter_by(persona_id=pid, user_id=user_id).first()
     d['user_vote'] = vote.vote_type if vote else None
     d['is_adopted'] = _is_adopted(pid, user_id)
@@ -648,7 +661,9 @@ def get_marketplace_persona(pid):
 @marketplace_bp.route('', methods=['POST'])
 @jwt_required()
 def publish_persona():
-    user_id = int(get_jwt_identity())
+    user_id = _jwt_user_id()
+    if user_id is None:
+        return jsonify({'code': 403, 'message': '该操作需要用户账号登录'}), 403
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
     description = (data.get('description') or '').strip()
@@ -718,7 +733,9 @@ def vote_persona(pid):
         为简化前端交互，这里同时支持通过可选参数 ``toggle=true``：
         同一类型再次点击会自动撤销并返回最新状态。
     """
-    user_id = int(get_jwt_identity())
+    user_id = _jwt_user_id()
+    if user_id is None:
+        return jsonify({'code': 403, 'message': '该操作需要用户账号登录'}), 403
     persona = PersonaMarketplace.query.get(pid)
     if not persona:
         return jsonify({'code': 404, 'message': '人设不存在'}), 404
@@ -781,7 +798,9 @@ def adopt_persona(pid):
     from models import PersonaTemplate
     # 常量在 routes.auth 中定义；此处按需导入，避免模块级循环引用
     from routes.auth import DEFAULT_USER_PROMPT
-    user_id = int(get_jwt_identity())
+    user_id = _jwt_user_id()
+    if user_id is None:
+        return jsonify({'code': 403, 'message': '该操作需要用户账号登录'}), 403
     persona = PersonaMarketplace.query.get(pid)
     if not persona:
         return jsonify({'code': 404, 'message': '人设不存在'}), 404
@@ -860,7 +879,7 @@ def update_persona(pid):
     只提交需要变更的字段（PATCH 语义），未出现的字段保持原值，
     便于前端复用已有的发布表单做局部更新。
     """
-    user_id = int(get_jwt_identity())
+    user_id = _jwt_user_id()
     is_admin = get_jwt().get('role') == 'admin'
     persona = PersonaMarketplace.query.get(pid)
     if not persona:
@@ -926,11 +945,11 @@ def update_persona(pid):
 @marketplace_bp.route('/<int:pid>', methods=['DELETE'])
 @jwt_required()
 def delete_persona(pid):
-    user_id = int(get_jwt_identity())
+    user_id = _jwt_user_id()
     persona = PersonaMarketplace.query.get(pid)
     if not persona:
         return jsonify({'code': 404, 'message': '人设不存在'}), 404
-    if persona.user_id != user_id:
+    if persona.user_id != user_id and not _is_admin():
         return jsonify({'code': 403, 'message': '只能删除自己发布的卡片'}), 403
     db.session.delete(persona)
     db.session.commit()
@@ -941,7 +960,7 @@ def delete_persona(pid):
 @marketplace_bp.route('/<int:pid>/unadopt', methods=['POST'])
 @jwt_required()
 def unadopt_persona(pid):
-    user_id = int(get_jwt_identity())
+    user_id = _jwt_user_id()
     adopt = MarketplaceAdopt.query.filter_by(persona_id=pid, user_id=user_id).first()
     if adopt:
         db.session.delete(adopt)
@@ -957,7 +976,7 @@ def list_comments(pid):
     page = int(request.args.get('page', 1))
     per_page = min(int(request.args.get('per_page', 30)), 100)
 
-    user_id = int(get_jwt_identity())
+    user_id = _jwt_user_id()
 
     query = MarketplaceComment.query.filter_by(persona_id=pid)
     if sort == 'new':
@@ -997,7 +1016,9 @@ def list_comments(pid):
 @jwt_required()
 def add_comment(pid):
     """对人物卡发表评论（扁平，不支持回复评论）。"""
-    user_id = int(get_jwt_identity())
+    user_id = _jwt_user_id()
+    if user_id is None:
+        return jsonify({'code': 403, 'message': '该操作需要用户账号登录'}), 403
     persona = PersonaMarketplace.query.get(pid)
     if not persona:
         return jsonify({'code': 404, 'message': '人设不存在'}), 404
@@ -1031,7 +1052,9 @@ def add_comment(pid):
 @marketplace_bp.route('/comments/<int:cid>/like', methods=['POST'])
 @jwt_required()
 def like_comment(cid):
-    user_id = int(get_jwt_identity())
+    user_id = _jwt_user_id()
+    if user_id is None:
+        return jsonify({'code': 403, 'message': '该操作需要用户账号登录'}), 403
     comment = MarketplaceComment.query.get(cid)
     if not comment:
         return jsonify({'code': 404, 'message': '评论不存在'}), 404
@@ -1078,7 +1101,9 @@ def daily_checkin():
     生图时优先使用用户自有的 Agnes 图片配置，未配置则回退到系统共享免费 Key，
     每次生图均消耗 1 次剩余次数。
     """
-    user_id = int(get_jwt_identity())
+    user_id = _jwt_user_id()
+    if user_id is None:
+        return jsonify({'code': 403, 'message': '该操作需要用户账号登录'}), 403
     now = local_now()
 
     # 并发安全：先原子「抢占」签到窗口——仅当不存在近 24h 的签到记录时才插入。
@@ -1137,7 +1162,7 @@ def checkin_status():
     上限来自 IMAGE_FREE_LIMIT，与图片生成共享同一上限。
     """
     from flask import current_app
-    user_id = int(get_jwt_identity())
+    user_id = _jwt_user_id()
     now = local_now()
     free_limit = int(current_app.config.get('IMAGE_FREE_LIMIT') or 5)
 

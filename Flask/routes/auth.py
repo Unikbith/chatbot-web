@@ -368,8 +368,9 @@ def send_verification_code():
     # 反邮箱枚举：不再区分「邮箱是否已注册」，一律下发验证码并返回统一提示。
     # 目标邮箱的真实归属由验证码本身保证（收不到验证码即无法利用注册/重置）。
     if not EmailService.is_configured():
-        # 不再提供开发固定验证码；未配置邮件服务时统一报错，避免生产出现弱验证码兜底
-        return jsonify({'code': 500, 'message': '邮件服务未配置，请联系管理员'}), 500
+        # 不再提供开发固定验证码；未配置邮件服务时统一报错，避免生产出现弱验证码兜底。
+        # 文案不提及「管理员」，保持「用户无感知管理员」的产品设定。
+        return jsonify({'code': 500, 'message': '邮件服务暂时不可用，请稍后再试'}), 500
 
     code = EmailService.generate_code()
     VerificationCode.create(email=email, code=code, purpose=purpose)

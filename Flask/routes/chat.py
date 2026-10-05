@@ -1711,7 +1711,7 @@ def prompt_tool_generate():
 @chat_bp.route('/memory-export', methods=['POST'])
 @jwt_required()
 def export_memory():
-    """调用 AI 总结短记忆+长记忆+最新AI回复，生成可移植的记忆档案。"""
+    """调用 AI 汇总记忆宫殿的长记忆+短记忆，生成可移植的长期记忆档案。"""
     user_id = int(get_jwt_identity())
     data = request.get_json(silent=True) or {}
     conv_id = data.get('conversation_id')
@@ -1724,13 +1724,26 @@ def export_memory():
     if not conv:
         return jsonify({'code': 404, 'message': '对话不存在'}), 404
 
-    # 获取长期记忆
-    long_memory = (conv.summary or '').strip()
+    # 长记忆：历次压缩记录 + 当前滚动摘要（去重合并，保证信息完整）
+    summary_rows = ConversationSummary.query.filter_by(
+        conversation_id=conv.id, user_id=user_id
+    ).order_by(ConversationSummary.seq.asc()).all()
+    long_parts = []
+    if (conv.summary or '').strip():
+        long_parts.append(conv.summary.strip())
+    for row in summary_rows:
+        body = (row.content or '').strip()
+        if body and body not in long_parts:
+            long_parts.append(body)
+    long_memory = '\n'.join(long_parts)
 
-    # 获取短期记忆（最近 10 条消息）
-    recent_msgs = Message.query.filter_by(conversation_id=conv.id).order_by(
-        Message.id.desc()
-    ).limit(10).all()
+    # 短记忆：尚未被压缩进摘要的近期消息（id > summary_upto_id）
+    last_id = conv.summary_upto_id or 0
+    recent_msgs = Message.query.filter(
+        Message.conversation_id == conv.id,
+        Message.id > last_id,
+        Message.role.in_(['user', 'assistant']),
+    ).order_by(Message.id.desc()).limit(30).all()
     recent_msgs.reverse()
     short_memory_lines = []
     for m in recent_msgs:
@@ -1740,34 +1753,25 @@ def export_memory():
             short_memory_lines.append(f'{role}：{content}')
     short_memory = '\n'.join(short_memory_lines)
 
-    # 获取最新一条 AI 回复
-    latest_ai_msg = Message.query.filter_by(
-        conversation_id=conv.id, role='assistant'
-    ).order_by(Message.id.desc()).first()
-    latest_ai_reply = (latest_ai_msg.content or '').strip()[:1000] if latest_ai_msg else ''
-
     # 如果没有任何记忆内容
-    if not long_memory and not short_memory and not latest_ai_reply:
+    if not long_memory and not short_memory:
         return jsonify({'code': 400, 'message': '当前对话还没有可导出的记忆内容'}), 400
 
-    # 构建总结提示词
-    summary_prompt = f"""请将以下记忆内容总结成一份简洁、可移植的记忆档案，要求：
-1. 保留关键信息、重要事件、人物关系、情感线索
-2. 去除重复和冗余内容
-3. 用第一人称或客观叙述均可，保持连贯性
-4. 控制在 500-1500 字以内
-5. 格式清晰，可分段
+    # 构建总结提示词：输出形态与「长期记忆」一致，便于导入后直接成为长记忆
+    summary_prompt = f"""请把以下「记忆宫殿」中的记忆内容整理成一份完整、可移植的长期记忆档案，要求：
+1. 保留所有关键记忆：人物关系变化、重要承诺、用户偏好与雷点、关键事件结果、情感线索
+2. 合并长记忆与短记忆中的重复信息，做到不遗漏
+3. 去除寒暄、重复表述、过程性描写、已经失效的临时状态和无关闲聊
+4. 用第三人称客观陈述，中文，格式清晰可分段
+5. 篇幅控制在 500-1500 字以内
 
-【长期记忆】
+【长记忆（历史压缩摘要）】
 {long_memory or '（暂无）'}
 
-【近期对话】
+【短记忆（近期对话）】
 {short_memory or '（暂无）'}
 
-【最新AI回复】
-{latest_ai_reply or '（暂无）'}
-
-请输出总结后的记忆档案："""
+请直接输出整理后的长期记忆档案："""
 
     # 复用对话主流程的提供商解析：指定配置 > 已启用配置 > 免费 API
     provider = _get_chat_provider(user_id, provider_id)
@@ -1797,7 +1801,8 @@ def export_memory():
 
     if response is None or getattr(response, 'status_code', None) != 200:
         current_app.logger.warning(f'[记忆导出] AI总结失败: {error}')
-        return jsonify({'code': 500, 'message': f'AI总结失败: {error}'}), 500
+        detail = (error or '').strip() or '模型服务暂时不可用，请稍后再试'
+        return jsonify({'code': 500, 'message': f'AI总结失败: {detail}'}), 500
 
     try:
         content = (response.json()['choices'][0]['message']['content'] or '').strip()
@@ -1822,7 +1827,7 @@ def export_memory():
     return jsonify({'code': 200, 'data': {
         'content': content,
         'model': model,
-        'source_chars': len(long_memory) + len(short_memory) + len(latest_ai_reply),
+        'source_chars': len(long_memory) + len(short_memory),
         'result_chars': len(content),
         'token_cost': token_cost,
     }})

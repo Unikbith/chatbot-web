@@ -545,7 +545,6 @@ function formatCount(n) {
 
 const props = defineProps({
   modelValue: Boolean,
-  currentUserId: { type: Number, default: null },
   // 人物卡列表版本号：人物卡增删改后由主页面自增，用于实时刷新「已添加」状态
   personaVersion: { type: Number, default: 0 },
 })
@@ -617,9 +616,7 @@ const promptExpanded = ref(false)
 watch(detailVisible, (val) => {
   if (val) promptExpanded.value = false
 })
-const isCreator = computed(() =>
-  detailData.value && props.currentUserId && detailData.value.author_id === props.currentUserId
-)
+// 编辑/删除按钮的显隐统一由后端下发的 can_edit 决定（管理员由后端放行）
 
 // ========== 编辑卡片 ==========
 const showEditDialog = ref(false)

@@ -1,5 +1,55 @@
 <template>
-  <div class="admin-page">
+  <!-- 未登录时展示内嵌登录页：管理后台唯一入口为 /chatbotadmin，登录态由本组件自管 -->
+  <div v-if="!authed" class="admin-login-page">
+    <div class="login-card">
+      <div class="brand">
+        <img :src="brandIcon" class="brand-img" alt="Confide" />
+        <span class="brand-text">{{ t('管理后台', 'Admin Panel') }}</span>
+      </div>
+      <p class="subtitle">{{ t('管理员专用登录入口（账号密码由服务端 .env 配置）', 'Admin-only login. Credentials come from the server .env') }}</p>
+
+      <el-form @submit.prevent="doLogin" class="login-form">
+        <el-form-item>
+          <el-input
+            v-model="loginUsername"
+            :placeholder="t('管理员账号', 'Admin username')"
+            size="large"
+            autocomplete="username"
+            :prefix-icon="User"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-input
+            v-model="loginPassword"
+            type="password"
+            :placeholder="t('管理员密码', 'Admin password')"
+            size="large"
+            show-password
+            autocomplete="current-password"
+            :prefix-icon="Lock"
+            @keyup.enter="doLogin"
+          />
+        </el-form-item>
+        <el-button
+          type="primary"
+          class="login-btn"
+          size="large"
+          :loading="loginLoading"
+          @click="doLogin"
+        >
+          {{ t('登 录', 'Login') }}
+        </el-button>
+      </el-form>
+
+      <div class="back-link">
+        <el-button link type="primary" @click="router.push('/')">
+          {{ t('返回 Confide 主界面', 'Back to Confide') }}
+        </el-button>
+      </div>
+    </div>
+  </div>
+
+  <div v-else class="admin-page">
     <!-- 顶部导航 -->
     <header class="admin-header">
       <div class="header-brand">
@@ -415,7 +465,7 @@
             <el-button size="small" :icon="Refresh" @click="loadMarketplaceCards">{{ t('刷新', 'Refresh') }}</el-button>
           </div>
 
-          <!-- 筛选：关键词（创建者用户名/邮箱）+ 人物卡性别 + 创建者性别 -->
+          <!-- 筛选：关键词（创建者用户名/邮箱）+ 人物卡性别 + 创建者性别，均走服务端 -->
           <div class="filter-panel">
             <el-input
               v-model="mpFilters.keyword"
@@ -426,11 +476,9 @@
               @input="applyMpFilters"
             />
             <el-select
-              v-model="mpFilters.genders"
-              multiple
-              collapse-tags
-              collapse-tags-tooltip
+              v-model="mpFilters.gender"
               :placeholder="t('人物卡性别', 'Persona gender')"
+              clearable
               size="small"
               class="filter-select"
               @change="applyMpFilters"
@@ -452,7 +500,7 @@
               <el-option label="神秘" value="神秘" />
             </el-select>
             <el-button size="small" plain @click="resetMpFilters">{{ t('重置', 'Reset') }}</el-button>
-            <span class="filter-count">{{ t('命中', 'Matched') }} {{ mpCards.length }} / {{ mpAllCards.length }}</span>
+            <span class="filter-count">{{ t('命中', 'Matched') }} {{ mpTotal }}</span>
           </div>
 
           <el-table :data="mpCards" v-loading="mpLoading" class="admin-table">
@@ -505,6 +553,16 @@
               </template>
             </el-table-column>
           </el-table>
+          <div v-if="mpTotal > mpPageSize" class="pl-pagination">
+            <el-pagination
+              small
+              layout="prev, pager, next, total"
+              :current-page="mpPage"
+              :page-size="mpPageSize"
+              :total="mpTotal"
+              @current-change="loadMarketplaceCards"
+            />
+          </div>
         </el-tab-pane>
 
         <el-tab-pane :label="t('提示词记录', 'Prompt Tool Logs')" name="promptLogs">
@@ -1223,7 +1281,7 @@
 import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Back, SwitchButton, Monitor, View, Download, Delete, Edit, ChatLineRound, Document, Search, Picture } from '@element-plus/icons-vue'
+import { Refresh, Back, SwitchButton, Monitor, View, Download, Delete, Edit, ChatLineRound, Document, Search, Picture, User, Lock } from '@element-plus/icons-vue'
 import { adminApi, resAi, uploadApi } from '@/utils/resAi'
 import logger from '@/utils/logger'
 import { t } from '../i18n'
@@ -1232,6 +1290,36 @@ import brandIcon from '@/assets/icon/ChatBotIcon.png'
 
 const router = useRouter()
 const adminName = ref(localStorage.getItem('admin_username') || '')
+// 管理后台唯一入口 /chatbotadmin：未登录时展示内嵌登录页，不再跳转独立 /admin 路由
+const authed = ref(!!localStorage.getItem('admin_token'))
+const loginUsername = ref('')
+const loginPassword = ref('')
+const loginLoading = ref(false)
+
+async function doLogin() {
+  if (!loginUsername.value.trim() || !loginPassword.value) {
+    ElMessage.warning(t('请输入管理员账号和密码', 'Enter admin username and password'))
+    return
+  }
+  loginLoading.value = true
+  try {
+    const res = await adminApi.login(loginUsername.value.trim(), loginPassword.value)
+    if (res.code === 200) {
+      localStorage.setItem('admin_token', res.data.access_token)
+      localStorage.setItem('admin_username', res.data.username)
+      adminName.value = res.data.username
+      authed.value = true
+      ElMessage.success(t('登录成功', 'Signed in'))
+      loadAll()
+    } else {
+      ElMessage.error(res.message || t('登录失败', 'Login failed'))
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || e.message || t('登录失败', 'Login failed'))
+  } finally {
+    loginLoading.value = false
+  }
+}
 
 const stats = ref({})
 const users = ref([])
@@ -1273,10 +1361,13 @@ const filters = ref(emptyFilters())
 // 卡片广场
 const mpCards = ref([])
 const mpLoading = ref(false)
-const mpAllCards = ref([])
+const mpTotal = ref(0)
+const mpPage = ref(1)
+const mpPageSize = ref(50)
+const mpLoaded = ref(false)
 const mpFilters = ref({
   keyword: '',
-  genders: [], // 人物卡性别：男 / 女 / 非二元
+  gender: '', // 人物卡性别：男 / 女 / 非二元
   creatorGender: '', // 创建者（用户）性别：男 / 女 / 神秘
 })
 
@@ -1299,34 +1390,14 @@ const mpDetailVisible = ref(false)
 const mpDetailLoading = ref(false)
 const mpDetailData = ref(null)
 
+// 筛选变化 → 回到第一页重新请求（筛选条件全部由服务端执行）
 function applyMpFilters() {
-  const kw = (mpFilters.value.keyword || '').trim().toLowerCase()
-  const gs = mpFilters.value.genders
-  const cg = mpFilters.value.creatorGender
-  mpCards.value = mpAllCards.value.filter((c) => {
-    if (kw) {
-      const hay = `${c.author_username || ''} ${c.author_email || ''}`.toLowerCase()
-      if (!hay.includes(kw)) return false
-    }
-    if (gs.length) {
-      // 人物卡 gender 筛选：「神秘」与「自定义 / 未填写」一并归入非二元桶
-      const rawGender = c.gender || ''
-      const tag =
-        rawGender === '男' ? '男' :
-        rawGender === '女' ? '女' :
-        '非二元'
-      if (!gs.includes(tag)) return false
-    }
-    if (cg) {
-      // 创建者（用户）性别：直接匹配 users.gender
-      if ((c.author_gender || '') !== cg) return false
-    }
-    return true
-  })
+  mpPage.value = 1
+  loadMarketplaceCards(1)
 }
 
 function resetMpFilters() {
-  mpFilters.value = { keyword: '', genders: [], creatorGender: '' }
+  mpFilters.value = { keyword: '', gender: '', creatorGender: '' }
   applyMpFilters()
 }
 
@@ -1781,26 +1852,24 @@ async function loadFeedback() {
   }
 }
 
-async function loadMarketplaceCards() {
+async function loadMarketplaceCards(page = 1) {
   mpLoading.value = true
+  mpPage.value = page
   try {
-    // 一次性拉完所有页，存入 mpAllCards 用于筛选；mpCards 仅作为渲染列表
-    const collected = []
-    let page = 1
-    let pages = 1
-    do {
-      const res = await adminApi.marketplaceCards(page)
-      if (res.code === 200) {
-        const data = res.data || {}
-        collected.push(...(data.items || []))
-        pages = data.pages || 1
-        page += 1
-      } else {
-        break
-      }
-    } while (page <= pages)
-    mpAllCards.value = collected
-    applyMpFilters()
+    // 服务端分页 + 服务端筛选：不再一次性拉全量再前端过滤
+    const res = await adminApi.marketplaceCards(page, {
+      keyword: mpFilters.value.keyword,
+      gender: mpFilters.value.gender,
+      creator_gender: mpFilters.value.creatorGender,
+    })
+    if (res.code === 200) {
+      const data = res.data || {}
+      mpCards.value = data.items || []
+      mpTotal.value = data.total || 0
+      mpLoaded.value = true
+    } else {
+      ElMessage.warning(t('加载卡片失败', 'Failed to load cards'))
+    }
   } catch (e) {
     ElMessage.error(t('加载卡片失败', 'Failed to load cards'))
   } finally {
@@ -2164,7 +2233,7 @@ async function deleteMpCard(card) {
     const res = await adminApi.deleteMarketplaceCard(card.id)
     if (res.code === 200) {
       ElMessage.success(t('已删除', 'Deleted'))
-      loadMarketplaceCards()
+      loadMarketplaceCards(mpPage.value)
     }
   } catch (e) {
     if (e !== 'cancel') ElMessage.error(t('删除失败', 'Delete failed'))
@@ -2266,24 +2335,24 @@ function doLogout() {
     { type: 'warning' }
   ).then(() => {
     adminApi.logout()
-    router.replace('/admin')
+    authed.value = false
   }).catch(() => {})
 }
 
 onMounted(async () => {
-  // 校验令牌是否仍有效，失效则回登录页
+  // 校验令牌是否仍有效，失效则回到内嵌登录页
   try {
     const res = await adminApi.status()
-    if (res.code !== 200) router.replace('/admin')
+    if (res.code !== 200) authed.value = false
   } catch (e) {
-    router.replace('/admin')
+    authed.value = false
   }
-  await loadAll()
+  if (authed.value) await loadAll()
 })
 
 // 切换到「卡片广场」Tab 时自动加载一次（首次进入也会触发）
 watch(activeTab, (val) => {
-  if (val === 'marketplace' && mpAllCards.value.length === 0 && !mpLoading.value) {
+  if (val === 'marketplace' && !mpLoaded.value && !mpLoading.value) {
     loadMarketplaceCards()
   }
   if (val === 'feedback' && feedbackList.value.length === 0 && !feedbackLoading.value) {
@@ -2302,6 +2371,57 @@ function onTabChange(name) {
 </script>
 
 <style scoped>
+.admin-login-page {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #fbf3ea 0%, #f3e3d0 100%);
+  padding: 20px;
+}
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: 0 12px 36px rgba(120, 84, 56, .16);
+  padding: 40px 36px 32px;
+  text-align: center;
+}
+.login-card .brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.login-card .brand-img {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+.login-card .brand-text {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary, #4a3b2e);
+}
+.login-card .subtitle {
+  font-size: 12.5px;
+  color: var(--text-muted, #9a8b7a);
+  margin-bottom: 26px;
+  line-height: 1.6;
+}
+.login-card .login-form {
+  text-align: left;
+}
+.login-card .login-btn {
+  width: 100%;
+  margin-top: 4px;
+}
+.login-card .back-link {
+  margin-top: 18px;
+}
 .admin-page {
   height: 100vh;
   height: 100dvh;
