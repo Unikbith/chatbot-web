@@ -13,7 +13,7 @@ from rich_marker import (
 )
 from models import (ModelProvider, Conversation, Message, PersonaTemplate,
                     UserSettings, PromptToolLog, ConversationSummary,
-                    WorldBookEntry, AiUsageLog, User, local_now, MemoryCard)
+                    WorldBookEntry, AiUsageLog, User, local_now)
 from services.ai_service import AIService, FreeAPIProvider
 from services.markdown_streamer import (
     strip_html_to_text,
@@ -479,15 +479,6 @@ CONTEXT_MAX_CHARS = 6000   # 历史正文总字数预算：长回复场景下条
 CONTEXT_MIN_KEEP = 6       # 字符预算收窄时至少保留最近几条原文，避免刚说的话也被砍掉
 MAX_LONG_MEMORY_CHARS = 600  # 长期记忆注入上限，避免摘要无限膨胀
 
-QUICK_ACTION_PROMPTS = {
-    'continue': '自然延续当前剧情和情绪，不要重复上一段，推进一个新的小动作或新细节。',
-    'rewrite': '重写上一条 AI 回复：保留剧情事实和人物关系，只调整表达、节奏和细节。',
-    'more_intimate': '在不违背角色设定和当前关系阶段的前提下，让表达更亲密、更关注用户，但不要突然无理由深爱。',
-    'more_restrained': '让情绪和动作更克制、更含蓄，减少直白表白，保持角色边界和真实感。',
-    'shorter': '压缩本条回复，只保留最有价值的动作、对白和情绪变化，删除重复描写。',
-    'change_scene': '平稳地推进到一个新的时间或场景，用自然过渡承接上一轮剧情。',
-    'lock_voice': '严格锁定角色已有的称呼、口癖、句式和态度，不要跳出角色，也不要改用旁白口吻。',
-}
 DEFAULT_REPLY_TEMPLATE_JSON = json.dumps({
     'preset': 'blush',
     'name': '脸红',
@@ -862,42 +853,6 @@ def _roleplay_subject_block():
     )
 
 
-def _memory_cards_block(conv, user_id):
-    if not conv:
-        return ''
-    cards = MemoryCard.query.filter_by(
-        conversation_id=conv.id, user_id=user_id
-    ).order_by(MemoryCard.importance.desc(), MemoryCard.updated_at.desc()).limit(20).all()
-    if not cards:
-        return ''
-    lines = []
-    used = 0
-    for c in cards:
-        line = f'- [{c.card_type}] {c.title}: {(c.content or "").strip()}'
-        if used + len(line) > 1200:
-            break
-        lines.append(line)
-        used += len(line)
-    if not lines:
-        return ''
-    return '\n\n【用户确认的长期记忆】只在与当前剧情相关时自然使用，不要逐条复述：\n' + '\n'.join(lines)
-
-
-def _relationship_stage_block(conv):
-    if not conv:
-        return ''
-    count = Message.query.filter_by(conversation_id=conv.id).count()
-    if count >= 90:
-        stage, style = '依赖', '态度可以稳定而自然，但不要变成无条件顺从，仍保留角色自己的边界。'
-    elif count >= 50:
-        stage, style = '信任', '可以更主动地回应情绪，出现共同回忆和更自然的关心。'
-    elif count >= 20:
-        stage, style = '熟悉', '可以记得用户偏好，允许更自然的称呼和小幅主动。'
-    else:
-        stage, style = '陌生', '保持角色原有距离感，不要突然亲密或承诺。'
-    return f'\n\n【关系阶段】当前阶段：{stage}。{style}关系变化要渐进，不能跳过阶段。'
-
-
 def _append_global_prompt(base, enabled=True):
     """把全局追加提示词 GLOBAL_APPEND_PROMPT 拼在系统提示词后面。
 
@@ -913,21 +868,17 @@ def _append_global_prompt(base, enabled=True):
     return base + "\n\n" + extra
 
 
-def _get_system_prompt(conv, user_id, persona_id=None, custom_prompt=None, quick_action=None):
+def _get_system_prompt(conv, user_id, persona_id=None, custom_prompt=None):
     """最终系统提示词 = 解析出的本体 + 玩家设定 + 全局追加提示词（受「提示词兜底」开关控制）"""
     body = _resolve_system_prompt(conv, user_id, persona_id, custom_prompt)
     body = (body or '') + _persona_identity_block(conv, user_id, persona_id)
     # 玩家设定紧跟 AI 提示词之后：先立住 AI 是谁，再交代玩家是谁
     body = (body or '') + _user_persona_block(conv, user_id, persona_id)
     body = (body or '') + _roleplay_subject_block()
-    body = (body or '') + _memory_cards_block(conv, user_id)
-    body = (body or '') + _relationship_stage_block(conv)
     # 提示词兜底默认关闭：那段兜底词有几千 token，默认带上会明显抬高每轮成本
-    enabled = bool(getattr(conv, 'append_prompt_enabled', False)) if conv else False
+    flag = getattr(conv, 'append_prompt_enabled', None) if conv else None
+    enabled = True if flag is None else bool(flag)
     body = _append_global_prompt(body, enabled=enabled)
-    action_prompt = QUICK_ACTION_PROMPTS.get(quick_action or '')
-    if action_prompt:
-        body += '\n\n【本轮快捷操作】' + action_prompt
     return body
 
 
@@ -1031,7 +982,6 @@ def chat():
     conversation_id = data.get('conversation_id')
     persona_id = data.get('persona_id')
     model_id = data.get('model_id')
-    quick_action = (data.get('quick_action') or '').strip()
 
     # 获取用户设置
     settings = _get_user_settings(user_id)
@@ -1083,6 +1033,7 @@ def chat():
             persona_id=persona_id,
             system_prompt=system_prompt or None,
             temperature=temperature,
+            append_prompt_enabled=True,
             rich_marker_enabled=True,
             reply_template=DEFAULT_REPLY_TEMPLATE_JSON,
         )
@@ -1143,9 +1094,7 @@ def chat():
             formatted_messages = formatted_messages[summarized_count:]
 
     # 插入系统提示词（历史摘要一并拼入，位于输出格式约定之前）
-    final_prompt = _get_system_prompt(
-        conv, user_id, persona_id, system_prompt, quick_action=quick_action
-    )
+    final_prompt = _get_system_prompt(conv, user_id, persona_id, system_prompt)
     final_prompt = final_prompt + _memory_summary_block(conv)
 
     # 世界书：按最近对话命中关键词，按需注入设定条目（无条目时返回空串，行为不变）
@@ -1284,6 +1233,13 @@ def chat():
                     is_free_api=is_free_api,
                 )
                 saved = True
+                rounds = Message.query.filter_by(conversation_id=conversation_id, role='user').count()
+                if rounds > 3 and getattr(conv, 'append_prompt_enabled', False):
+                    conv.append_prompt_enabled = False
+                    db.session.commit()
+                    note = '\n\n（已完成三轮对话，提示词兜底已自动关闭，以减少后续 Token 消耗。）'
+                    yield sse_content(note)
+                    yield sse_html(render_markdown(note))
 
             # token 用量（有厂商才返回，缺失时前端不展示）
             if prompt_tokens or completion_tokens:
@@ -1471,6 +1427,13 @@ def vision_chat():
                     is_free_api=isinstance(provider, FreeAPIProvider),
                 )
                 saved = True
+                rounds = Message.query.filter_by(conversation_id=conversation_id, role='user').count()
+                if rounds > 3 and getattr(conv, 'append_prompt_enabled', False):
+                    conv.append_prompt_enabled = False
+                    db.session.commit()
+                    note = '\n\n（已完成三轮对话，提示词兜底已自动关闭，以减少后续 Token 消耗。）'
+                    yield sse_content(note)
+                    yield sse_html(render_markdown(note))
 
             if usage_holder[0] or usage_holder[1]:
                 yield sse_tokens((usage_holder[0] or 0) + (usage_holder[1] or 0))
@@ -1743,19 +1706,12 @@ def export_memory():
     summaries = ConversationSummary.query.filter_by(
         conversation_id=conv.id, user_id=user_id
     ).order_by(ConversationSummary.seq.desc()).limit(6).all()
-    cards = MemoryCard.query.filter_by(
-        conversation_id=conv.id, user_id=user_id
-    ).order_by(MemoryCard.importance.desc(), MemoryCard.updated_at.desc()).limit(30).all()
     parts = []
     if conv.summary:
         parts.append('【当前长期记忆】\n' + conv.summary.strip()[:1200])
     if summaries:
         parts.append('【近期压缩记录】\n' + '\n'.join(
             f'{s.seq}. {(s.content or "").strip()[:500]}' for s in reversed(summaries)
-        ))
-    if cards:
-        parts.append('【记忆卡】\n' + '\n'.join(
-            f'- [{c.card_type}] {c.title}: {(c.content or "").strip()[:300]}' for c in cards
         ))
     material = '\n\n'.join(parts).strip()
     if not material:

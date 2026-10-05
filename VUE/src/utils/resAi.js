@@ -381,21 +381,6 @@ const conversationApi = {
   async clear(id) {
     return resAi.delete(`/api/conversations/${id}/messages`);
   },
-  async memoryCenter(id) {
-    return resAi.get(`/api/conversations/${id}/memory-center`);
-  },
-  async createMemory(id, data) {
-    return resAi.post(`/api/conversations/${id}/memories`, data);
-  },
-  async updateMemory(id, cardId, data) {
-    return resAi.put(`/api/conversations/${id}/memories/${cardId}`, data);
-  },
-  async removeMemory(id, cardId) {
-    return resAi.delete(`/api/conversations/${id}/memories/${cardId}`);
-  },
-  async dailyEvent(id) {
-    return resAi.get(`/api/conversations/${id}/daily-event`);
-  },
   async importMemory(data) {
     return resAi.post('/api/conversations/import-memory', data);
   },
@@ -606,8 +591,8 @@ const adminApi = {
   async supportThread(threadId) {
     return adminReq.get(`/api/feedback/admin/support-chats/${threadId}`);
   },
-  async replySupportThread(threadId, content) {
-    return adminReq.post(`/api/feedback/admin/support-chats/${threadId}`, { content });
+  async replySupportThread(threadId, content, imageUrl = '') {
+    return adminReq.post(`/api/feedback/admin/support-chats/${threadId}`, { content, image_url: imageUrl || undefined });
   },
   logout() {
     localStorage.removeItem("admin_token");
@@ -616,11 +601,14 @@ const adminApi = {
 };
 
 const supportApi = {
+  async status() {
+    return resAi.get('/api/feedback/support/status');
+  },
   async getThread() {
     return resAi.get('/api/feedback/support');
   },
-  async send(content) {
-    return resAi.post('/api/feedback/support', { content });
+  async send(content, imageUrl = '') {
+    return resAi.post('/api/feedback/support', { content, image_url: imageUrl || undefined });
   },
 };
 

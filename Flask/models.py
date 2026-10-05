@@ -355,7 +355,7 @@ class Conversation(db.Model):
     # 提示词兜底：开启后，后端写死的 GLOBAL_APPEND_PROMPT 才会接在人物设定之后。
     # 默认关闭 —— 那段兜底词有几千 token，默认带上会显著抬高每轮输入成本，
     # 只有在「AI 生成不出想要的内容」时才由用户自行打开。
-    append_prompt_enabled = db.Column(db.Boolean, default=False, nullable=True)
+    append_prompt_enabled = db.Column(db.Boolean, default=True, nullable=True)
     # 界面标记（富消息）：开启后把「【状态】【进度】【选项】」等标记约定接在系统提示词后，
     # 模型输出的标记由前端 RichMessage.vue 渲染成状态栏/进展条/可点选项。
     # 默认值跟随全局开关 RICH_MESSAGE_ENABLED（见 rich_marker.py）：
@@ -930,40 +930,6 @@ class AiUsageLog(db.Model):
         }
 
 
-class MemoryCard(db.Model):
-    """用户可编辑的长期记忆卡片，用于关系、时间线与偏好记忆。"""
-    __tablename__ = 'memory_cards'
-
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
-    conversation_id = db.Column(db.Integer, db.ForeignKey('conversations.id'), nullable=False, index=True)
-    card_type = db.Column(db.String(20), default='fact', nullable=False)
-    title = db.Column(db.String(200), nullable=False, default='')
-    content = db.Column(db.Text, nullable=False, default='')
-    importance = db.Column(db.Integer, default=1, nullable=False)
-    source = db.Column(db.String(20), default='user', nullable=False)
-    created_at = db.Column(db.DateTime, default=local_now)
-    updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
-
-    __table_args__ = (
-        db.Index('idx_memory_cards_conv_updated', 'conversation_id', 'updated_at'),
-        db.Index('idx_memory_cards_user_updated', 'user_id', 'updated_at'),
-    )
-
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'conversation_id': self.conversation_id,
-            'card_type': self.card_type,
-            'title': self.title,
-            'content': self.content,
-            'importance': self.importance,
-            'source': self.source,
-            'created_at': iso_time(self.created_at),
-            'updated_at': iso_time(self.updated_at),
-        }
-
-
 class SupportThread(db.Model):
     """用户与管理员之间的匿名反馈会话（每个用户一个线程）。"""
     __tablename__ = 'support_threads'
@@ -988,6 +954,9 @@ class SupportMessage(db.Model):
     thread_id = db.Column(db.Integer, db.ForeignKey('support_threads.id'), nullable=False, index=True)
     sender = db.Column(db.String(10), nullable=False)
     content = db.Column(db.Text, nullable=False)
+    image_url = db.Column(db.String(500), nullable=True)
+    read_by_user = db.Column(db.Boolean, default=False, nullable=False)
+    read_by_admin = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=local_now, index=True)
 
     __table_args__ = (
@@ -1000,5 +969,8 @@ class SupportMessage(db.Model):
             'thread_id': self.thread_id,
             'sender': self.sender,
             'content': self.content,
+            'image_url': self.image_url,
+            'read_by_user': bool(self.read_by_user),
+            'read_by_admin': bool(self.read_by_admin),
             'created_at': iso_time(self.created_at),
         }

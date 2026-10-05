@@ -23,14 +23,14 @@
           <p class="cv-panel__hint">{{ t('决定 AI 在本对话中的性格与口吻', 'Shapes how the AI behaves in this chat') }}</p>
           <el-select
             v-model="form.persona_id"
-            clearable
+            :clearable="false"
             class="cv-field"
-            :placeholder="t('使用默认AI人设', 'Use default AI persona')"
+            :placeholder="t('选择本对话的人物卡', 'Select a persona for this chat')"
           >
             <el-option
               v-for="p in aiPersonas"
               :key="p.id"
-              :label="p.is_default ? t('默认') + ' · ' + p.name : p.name"
+              :label="p.name"
               :value="p.id"
             >
               <div class="persona-opt">
@@ -429,7 +429,7 @@ const form = reactive({
   temperature: null, frequency_penalty: null, presence_penalty: null,
   auto_play_voice: false,
   summary_threshold: 10,
-  append_prompt_enabled: false,
+  append_prompt_enabled: true,
   // 界面标记默认开启（与后端 RICH_MESSAGE_ENABLED 默认值一致）
   rich_marker_enabled: true,
   // 回复渲染模板：默认使用脸红（不再有"不使用"这一档）
@@ -474,7 +474,7 @@ function resetForm() {
   form.presence_penalty = (conv.presence_penalty != null && conv.presence_penalty !== '') ? conv.presence_penalty : null
   form.auto_play_voice = !!conv.auto_play_voice
   form.summary_threshold = (conv.summary_threshold != null && conv.summary_threshold !== '') ? Number(conv.summary_threshold) : 10
-  form.append_prompt_enabled = !!conv.append_prompt_enabled
+  form.append_prompt_enabled = conv.append_prompt_enabled == null ? true : !!conv.append_prompt_enabled
   // 未存过（null/undefined）按全局默认「开启」处理：
   // 后端 resolve_rich_marker_enabled 对 NULL 也是回落到全局开关，
   // 这里若按 !!null 显示成关闭，就会出现「界面显示关、实际在注入」的不一致。

@@ -181,8 +181,6 @@ def _ensure_runtime_indexes(app):
         'idx_ai_usage_user_created',
         'idx_ai_usage_model_created',
         'idx_ai_usage_conversation_created',
-        'idx_memory_cards_conv_updated',
-        'idx_memory_cards_user_updated',
         'idx_support_messages_thread_created',
     }
     try:
@@ -277,6 +275,17 @@ def _ensure_schema_columns(app):
             if 'ai_usage_logs' not in inspector.get_table_names():
                 db.create_all()
                 app.logger.info('[迁移] 已创建 ai_usage_logs 表')
+            if 'support_messages' in inspector.get_table_names():
+                cols = {c['name'] for c in inspector.get_columns('support_messages')}
+                for cname, ctype in (
+                    ('image_url', 'VARCHAR(500)'),
+                    ('read_by_user', 'BOOLEAN DEFAULT 0'),
+                    ('read_by_admin', 'BOOLEAN DEFAULT 0'),
+                ):
+                    if cname not in cols:
+                        with db.engine.begin() as conn:
+                            conn.execute(text(f'ALTER TABLE support_messages ADD COLUMN {cname} {ctype}'))
+                        app.logger.info(f'[迁移] 已为 support_messages 增加 {cname} 字段')
             # messages.prompt_tokens / completion_tokens - 单条回复的 token 用量
             if 'messages' in inspector.get_table_names():
                 cols = {c['name'] for c in inspector.get_columns('messages')}

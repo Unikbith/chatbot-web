@@ -619,30 +619,6 @@
         </el-tab-pane>
 
         <el-tab-pane :label="t('对话素材记录', 'Media History')" name="mediaLogs">
-          <div class="admin-toolbar support-toolbar">
-            <span class="admin-title">{{ t('匿名反馈会话', 'Anonymous Support Chats') }}</span>
-            <el-button size="small" :icon="Refresh" @click="loadSupportChats">{{ t('刷新反馈', 'Refresh chats') }}</el-button>
-          </div>
-          <el-table :data="supportChats" v-loading="supportChatsLoading" size="small" stripe class="admin-table support-table">
-            <el-table-column prop="user.id" label="UID" width="70" align="center" />
-            <el-table-column prop="anonymous_id" :label="t('匿名ID', 'Anonymous ID')" width="130" />
-            <el-table-column :label="t('用户信息', 'User')" min-width="180">
-              <template #default="{ row }">{{ row.user?.username }} · {{ row.user?.email }}</template>
-            </el-table-column>
-            <el-table-column :label="t('最近消息', 'Last message')" min-width="200" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.last_message?.content || '-' }}</template>
-            </el-table-column>
-            <el-table-column :label="t('未读', 'Unread')" width="70" align="center">
-              <template #default="{ row }"><el-badge v-if="row.admin_unread" :value="row.admin_unread" /></template>
-            </el-table-column>
-            <el-table-column :label="t('时间', 'Time')" width="150">
-              <template #default="{ row }">{{ formatTime(row.last_message_at) }}</template>
-            </el-table-column>
-            <el-table-column :label="t('操作', 'Actions')" width="90" align="center">
-              <template #default="{ row }"><el-button size="small" type="primary" plain @click="openSupportChat(row)">{{ t('回复', 'Reply') }}</el-button></template>
-            </el-table-column>
-          </el-table>
-
           <div class="admin-toolbar">
             <span class="admin-title">{{ t('对话素材设置历史', 'Conversation Media History') }}</span>
             <el-button size="small" type="danger" :disabled="!mediaSelected.length" :icon="Delete" @click="deleteMediaLogs">
@@ -731,6 +707,33 @@
             style="margin-top: 12px; justify-content: flex-end"
           />
         </el-tab-pane>
+        <el-tab-pane :label="t('匿名反馈会话', 'Support Chat')" name="supportChats">
+          <div class="admin-toolbar support-toolbar">
+            <span class="admin-title">{{ t('匿名反馈会话', 'Anonymous Support Chats') }}</span>
+            <el-button size="small" :icon="Refresh" @click="loadSupportChats">{{ t('刷新反馈', 'Refresh chats') }}</el-button>
+          </div>
+          <el-table :data="supportChats" v-loading="supportChatsLoading" size="small" stripe class="admin-table support-table">
+            <el-table-column prop="user.id" label="UID" width="70" align="center" />
+            <el-table-column prop="anonymous_id" :label="t('匿名ID', 'Anonymous ID')" width="130" />
+            <el-table-column :label="t('用户信息', 'User')" min-width="180">
+              <template #default="{ row }">{{ row.user?.username }} · {{ row.user?.email }}</template>
+            </el-table-column>
+            <el-table-column :label="t('最近消息', 'Last message')" min-width="200" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.last_message?.content || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('未读', 'Unread')" width="70" align="center">
+              <template #default="{ row }"><el-badge v-if="row.admin_unread" :value="row.admin_unread" /></template>
+            </el-table-column>
+            <el-table-column :label="t('时间', 'Time')" width="150">
+              <template #default="{ row }">{{ formatTime(row.last_message_at) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('操作', 'Actions')" width="90" align="center">
+              <template #default="{ row }"><el-button size="small" type="primary" plain @click="openSupportChat(row)">{{ t('回复', 'Reply') }}</el-button></template>
+            </el-table-column>
+          </el-table>
+
+        </el-tab-pane>
+
       </el-tabs>
 
       <!-- 管理员编辑广场卡片 -->
@@ -995,9 +998,6 @@
             <el-button size="small" plain :icon="Refresh" @click="refreshConversationMessages">
               {{ t('刷新最新', 'Refresh latest') }}
             </el-button>
-            <el-button size="small" plain @click="_scrollMessageDrawerToTop">
-              {{ t('回到顶部', 'Back to top') }}
-            </el-button>
           </div>
         </div>
 
@@ -1057,13 +1057,18 @@
         <div class="support-admin-messages">
           <div v-for="m in supportDetail.messages" :key="m.id" class="support-admin-msg" :class="m.sender">
             <div>{{ m.content }}</div>
-            <time>{{ formatTime(m.created_at) }}</time>
+            <el-image v-if="m.image_url" :src="m.image_url" fit="contain" class="support-admin-image" />
+            <time>{{ formatTime(m.created_at) }}<template v-if="m.sender === 'admin'"> · {{ m.read_by_user ? t('已读', 'Read') : t('未读', 'Unread') }}</template></time>
           </div>
         </div>
         <div class="support-admin-reply">
+          <el-upload :show-file-list="false" :before-upload="uploadSupportReplyImage" accept="image/*">
+            <el-button :icon="Picture">{{ t('图片', 'Image') }}</el-button>
+          </el-upload>
           <el-input v-model="supportReply" type="textarea" :rows="2" maxlength="2000" :placeholder="t('回复用户', 'Reply to user')" />
           <el-button type="primary" @click="replySupport">{{ t('发送回复', 'Send reply') }}</el-button>
         </div>
+        <div v-if="supportReplyImage" class="support-admin-image-preview"><el-image :src="supportReplyImage" fit="contain" /></div>
       </div>
     </el-dialog>
 
@@ -1184,8 +1189,8 @@
 import { ref, reactive, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Back, SwitchButton, Monitor, View, Download, Delete, Edit, ChatLineRound, Document, Search } from '@element-plus/icons-vue'
-import { adminApi, resAi } from '@/utils/resAi'
+import { Refresh, Back, SwitchButton, Monitor, View, Download, Delete, Edit, ChatLineRound, Document, Search, Picture } from '@element-plus/icons-vue'
+import { adminApi, resAi, uploadApi } from '@/utils/resAi'
 import logger from '@/utils/logger'
 import { t } from '../i18n'
 import ThumbIcon from '../components/ThumbIcon.vue'
@@ -1904,6 +1909,7 @@ const supportDialogVisible = ref(false)
 const supportDialogLoading = ref(false)
 const supportDetail = ref({ thread: null, user: null, messages: [] })
 const supportReply = ref('')
+const supportReplyImage = ref('')
 const mediaPage = ref(1)
 const mediaPerPage = 20
 const mediaTotal = ref(0)
@@ -1942,14 +1948,23 @@ async function replySupport() {
   const content = supportReply.value.trim()
   if (!content || !supportDetail.value.thread?.id) return
   try {
-    const res = await adminApi.replySupportThread(supportDetail.value.thread.id, content)
+    const res = await adminApi.replySupportThread(supportDetail.value.thread.id, content, supportReplyImage.value)
     if (res.code === 200) {
       supportReply.value = ''
+      supportReplyImage.value = ''
       await openSupportChat({ id: supportDetail.value.thread.id })
     }
   } catch (e) {
     ElMessage.error(t('回复失败', 'Reply failed'))
   }
+}
+
+async function uploadSupportReplyImage(file) {
+  try {
+    const res = await uploadApi.uploadImage(file)
+    if (res?.code === 200) supportReplyImage.value = res.data.url
+  } catch (e) { ElMessage.error(t('图片上传失败', 'Image upload failed')) }
+  return false
 }
 
 async function loadMediaLogs() {
@@ -2166,8 +2181,8 @@ function onTabChange(name) {
   if (name === 'promptLogs') loadPromptLogs()
   if (name === 'mediaLogs') {
     loadMediaLogs()
-    loadSupportChats()
   }
+  if (name === 'supportChats') loadSupportChats()
 }
 </script>
 
@@ -3167,6 +3182,8 @@ function onTabChange(name) {
 .support-admin-msg { max-width: 78%; padding: 9px 11px; border-radius: 11px; background: var(--surface-hover); white-space: pre-wrap; }
 .support-admin-msg.admin { align-self: flex-end; background: rgba(176, 106, 46, .12); }
 .support-admin-msg time { display: block; margin-top: 4px; font-size: 10.5px; color: var(--text-muted); }
+.support-admin-image { display: block; max-width: 220px; max-height: 220px; margin-top: 6px; border-radius: 8px; }
+.support-admin-image-preview :deep(.el-image) { max-height: 120px; }
 .support-admin-reply { display: flex; gap: 8px; align-items: flex-end; }
 .support-admin-reply :deep(.el-textarea) { flex: 1; }
 

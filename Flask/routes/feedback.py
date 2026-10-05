@@ -84,9 +84,10 @@ def _get_or_create_support_thread(user_id):
 
 
 def _anonymous_identity(user_id):
+    from routes.marketplace import _pseudonym_for, _identicon_seed_for
     return {
-        'anonymous_id': f'匿名用户{int(user_id):04d}',
-        'avatar_seed': f'support-{int(user_id)}',
+        'anonymous_id': _pseudonym_for(int(user_id), 0),
+        'avatar_seed': _identicon_seed_for(int(user_id), 0),
     }
 
 
@@ -99,8 +100,15 @@ def support_thread():
     messages = SupportMessage.query.filter_by(thread_id=thread.id).order_by(
         SupportMessage.created_at.asc(), SupportMessage.id.asc()
     ).all()
+    changed = False
+    for msg in messages:
+        if msg.sender == 'admin' and not msg.read_by_user:
+            msg.read_by_user = True
+            changed = True
     if thread.user_unread:
         thread.user_unread = 0
+        changed = True
+    if changed:
         db.session.commit()
     return jsonify({'code': 200, 'data': {
         **_anonymous_identity(user_id),
@@ -109,18 +117,30 @@ def support_thread():
     }})
 
 
+@feedback_bp.route('/support/status', methods=['GET'])
+@jwt_required()
+def support_status():
+    user_id = int(get_jwt_identity())
+    thread = _get_or_create_support_thread(user_id)
+    return jsonify({'code': 200, 'data': {'unread': thread.user_unread or 0}})
+
+
 @feedback_bp.route('/support', methods=['POST'])
 @jwt_required()
 def send_support_message():
     user_id = int(get_jwt_identity())
     data = request.get_json(silent=True) or {}
     content = (data.get('content') or '').strip()
-    if not content:
-        return jsonify({'code': 400, 'message': '请输入内容'}), 400
+    image_url = (data.get('image_url') or '').strip() or None
+    if not content and not image_url:
+        return jsonify({'code': 400, 'message': '请输入内容或发送图片'}), 400
     if len(content) > 2000:
         return jsonify({'code': 400, 'message': '单条消息最多 2000 字'}), 400
     thread = _get_or_create_support_thread(user_id)
-    msg = SupportMessage(thread_id=thread.id, sender='user', content=content)
+    msg = SupportMessage(
+        thread_id=thread.id, sender='user', content=content,
+        image_url=image_url, read_by_admin=False, read_by_user=True,
+    )
     thread.admin_unread = (thread.admin_unread or 0) + 1
     thread.last_message_at = local_now()
     db.session.add(msg)
@@ -169,25 +189,34 @@ def admin_support_thread(thread_id):
     if request.method == 'POST':
         data = request.get_json(silent=True) or {}
         content = (data.get('content') or '').strip()
-        if not content:
-            return jsonify({'code': 400, 'message': '请输入回复内容'}), 400
+        image_url = (data.get('image_url') or '').strip() or None
+        if not content and not image_url:
+            return jsonify({'code': 400, 'message': '请输入回复内容或发送图片'}), 400
         if len(content) > 2000:
             return jsonify({'code': 400, 'message': '单条消息最多 2000 字'}), 400
-        msg = SupportMessage(thread_id=thread.id, sender='admin', content=content)
+        msg = SupportMessage(
+            thread_id=thread.id, sender='admin', content=content,
+            image_url=image_url, read_by_user=False, read_by_admin=True,
+        )
         thread.user_unread = (thread.user_unread or 0) + 1
         thread.last_message_at = local_now()
         db.session.add(msg)
         db.session.commit()
         return jsonify({'code': 200, 'message': '已回复', 'data': msg.to_dict()})
 
-    thread.admin_unread = 0
-    db.session.commit()
     messages = SupportMessage.query.filter_by(thread_id=thread.id).order_by(
         SupportMessage.created_at.asc(), SupportMessage.id.asc()
     ).all()
+    for msg in messages:
+        if msg.sender == 'user':
+            msg.read_by_admin = True
+    thread.admin_unread = 0
+    db.session.commit()
     user = User.query.get(thread.user_id)
     return jsonify({'code': 200, 'data': {
         'thread': {'id': thread.id, 'anonymous_id': _anonymous_identity(thread.user_id)['anonymous_id']},
         'user': user.to_dict() if user else None,
         'messages': [m.to_dict() for m in messages],
+        'user_unread': thread.user_unread or 0,
+        'admin_unread': thread.admin_unread or 0,
     }})

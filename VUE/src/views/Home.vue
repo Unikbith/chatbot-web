@@ -4,7 +4,7 @@ import logger from '@/utils/logger';
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ZoomIn, ChatLineRound } from '@element-plus/icons-vue'
 import {
-  authApi, providersApi, personaApi, settingsApi, conversationApi, chatApi, marketplaceApi
+  authApi, providersApi, personaApi, settingsApi, conversationApi, chatApi, marketplaceApi, supportApi
 } from '../utils/resAi'
 import { applyTheme, bindSystemThemeListener } from '../utils/theme'
 import { tokenStore } from '../utils/tokenStore'
@@ -22,7 +22,7 @@ import ConversationSettings from '../components/ConversationSettings.vue'
 import PersonaMarketplace from '../components/PersonaMarketplace.vue'
 import NewUserTutorialDialog from '../components/NewUserTutorialDialog.vue'
 import SupportChatDialog from '../components/SupportChatDialog.vue'
-import MemoryCenterDialog from '../components/MemoryCenterDialog.vue'
+import MemoryTransferDialog from '../components/MemoryTransferDialog.vue'
 import ThumbIcon from '../components/ThumbIcon.vue'
 import { identiconDataUrl } from '../utils/identicon'
 
@@ -49,7 +49,10 @@ const personaPanelVisible = ref(false)
 const convoSettingsVisible = ref(false)
 const marketplaceVisible = ref(false)
 const supportChatVisible = ref(false)
-const memoryCenterVisible = ref(false)
+const memoryTransferVisible = ref(false)
+const newChatPersonaVisible = ref(false)
+const supportUnread = ref(0)
+let supportPollTimer = null
 // 新用户使用教程弹窗（新用户注册后首次登录自动弹出一次）
 const tutorialVisible = ref(false)
 
@@ -438,6 +441,8 @@ onMounted(async () => {
     try {
       await loadUserInfo()
       await loadAllData()
+      await loadSupportUnread()
+      supportPollTimer = setInterval(loadSupportUnread, 15000)
       await ensureInitialConversation()
       // 新用户注册后若直接刷新页面，这里兜底再判一次（已看过则不会弹）
       maybeShowTutorial()
@@ -460,6 +465,10 @@ watch(tutorialVisible, (val) => {
   if (!val) maybeShowFreeApiReminder()
 })
 
+watch(supportChatVisible, (val) => {
+  if (!val) loadSupportUnread()
+})
+
 // 打开/关闭模型配置面板后刷新对话配置列表，保证对话内模型选择为最新
 watch(providerPanelVisible, (val) => {
   if (!val) {
@@ -473,6 +482,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', updateViewport)
   window.removeEventListener('auth:expired', handleAuthExpired)
   if (unbindSystemTheme) unbindSystemTheme()
+  if (supportPollTimer) clearInterval(supportPollTimer)
 })
 
 function handleAuthExpired() {
@@ -648,14 +658,16 @@ async function ensureInitialConversation() {
 }
 
 async function handleNewChat() {
-  // 默认人物卡来自注册时选择的性别（后端按性别把对应人物卡标记为 is_default）
-  const personaId = (
-    aiPersonas.value.find(p => p.is_default) ||
-    personas.value.find(p => p.is_default) ||
-    aiPersonas.value[0] ||
-    personas.value[0] ||
-    currentPersona.value
-  )?.id || null
+  if (!(aiPersonas.value || []).length) {
+    ElMessage.warning(t('请先创建一个人物卡，再开启新对话', 'Create a persona before starting a new chat'))
+    personaPanelVisible.value = true
+    return
+  }
+  newChatPersonaVisible.value = true
+}
+
+async function createNewChatWithPersona(personaId) {
+  newChatPersonaVisible.value = false
   await _doCreateConversation(personaId)
 }
 
@@ -858,6 +870,7 @@ async function handleLoginSuccess(userData) {
   user.value = userData
   isLoggedIn.value = true
   authModalVisible.value = false
+  loadSupportUnread()
   // 清空旧人设，让 loadPersonas 按新登录用户的性别重新挑默认人物卡
   currentPersona.value = null
   // 登录/注册响应只有用户信息，不含用户设置：这里补拉一次，
@@ -896,6 +909,14 @@ async function handleLoginSuccess(userData) {
   }
 
   await ensureInitialConversation()
+}
+
+async function loadSupportUnread() {
+  if (!isLoggedIn.value) return
+  try {
+    const res = await supportApi.status()
+    if (res.code === 200) supportUnread.value = res.data?.unread || 0
+  } catch (e) { /* 静默 */ }
 }
 
 function handleLogout() {
@@ -1109,6 +1130,7 @@ async function handleConvoSettingsSaved(payload) {
       :free-api-name="chatStatus.free_name"
       :tutorial-hint="showTutorialHint"
       :ai-personas="aiPersonas"
+      :support-unread="supportUnread"
       @dismiss-free-api="dismissFreeApiBanner"
       @open-tutorial="openTutorial"
       @dismiss-tutorial="dismissTutorialHint"
@@ -1122,7 +1144,7 @@ async function handleConvoSettingsSaved(payload) {
       @open-persona="requireLogin(() => personaPanelVisible = true)"
       @open-marketplace="requireLogin(() => marketplaceVisible = true)"
       @open-support="requireLogin(() => supportChatVisible = true)"
-      @open-memory-center="requireLogin(() => memoryCenterVisible = true)"
+      @open-memory-transfer="requireLogin(() => memoryTransferVisible = true)"
       @edit-persona="handleSidebarEditPersona"
       @login="authModalVisible = true"
       @logout="handleLogout"
@@ -1408,14 +1430,36 @@ async function handleConvoSettingsSaved(payload) {
     <!-- 新用户使用教程：注册后首次登录自动弹出一次，之后从侧边栏/系统设置随时可看 -->
     <NewUserTutorialDialog v-model="tutorialVisible" @read="markTutorialSeen" />
     <SupportChatDialog v-model="supportChatVisible" :user="user" />
-    <MemoryCenterDialog
-      v-model="memoryCenterVisible"
+    <MemoryTransferDialog
+      v-model="memoryTransferVisible"
       :conversation-id="currentConvId"
       :provider-id="currentProviderId"
       :model-id="currentModelId"
       :persona-id="currentPersona?.id"
       @imported="handleMemoryImported"
     />
+
+    <el-dialog v-model="newChatPersonaVisible" :title="t('选择本次聊天的人物卡', 'Choose a Persona')" width="min(520px, 94vw)" align-center>
+      <div class="new-chat-persona-list">
+        <button
+          v-for="p in aiPersonas"
+          :key="p.id"
+          class="new-chat-persona-item"
+          type="button"
+          @click="createNewChatWithPersona(p.id)"
+        >
+          <el-avatar :size="38" :src="p.avatar">{{ p.name?.charAt(0) }}</el-avatar>
+          <span>
+            <strong>{{ p.name }}</strong>
+            <small>{{ p.description || t('暂无简介', 'No description') }}</small>
+          </span>
+        </button>
+      </div>
+      <template #footer>
+        <el-button @click="newChatPersonaVisible = false">{{ t('取消', 'Cancel') }}</el-button>
+        <el-button type="primary" @click="newChatPersonaVisible = false; personaPanelVisible = true">{{ t('新建人物卡', 'New persona') }}</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 免费模型提醒：未配置自己 API Key 的用户每次进入都会看到一次 -->
     <FreeApiReminderDialog
@@ -2242,6 +2286,13 @@ async function handleConvoSettingsSaved(payload) {
     padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
   }
 }
+
+.new-chat-persona-list { display: flex; flex-direction: column; gap: 8px; max-height: 52vh; overflow-y: auto; }
+.new-chat-persona-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--surface); text-align: left; cursor: pointer; }
+.new-chat-persona-item:hover { border-color: var(--brand); background: var(--surface-hover); }
+.new-chat-persona-item span { display: flex; flex-direction: column; min-width: 0; }
+.new-chat-persona-item strong { color: var(--text-primary); }
+.new-chat-persona-item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
 
 /* 超窄屏（iPhone SE 一类）再收紧一档 */
 @media (max-width: 420px) {

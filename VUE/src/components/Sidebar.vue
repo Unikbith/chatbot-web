@@ -70,8 +70,9 @@
 
       <div class="sidebar-feedback-banner" @click="emit('open-support')">
         <span class="sfb-tutorial-icon"><el-icon><ChatDotRound /></el-icon></span>
-        <span class="sfb-tutorial-text">{{ t('反馈与建议', 'Feedback & Suggestions') }}</span>
+        <span class="sfb-tutorial-text">{{ t('与管理员对话并提出建议', 'Chat with Admin') }}</span>
         <span class="sfb-tutorial-anon">{{ t('匿名', 'Anonymous') }}</span>
+        <el-badge v-if="supportUnread" :value="supportUnread" class="feedback-unread-badge" />
       </div>
       
       <div class="new-chat-row">
@@ -312,6 +313,7 @@ const props = defineProps({
   freeApiName: { type: String, default: '' },
   // 新用户教程入口：看过引导弹窗但尚未点开教程时显示在免费提示条下方
   tutorialHint: { type: Boolean, default: false },
+  supportUnread: { type: Number, default: 0 },
   aiPersonas: { type: Array, default: () => [] },
 })
 
@@ -641,6 +643,7 @@ function handleCommand(cmd) {
 .sfb-tutorial-icon { display: inline-flex; color: var(--brand); font-size: 15px; flex-shrink: 0; }
 .sfb-tutorial-text { flex: 1; min-width: 0; font-weight: 600; color: var(--text-primary); }
 .sfb-tutorial-anon { color: var(--text-muted); font-size: 11px; }
+.feedback-unread-badge { margin-left: auto; }
 
 .btn-icon {
   color: var(--brand);
