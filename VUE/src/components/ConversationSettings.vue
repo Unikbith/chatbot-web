@@ -43,6 +43,8 @@
           </el-select>
         </section>
 
+        <!-- 提示词兜底：现在等于「协议包总开关」—— 协议条目存在人物卡的世界书里，
+             用户可逐卡编辑 / 停用 / 删除；这里一键决定本对话要不要注入它们 -->
         <section class="cv-panel">
           <header class="cv-panel__head">
             <span class="cv-tick" aria-hidden="true"></span>
@@ -50,13 +52,17 @@
           </header>
           <div class="cv-toggle">
             <div class="cv-toggle__text">
-              <span class="cv-toggle__label">{{ t('追加全局约定', 'Append global instructions') }}</span>
+              <span class="cv-toggle__label">{{ t('注入协议包', 'Inject protocol pack') }}</span>
               <span class="cv-toggle__hint">
-                {{ t('默认开启：接上世界观、语气与禁区等全局约定，角色更不容易跳出设定；在意 token 时可关闭', 'On by default: appends global world/tone/limits so the character stays in setting. Turn off to save tokens') }}
+                {{ t('默认开启：注入人物卡里的协议条目（输出结构、创作与内容、剧情推进与玩法）。关掉后每轮更省 token，但界面构件与创作规范会一并消失',
+                  'On by default: injects the persona card’s protocol entries. Turning it off saves tokens per turn — at the cost of structure and writing rules') }}
               </span>
             </div>
             <el-switch v-model="form.append_prompt_enabled" />
           </div>
+          <p class="cv-panel__hint">
+            {{ t('协议条目在「人物卡 → 世界书」里，可逐条编辑、停用或删除。', 'Protocol entries live in Persona → Worldbook, and can be edited, disabled or deleted one by one.') }}
+          </p>
         </section>
 
         <!-- 界面标记（富消息）：总开关。开启后 AI 才会输出标记，聊天页才会渲染成面板 -->

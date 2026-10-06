@@ -149,27 +149,44 @@
         <div class="form-card wb-card">
           <div class="wb-head">
             <div>
-              <div class="wb-title">世界书（设定条目）</div>
+              <div class="wb-title">世界书（设定条目 + 协议包）</div>
               <div class="wb-desc">
                 把只在特定话题才用得上的设定拆成条目，聊到相关词才加载 —— 省 token，还能写更多设定。
                 <b>常驻</b>条目每次都加载（放核心人设）；其余按触发词命中才加载。
                 <b>一条都不加也不影响</b>，照常聊天。
                 <span v-if="!editingPersona" class="wb-draft-note">新建模式下，条目会随人物卡一起保存。</span>
               </div>
+              <div class="wb-desc wb-desc--protocol">
+                标记 <span class="wb-tag is-proto">协议</span> 的是系统默认种入的协议条目：
+                ①②③ 常驻（输出结构 / 创作与内容 / 剧情推进），玩法包按触发词加载。
+                都可以<b>停用、改写或删除</b> —— 删掉就不再注入，省 token 的开关就在你手里。
+              </div>
             </div>
-            <el-button size="small" type="primary" plain @click="openWbCreate">
-              <el-icon><Plus /></el-icon> 添加条目
-            </el-button>
+            <div class="wb-head-ops">
+              <el-button
+                v-if="editingPersona"
+                size="small"
+                plain
+                :loading="protocolRestoring"
+                @click="restoreProtocolPack"
+              >
+                恢复默认协议包
+              </el-button>
+              <el-button size="small" type="primary" plain @click="openWbCreate">
+                <el-icon><Plus /></el-icon> 添加条目
+              </el-button>
+            </div>
           </div>
 
           <div v-if="wbLoading" class="wb-empty">加载中…</div>
           <div v-else-if="!wbEntries.length" class="wb-empty">
-            {{ editingPersona ? '暂无条目 —— 当前全部设定都在上面的系统提示词里，每次对话都会整块发送' : '暂无条目，可先添加触发词和设定内容，新建人物卡时会一起保存' }}
+            {{ editingPersona ? '暂无条目 —— 协议包与设定都为空，AI 将没有输出结构与创作规范（可点「恢复默认协议包」一键补回）' : '暂无条目，可先添加触发词和设定内容，新建人物卡时会一起保存' }}
           </div>
           <div v-else class="wb-list">
-            <div v-for="e in wbEntries" :key="e.id" class="wb-item">
+            <div v-for="e in wbEntries" :key="e.id" class="wb-item" :class="{ 'is-protocol': e.category === 'protocol' }">
               <div class="wb-item-main">
                 <div class="wb-item-title">
+                  <span v-if="e.category === 'protocol'" class="wb-tag is-proto">协议</span>
                   <span class="wb-tag" :class="{ 'is-on': e.always_on }">
                     {{ e.always_on ? '常驻' : '按需' }}
                   </span>
@@ -348,13 +365,42 @@ function resetForm() {
   wbEntries.value = []
 }
 
-/* ---------- 世界书（设定条目） ---------- */
+/* ---------- 世界书（设定条目 + 协议包） ---------- */
 const wbEntries = ref([])
 const wbLoading = ref(false)
 const wbDialogVisible = ref(false)
 const wbEditing = ref(null)
 const wbSaving = ref(false)
+const protocolRestoring = ref(false)
 let wbDraftSeq = 0
+
+// 恢复默认协议包：用户删掉/改坏协议条目后的一键救援（后端按 source_key 幂等重建）
+async function restoreProtocolPack() {
+  if (!editingPersona.value) return
+  try {
+    await ElMessageBox.confirm(
+      '将把协议条目（输出结构 / 创作与内容 / 剧情推进 / 玩法扩展包）恢复成默认内容并重新启用，你改写过的协议条目会被覆盖。继续？',
+      '恢复默认协议包',
+      { type: 'warning', confirmButtonText: '恢复', cancelButtonText: '取消' }
+    )
+  } catch (e) {
+    return // 用户取消
+  }
+  protocolRestoring.value = true
+  try {
+    const res = await personaApi.restoreProtocol(editingPersona.value.id)
+    if (res.code === 200) {
+      ElMessage.success(res.message || '已恢复默认协议包')
+      loadWorldBook()
+    } else {
+      ElMessage.warning(res.message || '恢复失败')
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || '恢复失败')
+  } finally {
+    protocolRestoring.value = false
+  }
+}
 const defaultWbForm = {
   title: '',
   keywords: '',
@@ -764,6 +810,28 @@ function confirmDelete(id) {
   font-weight: 600;
 }
 
+/* 协议包说明：与普通设定条目区分开，避免用户以为这是自己加的设定 */
+.wb-desc--protocol {
+  margin-top: 6px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, rgba(0, 0, 0, .08));
+  background: var(--surface-hover, rgba(0, 0, 0, .03));
+  color: var(--text-muted, #909399);
+}
+
+.wb-head-ops {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* 协议条目：左侧一道品牌色刻度，一眼看出是系统种的规范而不是人设设定 */
+.wb-item.is-protocol {
+  border-left: 3px solid var(--brand, #c98a5a);
+}
+
 .wb-draft-note {
   display: inline-block;
   margin-top: 4px;
@@ -832,6 +900,13 @@ function confirmDelete(id) {
 .wb-tag.is-off {
   background: #fde2e2;
   color: #f56c6c;
+}
+
+/* 「协议」标记：用深色描边与「常驻/按需」的品牌色填充区分开（两条会同时出现） */
+.wb-tag.is-proto {
+  background: transparent;
+  color: var(--text-primary, #303133);
+  border: 1px solid currentColor;
 }
 
 .wb-kw {

@@ -1,0 +1,109 @@
+"""协议包种入：把 protocol_pack 里的条目挂到人物卡名下（幂等）。
+
+为什么做成"种入到卡"而不是"全局注入"：
+    用户要的是「默认在每张卡里打开并执行，新建也能选择打开和删除」——
+    所以条目必须真实存在于该卡的世界书里，用户在自己的卡片面板就能编辑 / 停用 / 删除。
+    后端不再无条件硬注入，注入与否由条目自己的开关决定。
+
+幂等规则：以 (user_id, persona_id, source_key) 为唯一键。
+    已存在 → 只更新标题 / 正文 / 权重等系统维护字段，**不动用户的 always_on 与 enabled**，
+    避免用户刚关掉的玩法包又被下一次种入打开。
+"""
+from extensions import db
+from models import WorldBookEntry
+import protocol_pack
+
+
+def seed_protocol_entries(user_id, persona_id, only_missing=False):
+    """给某张人物卡种入协议包条目。
+
+    :param only_missing: True 时只补缺失的条目（不覆盖已有条目的正文），
+                         用于"补种"场景；False 时同时刷新系统维护字段的正文。
+    :return: (新增数, 更新数)
+    """
+    if not user_id or not persona_id:
+        return 0, 0
+
+    existing = {
+        e.source_key: e
+        for e in WorldBookEntry.query.filter_by(
+            user_id=user_id, persona_id=persona_id, category='protocol'
+        ).filter(WorldBookEntry.source_key.isnot(None)).all()
+    }
+
+    created = updated = 0
+    for spec in protocol_pack.protocol_entries():
+        row = existing.get(spec['source_key'])
+        if row is None:
+            db.session.add(WorldBookEntry(
+                user_id=user_id,
+                persona_id=persona_id,
+                title=spec['title'],
+                keywords=spec['keywords'],
+                content=spec['content'],
+                always_on=bool(spec['always_on']),
+                enabled=True,
+                weight=spec['weight'],
+                category='protocol',
+                kind=spec['kind'],
+                source_key=spec['source_key'],
+            ))
+            created += 1
+            continue
+        if only_missing:
+            continue
+        # 只刷新系统维护的字段；enabled / always_on 尊重用户当前选择
+        changed = False
+        if row.title != spec['title']:
+            row.title = spec['title']; changed = True
+        if (row.content or '') != spec['content']:
+            row.content = spec['content']; changed = True
+        if (row.keywords or '') != spec['keywords']:
+            row.keywords = spec['keywords']; changed = True
+        if row.kind != spec['kind']:
+            row.kind = spec['kind']; changed = True
+        if (row.weight or 0) != spec['weight']:
+            row.weight = spec['weight']; changed = True
+        if changed:
+            updated += 1
+    return created, updated
+
+
+def restore_protocol_entry(user_id, persona_id, source_key):
+    """把某条协议条目恢复成默认正文并重新启用（用户删掉/改坏后的救援入口）。"""
+    content = protocol_pack.entry_content_of(source_key)
+    if not content:
+        return None
+    spec = next((e for e in protocol_pack.protocol_entries()
+                 if e['source_key'] == source_key), None)
+    if spec is None:
+        return None
+    row = WorldBookEntry.query.filter_by(
+        user_id=user_id, persona_id=persona_id, source_key=source_key
+    ).first()
+    if row is None:
+        row = WorldBookEntry(
+            user_id=user_id, persona_id=persona_id, source_key=source_key,
+            title=spec['title'], keywords=spec['keywords'], content=content,
+            always_on=bool(spec['always_on']), enabled=True, weight=spec['weight'],
+            category='protocol', kind=spec['kind'],
+        )
+        db.session.add(row)
+    else:
+        row.title = spec['title']
+        row.content = content
+        row.keywords = spec['keywords']
+        row.kind = spec['kind']
+        row.weight = spec['weight']
+        row.always_on = bool(spec['always_on'])
+        row.enabled = True
+    return row
+
+
+def persona_has_protocol(user_id, persona_id):
+    """该卡是否已有启用的协议条目（用于提示用户"这张卡没有协议包"）。"""
+    if not persona_id:
+        return False
+    return WorldBookEntry.query.filter_by(
+        user_id=user_id, persona_id=persona_id, category='protocol', enabled=True
+    ).count() > 0

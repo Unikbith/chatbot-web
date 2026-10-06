@@ -3,6 +3,8 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
 from models import PersonaTemplate, MarketplaceAdopt, WorldBookEntry, local_now
+from services.protocol_seed import seed_protocol_entries, restore_protocol_entry
+import protocol_pack
 
 persona_bp = Blueprint('persona', __name__, url_prefix='/api/personas')
 
@@ -163,13 +165,19 @@ def create_persona():
             enabled=entry['enabled'],
             weight=entry['weight'],
         ))
-    
+
+    # 协议包：默认给每张卡种入一份（输出结构 / 创作与内容 / 剧情体验 + 玩法扩展包）。
+    # 只种入协议条目，用户提交的世界书草稿不受影响；种入后用户可在卡片面板里
+    # 自行编辑 / 停用 / 删除 —— 后端不再无条件硬注入规范。
+    seeded, _ = seed_protocol_entries(user_id, persona.id)
     db.session.commit()
     
     return jsonify({
         'code': 200,
         'message': '创建成功',
-        'data': {**persona.to_dict(), 'worldbook_count': len(worldbook_entries)}
+        'data': {**persona.to_dict(),
+                 'worldbook_count': len(worldbook_entries),
+                 'protocol_seeded': seeded}
     })
 
 
@@ -379,6 +387,46 @@ def list_worldbook(persona_id):
     return jsonify({
         'code': 200,
         'data': [e.to_dict() for e in entries]
+    })
+
+
+@persona_bp.route('/<int:persona_id>/worldbook/restore-protocol', methods=['POST'])
+@jwt_required()
+def restore_protocol_pack(persona_id):
+    """把协议包恢复成默认（用户删掉或改坏后的救援入口）。
+
+    请求体可选：
+      {source_keys: ['protocol:structure', ...]} —— 只恢复指定条目；
+      不传则整包恢复（缺失的补建、已有的重置为默认正文并重新启用）。
+    """
+    user_id = int(get_jwt_identity())
+    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first()
+    if not persona:
+        return jsonify({'code': 404, 'message': '角色不存在'}), 404
+
+    data = request.get_json() or {}
+    keys = data.get('source_keys')
+    if isinstance(keys, list) and keys:
+        wanted = [k for k in keys if isinstance(k, str) and k.strip()]
+    else:
+        wanted = [e['source_key'] for e in protocol_pack.protocol_entries()]
+
+    restored = []
+    for key in wanted:
+        row = restore_protocol_entry(user_id, persona_id, key)
+        if row is not None:
+            restored.append(key)
+    # 补齐可能缺失的其他协议条目（例如用户删了玩法包后又想全要回来）
+    if not keys:
+        created, _ = seed_protocol_entries(user_id, persona_id, only_missing=True)
+    else:
+        created = 0
+    db.session.commit()
+
+    return jsonify({
+        'code': 200,
+        'message': f'已恢复 {len(restored)} 条协议条目' + (f'，补建 {created} 条' if created else ''),
+        'data': {'restored': restored, 'created': created},
     })
 
 

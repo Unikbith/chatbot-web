@@ -110,10 +110,20 @@ console.log('\n[6] 后端：开关默认值与自动关闭逻辑')
   const models = readFileSync(join(here, '..', '..', 'Flask', 'models.py'), 'utf8')
   const chat = readFileSync(join(here, '..', '..', 'Flask', 'routes', 'chat.py'), 'utf8')
   const rich = readFileSync(join(here, '..', '..', 'Flask', 'rich_marker.py'), 'utf8')
+  const pack = readFileSync(join(here, '..', '..', 'Flask', 'protocol_pack.py'), 'utf8')
   ok('模型默认 append_prompt_enabled=True',
     /append_prompt_enabled = db\.Column\(db\.Boolean, default=True/.test(models))
-  ok('注入侧 NULL 视为开启',
-    /enabled = True if flag is None else bool\(flag\)/.test(chat))
+  ok('协议包：只有显式关闭才不注入（NULL 视为开启）',
+    /getattr\(conv, 'append_prompt_enabled', None\) is False/.test(chat))
+  ok('协议包：硬注入已移除（_get_system_prompt 不再拼兜底词）',
+    !/_append_global_prompt\(body/.test(chat))
+  ok('协议包：结构与内容协议都是常驻条目',
+    /'source_key': 'protocol:structure'[\s\S]{0,200}?'always_on': True/.test(pack)
+    && /'source_key': 'protocol:content'[\s\S]{0,200}?'always_on': True/.test(pack))
+  ok('协议包：玩法扩展包是按需触发（不常驻）',
+    /'kind': 'play',\s*\n\s*'always_on': False/.test(pack))
+  ok('协议包含双男主与色情玩法包',
+    pack.includes('protocol:play:multi') && pack.includes('protocol:play:sex'))
   ok('enhance 未设置时按开启处理',
     /enhance = opts\.get\('enhance'\) is not False/.test(rich))
   ok('不再有「聊满三轮自动关闭提示词兜底」', !chat.includes('提示词兜底已自动关闭'))

@@ -317,6 +317,11 @@ const personaApi = {
   async removeWorldBook(personaId, entryId) {
     return resAi.delete(`/api/personas/${personaId}/worldbook/${entryId}`);
   },
+  // 恢复默认协议包（输出结构 / 创作与内容 / 剧情推进 / 玩法扩展包）
+  async restoreProtocol(personaId, sourceKeys = null) {
+    const body = Array.isArray(sourceKeys) && sourceKeys.length ? { source_keys: sourceKeys } : {};
+    return resAi.post(`/api/personas/${personaId}/worldbook/restore-protocol`, body);
+  },
   getDefaultId() {
     return localStorage.getItem('default_persona_id');
   },

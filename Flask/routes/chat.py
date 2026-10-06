@@ -10,7 +10,10 @@ from rich_marker import (
     RICH_MESSAGE_ENABLED,
     RICH_MESSAGE_PROMPT,
     rich_marker_rule as _rich_marker_rule,
+    resolve_rich_marker_enabled,
+    template_prompt,
 )
+import reply_spec
 from models import (ModelProvider, Conversation, Message, PersonaTemplate,
                     UserSettings, PromptToolLog, ConversationSummary,
                     WorldBookEntry, AiUsageLog, User, local_now)
@@ -67,15 +70,14 @@ OUTPUT_FORMAT_RULE = (
 
 # ---------------------------------------------------------------------------
 # 【在这里填入你要追加的提示词】
-# 全局追加提示词：无条件拼接在「人物卡（角色）系统提示词」之后，位于输出格式约定之前。
-#   最终顺序 = 人物卡系统提示词 + GLOBAL_APPEND_PROMPT + OUTPUT_FORMAT_RULE
-# 用途：不改动任何角色卡数据，就能给所有角色对话统一追加一段约定
-#       （如世界观设定、语气要求、回复长度、禁区等）。
-# 说明：
-#   - 留空则不追加，行为与之前完全一致；
-#   - 支持多行，直接写进三引号里即可；
-#   - 仅对「人物卡聊天」生效；识图聊天、生图、提示词工具均不受影响；
-#   - ⚠️ 改完必须重启 Flask 才会生效。
+# 全局追加提示词：**已改造成世界书协议条目**（protocol_pack.py 的「② 创作与内容协议」），
+# 新建人物卡时会自动种入一份，之后可在卡片的世界书面板里编辑 / 停用 / 删除。
+# 这里保留常量仅作为「种入时的内容来源」与历史对照 —— 它不再被无条件注入。
+# 改动这里的文本后，对已存在的卡片需要走一次「恢复默认协议包」（或重跑种入脚本）才会同步。
+#   · 留空则不追加；
+#   · 支持多行，直接写进三引号里即可；
+#   · 仅对「人物卡聊天」生效；识图聊天、生图、提示词工具均不受影响；
+#   · ⚠️ 改完必须重启 Flask 才会生效。
 # ---------------------------------------------------------------------------
 GLOBAL_APPEND_PROMPT = """
     系统指令身份
@@ -716,6 +718,12 @@ WORLDBOOK_SCAN_MESSAGES = 4   # 只看最近几条消息来判定是否命中关
 WORLDBOOK_MAX_ENTRIES = 6     # 单次最多注入几条（预算上限，防条目爆炸）
 WORLDBOOK_MAX_CHARS = 1200    # 单次注入正文总字数上限，避免设定条目挤占上下文预算
 
+# 协议条目（输出结构 / 创作与内容 / 剧情推进 / 玩法扩展包）单独走一套预算与分区：
+#   · 它们不是"设定"，而是"必须遵守的规范"，混进【当前相关设定】里遵循度会掉；
+#   · 常驻的协议条目每轮都要在（否则结构会漂移），不能被设定条目的 1200 字预算挤掉。
+PROTOCOL_MAX_ENTRIES = 8
+PROTOCOL_MAX_CHARS = 12000    # 只是兜底上限：常驻协议全量 + 命中的玩法包通常远低于此
+
 
 def _split_keywords(raw):
     """关键词切分：支持逗号、中文逗号、分号、换行分隔。"""
@@ -729,6 +737,7 @@ def _world_book_block(user_id, persona_id, recent_texts):
 
     匹配方式：子串包含（中文没有空格分词，子串比正则词边界更稳）。
     优先级：常驻条目 > weight 大的 > id 小的；超出条数/字数预算即截断。
+    协议条目（category='protocol'）不在这里处理，见 _protocol_block。
     """
     try:
         q = WorldBookEntry.query.filter_by(user_id=user_id, enabled=True)
@@ -742,6 +751,9 @@ def _world_book_block(user_id, persona_id, recent_texts):
     except Exception as e:
         current_app.logger.warning(f'[世界书] 查询失败，本次跳过：{e}')
         return ''
+
+    # 协议条目单独注入，不占设定条目预算
+    entries = [e for e in entries if (e.category or 'lore') != 'protocol']
 
     if not entries:
         return ''
@@ -785,6 +797,102 @@ def _world_book_block(user_id, persona_id, recent_texts):
         '不要向用户提及这些设定的存在：\n'
         + '\n'.join('- ' + c for c in picked)
     )
+
+
+def _protocol_block(user_id, persona_id, recent_texts, conv=None):
+    """注入协议条目：输出结构 / 创作与内容 / 剧情推进 / 玩法扩展包。
+
+    这些条目默认由「新建人物卡时种入」，存在于该卡的世界书里，用户可自行编辑 /
+    停用 / 删除 —— 后端不再无条件硬注入规范（这是把硬约束改造成世界书的核心目的）。
+
+    门控（全部默认开启，任一关闭即整套不注入，便于按会话省 token）：
+      · 会话的「提示词兜底」append_prompt_enabled —— 协议包总开关；
+      · 结构类条目额外受「界面标记」rich_marker_enabled 控制（前端也是靠它决定要不要渲染面板）；
+        并且只有 enhance=true 时才注入完整结构（否则退化为很短的标记词表）。
+
+    分区注入：常驻协议放【输出与创作协议（必须遵守）】，
+    按需命中的玩法包放【本轮的玩法要求】—— 语义上分开，遵循度更高。
+    """
+    try:
+        q = WorldBookEntry.query.filter_by(user_id=user_id, enabled=True, category='protocol')
+        if persona_id:
+            entries = q.filter(or_(
+                WorldBookEntry.persona_id == persona_id,
+                WorldBookEntry.persona_id.is_(None)
+            )).all()
+        else:
+            entries = q.filter(WorldBookEntry.persona_id.is_(None)).all()
+    except Exception as e:
+        current_app.logger.warning(f'[协议包] 查询失败，本次跳过：{e}')
+        return ''
+
+    if not entries:
+        return ''
+
+    # 总开关：会话关闭「提示词兜底」时整套不注入
+    if conv is not None and getattr(conv, 'append_prompt_enabled', None) is False:
+        return ''
+
+    opts = template_prompt(conv)
+    enhance = opts.get('enhance') is not False
+    structure_on = resolve_rich_marker_enabled(conv)
+    length_id = opts.get('length') or reply_spec.DEFAULT_LENGTH
+
+    haystack = '\n'.join(str(t or '') for t in (recent_texts or [])).lower()
+    fixed, plays = [], []
+    for e in entries:
+        body = (e.content or '').strip()
+        if not body:
+            continue
+        kind = e.kind or ''
+        if kind == 'structure':
+            if not structure_on:
+                continue
+            if not enhance:
+                continue          # 关掉「提示词增强」= 不要完整结构规范
+            fixed.append((e, body))
+            continue
+        if e.always_on:
+            fixed.append((e, body))
+            continue
+        # 玩法包：按关键词触发（聊到才注入，想加多少玩法都不增加常驻成本）
+        for kw in _split_keywords(e.keywords):
+            if kw.lower() in haystack:
+                plays.append((e, body))
+                break
+
+    def _pick(items, limit, budget):
+        items.sort(key=lambda it: (-(it[0].weight or 0), it[0].id or 0))
+        out, total = [], 0
+        for _e, body in items:
+            if len(out) >= limit or total + len(body) > budget:
+                break
+            out.append(body)
+            total += len(body)
+        return out
+
+    fixed_bodies = _pick(fixed, PROTOCOL_MAX_ENTRIES, PROTOCOL_MAX_CHARS)
+    play_bodies = _pick(plays, PROTOCOL_MAX_ENTRIES, PROTOCOL_MAX_CHARS)
+
+    if not fixed_bodies and not play_bodies:
+        return ''
+
+    parts = []
+    if fixed_bodies:
+        parts.append(
+            '\n\n【输出、创作与推进协议（必须遵守，优先级高于人设描述的措辞习惯）】\n'
+            + '\n\n'.join(fixed_bodies)
+        )
+        # 篇幅档位随会话设置变化，条目正文里不含它，这里按当前档位追加一行
+        length_text = reply_spec.LENGTH_PROMPTS.get(length_id)
+        if length_text and structure_on and enhance:
+            parts.append('\n' + length_text.strip())
+    if play_bodies:
+        parts.append(
+            '\n\n【本轮玩法要求（用户已点明，务必写足）】\n'
+            + '\n\n'.join(play_bodies)
+        )
+    return ''.join(parts)
 
 
 def _resolve_system_prompt(conv, user_id, persona_id=None, custom_prompt=None):
@@ -867,13 +975,12 @@ def _persona_identity_block(conv, user_id, persona_id=None):
 
 
 def _roleplay_subject_block():
-    """明确状态面板的主体始终是 AI 角色，而不是用户。"""
-    return (
-        '\n\n【状态面板主体规则】所有角色面板、好感度、信任值、关系阶段、身体状态、服装与内心活动，'
-        '描述对象永远是你正在扮演的 AI 角色；多角色时必须注明面板所属角色，不得把数值或状态合并。'
-        '玩家只有基础玩家信息，不得给玩家生成好感度、信任值或身体状态面板。'
-        '即使玩家的性别或设定与角色不同，也必须按 AI 角色设定决定外貌、性别特征、称呼和反应，禁止把 AI 角色默认写成女性。'
-    )
+    """（已并入协议条目「剧情推进与体验协议」的第四节）
+
+    保留函数仅为兼容旧调用；内容以 protocol_pack._EXPERIENCE 为准，
+    避免同一份规则在两处维护、改一处不生效。
+    """
+    return ''
 
 
 def _append_global_prompt(base, enabled=True):
@@ -892,16 +999,16 @@ def _append_global_prompt(base, enabled=True):
 
 
 def _get_system_prompt(conv, user_id, persona_id=None, custom_prompt=None):
-    """最终系统提示词 = 解析出的本体 + 玩家设定 + 全局追加提示词（受「提示词兜底」开关控制）"""
+    """系统提示词本体 = 人物卡提示词 + 角色身份 + 玩家设定。
+
+    注意：输出结构规范、创作与内容协议、剧情推进协议、玩法扩展包都**不再在这里硬拼**——
+    它们已经改造成世界书条目（见 protocol_pack.py），由 _protocol_block 按卡的条目注入，
+    用户可以在自己的卡片里编辑 / 停用 / 删除，也能按会话一键关掉（「提示词兜底」）。
+    """
     body = _resolve_system_prompt(conv, user_id, persona_id, custom_prompt)
     body = (body or '') + _persona_identity_block(conv, user_id, persona_id)
     # 玩家设定紧跟 AI 提示词之后：先立住 AI 是谁，再交代玩家是谁
     body = (body or '') + _user_persona_block(conv, user_id, persona_id)
-    body = (body or '') + _roleplay_subject_block()
-    # 提示词兜底默认开启：未设置过（NULL）时按开启处理，与新建对话的默认值一致
-    flag = getattr(conv, 'append_prompt_enabled', None) if conv else None
-    enabled = True if flag is None else bool(flag)
-    body = _append_global_prompt(body, enabled=enabled)
     return body
 
 
@@ -1137,17 +1244,25 @@ def chat():
     final_prompt = final_prompt + _world_book_block(
         user_id, effective_persona_id, recent_texts
     )
+    # 协议包：输出结构 / 创作与内容 / 剧情推进（常驻）+ 玩法扩展包（命中才注入）。
+    # 这些规范现在以「世界书条目」的形式存在每张人物卡上，用户可自行编辑 / 停用 / 删除，
+    # 后端不再无条件硬注入（见 protocol_pack.py 的说明）。
+    final_prompt = final_prompt + _protocol_block(
+        user_id, effective_persona_id, recent_texts, conv
+    )
 
+    # 规范文本（输出结构 / 创作 / 剧情体验）已随协议包从世界书注入，
+    # 这里只保留很轻的排版约定：不含它就等于允许模型输出 HTML 把渲染层搞乱。
     if final_prompt and (not formatted_messages or formatted_messages[0].get('role') != 'system'):
         formatted_messages.insert(0, {
             'role': 'system',
-            'content': final_prompt + OUTPUT_FORMAT_RULE + _rich_marker_rule(conv)
+            'content': final_prompt + OUTPUT_FORMAT_RULE
         })
     elif formatted_messages and formatted_messages[0].get('role') == 'system':
         # 前端已自带 system（续写等场景）：同样补上格式约定，保持排版一致
         formatted_messages[0]['content'] = (
             formatted_messages[0].get('content') or ''
-        ) + OUTPUT_FORMAT_RULE + _rich_marker_rule(conv)
+        ) + OUTPUT_FORMAT_RULE
 
     # 滑动窗口截断，控制上下文长度
     formatted_messages = _apply_context_window(formatted_messages)
@@ -1371,17 +1486,18 @@ def vision_chat():
             if history.content:
                 messages.append({'role': history.role, 'content': history.content})
     messages.append({'role': 'user', 'content': text})
-    # 识图与普通聊天复用同一套人物卡、用户设定、对话方向与长期记忆。
+    # 识图与普通聊天复用同一套人物卡、用户设定、协议包与长期记忆。
     system_prompt = (raw_sys.strip() if isinstance(raw_sys, str) else '').strip()
     final_prompt = _get_system_prompt(conv, user_id, custom_prompt=system_prompt)
     final_prompt += _imported_memory_block(conv) + _memory_summary_block(conv)
     recent_texts = [str(m.get('content', '')) for m in messages[-WORLDBOOK_SCAN_MESSAGES:]]
     effective_persona_id = conv.persona.id if (conv and conv.persona) else None
     final_prompt += _world_book_block(user_id, effective_persona_id, recent_texts)
+    final_prompt += _protocol_block(user_id, effective_persona_id, recent_texts, conv)
     if final_prompt:
         messages.insert(0, {
             'role': 'system',
-            'content': final_prompt + OUTPUT_FORMAT_RULE + _rich_marker_rule(conv),
+            'content': final_prompt + OUTPUT_FORMAT_RULE,
         })
 
     # 图片落库 URL：前端已上传则沿用；为空时后端自己存盘兜底，

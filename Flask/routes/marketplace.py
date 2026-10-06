@@ -873,6 +873,11 @@ def adopt_persona(pid):
         ))
         adopted_entries += 1
 
+    # 协议包：采用来的卡同样默认带一份（输出结构 / 创作与内容 / 剧情体验 + 玩法扩展包），
+    # 采用者可在自己的卡片面板里自由编辑 / 停用 / 删除
+    from services.protocol_seed import seed_protocol_entries
+    seed_protocol_entries(user_id, tp.id)
+
     db.session.commit()
     data = tp.to_dict()
     data['worldbook_count'] = adopted_entries

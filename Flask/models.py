@@ -486,6 +486,12 @@ class WorldBookEntry(db.Model):
       always_on   —— True 表示常驻（每次都注入，用于核心人设）；False 表示按需
       enabled     —— 停用开关（保留条目但不注入）
       weight      —— 命中过多、超出预算时的优先级，越大越优先
+      category    —— 'lore'=普通设定（1200 字预算内按需注入）；
+                     'protocol'=协议条目（结构与创作规范，单独预算、单独分区注入）
+      kind        —— 协议条目的子类：'structure'（输出结构）/ 'content'（创作与内容）/
+                     'experience'（剧情推进与体验）/ 'play'（玩法扩展包）。普通设定为空串。
+      source_key  —— 系统种入的条目标识（如 protocol:structure）。
+                     用于幂等种入与「恢复默认」：同 key 视为同一条，不重复创建。
     """
     __tablename__ = 'worldbook_entries'
 
@@ -498,6 +504,9 @@ class WorldBookEntry(db.Model):
     always_on = db.Column(db.Boolean, default=False)                   # 常驻（每次都注入）
     enabled = db.Column(db.Boolean, default=True)                      # 是否启用
     weight = db.Column(db.Integer, default=0)                          # 预算不足时的优先级
+    category = db.Column(db.String(20), default='lore')                # lore / protocol
+    kind = db.Column(db.String(20), default='')                        # 协议子类
+    source_key = db.Column(db.String(80), nullable=True, index=True)   # 系统种入标识
     created_at = db.Column(db.DateTime, default=local_now)
     updated_at = db.Column(db.DateTime, default=local_now, onupdate=local_now)
 
@@ -511,6 +520,9 @@ class WorldBookEntry(db.Model):
             'always_on': bool(self.always_on),
             'enabled': bool(self.enabled),
             'weight': self.weight or 0,
+            'category': self.category or 'lore',
+            'kind': self.kind or '',
+            'source_key': self.source_key,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

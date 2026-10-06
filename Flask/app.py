@@ -267,6 +267,19 @@ def _ensure_schema_columns(app):
             if 'worldbook_entries' not in inspector.get_table_names():
                 db.create_all()
                 app.logger.info('[迁移] 已创建 worldbook_entries 表')
+            else:
+                # 世界书扩展：协议条目（输出结构 / 创作规范 / 玩法包）需要独立分类与预算
+                wb_cols = {c['name'] for c in inspector.get_columns('worldbook_entries')}
+                with db.engine.begin() as conn:
+                    if 'category' not in wb_cols:
+                        conn.execute(text("ALTER TABLE worldbook_entries ADD COLUMN category VARCHAR(20) DEFAULT 'lore'"))
+                        app.logger.info('[迁移] 已为 worldbook_entries 增加 category 字段')
+                    if 'kind' not in wb_cols:
+                        conn.execute(text("ALTER TABLE worldbook_entries ADD COLUMN kind VARCHAR(20) DEFAULT ''"))
+                        app.logger.info('[迁移] 已为 worldbook_entries 增加 kind 字段')
+                    if 'source_key' not in wb_cols:
+                        conn.execute(text('ALTER TABLE worldbook_entries ADD COLUMN source_key VARCHAR(80)'))
+                        app.logger.info('[迁移] 已为 worldbook_entries 增加 source_key 字段')
             # marketplace_worldbook_entries — 广场卡片随卡分享的世界书条目
             if 'marketplace_worldbook_entries' not in inspector.get_table_names():
                 db.create_all()
