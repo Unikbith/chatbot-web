@@ -5,7 +5,8 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
 from models import (Conversation, Message, ModelProvider, PersonaTemplate,
-                    local_now, ConversationMediaLog, ConversationSummary, AiUsageLog)
+                    local_now, ConversationMediaLog, ConversationSummary, AiUsageLog,
+                    WorldBookEntry)
 from services.media_log import log_media
 
 
@@ -33,9 +34,10 @@ DEFAULT_REPLY_TEMPLATE = json.dumps({
     'name': '脸红',
     'protocol': 'full',
     'length': 'medium',
-    # 丰富面板内容（enhance）默认关闭：开启后才会注入「输出结构协议」，
-    # 每轮固定多几千字。面板要不要常开由用户在「界面标记 → 丰富面板内容」里决定。
-    'enhance': False,
+    # 丰富面板内容（enhance）默认开启，但**只开前两轮**：
+    # 前两轮注入结构协议把面板格式"教"给模型，之后 chat.py 会自动关掉它
+    # （_maybe_disable_enhance），靠上下文里已有的格式继续输出面板，每轮省约 3k 字。
+    'enhance': True,
 }, ensure_ascii=False)
 
 
@@ -176,6 +178,104 @@ def create_conversation():
     })
 
 
+# ---------------------------------------------------------------------------
+# 协议条目：两层开关的辅助
+#   总开关（对话设置）管一整类，条目开关（人物卡世界书）管单条，两者都开才注入。
+#   这里提供「这张卡上有多少条已启用」的统计与批量开关，供设置面板提示用户。
+# ---------------------------------------------------------------------------
+PROTOCOL_SCOPES = {
+    'structure': ('structure',),                 # 由「界面标记 + 丰富面板内容」控制
+    'append': ('content', 'experience', 'play'),  # 由「提示词兜底」控制
+}
+
+
+def protocol_entry_stats(user_id, persona_id):
+    """统计该人物卡上协议条目的启用情况：{'append': {'enabled': n, 'total': m}, ...}"""
+    stats = {scope: {'enabled': 0, 'total': 0} for scope in PROTOCOL_SCOPES}
+    if not persona_id:
+        return stats
+    rows = WorldBookEntry.query.filter(
+        WorldBookEntry.user_id == user_id,
+        WorldBookEntry.category == 'protocol',
+        db.or_(WorldBookEntry.persona_id == persona_id,
+               WorldBookEntry.persona_id.is_(None)),
+    ).all()
+    default_scope = 'append'
+    for row in rows:
+        scope = next((s for s, kinds in PROTOCOL_SCOPES.items()
+                      if (row.kind or '') in kinds), default_scope)
+        stats[scope]['total'] += 1
+        if row.enabled:
+            stats[scope]['enabled'] += 1
+    return stats
+
+
+@conversation_bp.route('/<int:conv_id>/protocol-stats', methods=['GET'])
+@jwt_required()
+def get_protocol_stats(conv_id):
+    """轻量接口：只回协议条目的启用统计（设置面板打开时用，避免拉整段消息）。"""
+    user_id = int(get_jwt_identity())
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).first()
+    if not conv:
+        return jsonify({'code': 404, 'message': '对话不存在'}), 404
+    from routes.chat import _effective_persona_id
+    persona_id = _effective_persona_id(conv, user_id)
+    return jsonify({
+        'code': 200,
+        'data': {'persona_id': persona_id,
+                 'stats': protocol_entry_stats(user_id, persona_id)},
+    })
+
+
+@conversation_bp.route('/<int:conv_id>/enable-protocol', methods=['POST'])
+@jwt_required()
+def enable_protocol_entries(conv_id):
+    """一键开关该对话人物卡上的协议条目（「对话设置」里的便捷入口）。
+
+    请求体：{scope: 'append' | 'structure' | 'all', enabled: true|false}
+      · append    → 创作与内容 / 剧情推进与体验 / 玩法包
+      · structure → 输出结构协议
+    总开关仍然有效：这里只是替用户去卡片里把条目开关批量打开/关掉，
+    避免「开了总开关却因为条目没开而没反应」的困惑。
+    """
+    user_id = int(get_jwt_identity())
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).first()
+    if not conv:
+        return jsonify({'code': 404, 'message': '对话不存在'}), 404
+
+    data = request.get_json(silent=True) or {}
+    scope = data.get('scope') or 'all'
+    enabled = bool(data.get('enabled', True))
+    if scope != 'all' and scope not in PROTOCOL_SCOPES:
+        return jsonify({'code': 400, 'message': '无效的 scope'}), 400
+
+    from routes.chat import _effective_persona_id
+    persona_id = _effective_persona_id(conv, user_id)
+    if not persona_id:
+        return jsonify({'code': 400, 'message': '该对话还没有绑定人物卡'}), 400
+
+    kinds = ([k for ks in PROTOCOL_SCOPES.values() for k in ks]
+             if scope == 'all' else list(PROTOCOL_SCOPES[scope]))
+    rows = WorldBookEntry.query.filter(
+        WorldBookEntry.user_id == user_id,
+        WorldBookEntry.category == 'protocol',
+        WorldBookEntry.persona_id == persona_id,
+        WorldBookEntry.kind.in_(kinds),
+    ).all()
+    changed = 0
+    for row in rows:
+        if bool(row.enabled) != enabled:
+            row.enabled = enabled
+            changed += 1
+    db.session.commit()
+    return jsonify({
+        'code': 200,
+        'message': ('已开启' if enabled else '已关闭') + f' {changed} 条协议条目',
+        'data': {'changed': changed, 'matched': len(rows),
+                 'stats': protocol_entry_stats(user_id, persona_id)},
+    })
+
+
 @conversation_bp.route('/<int:conv_id>', methods=['GET'])
 @jwt_required()
 def get_conversation(conv_id):
@@ -206,10 +306,15 @@ def get_conversation(conv_id):
                 d['content_html'] = ''
         payload.append(d)
 
+    # 协议条目启用情况：设置面板据此提示「总开关开了但卡片里一条都没开」
+    from routes.chat import _effective_persona_id
+    stats = protocol_entry_stats(user_id, _effective_persona_id(conv, user_id))
+
     return jsonify({
         'code': 200,
         'data': {
             **conv.to_dict(),
+            'protocol_stats': stats,
             'messages': payload
         }
     })

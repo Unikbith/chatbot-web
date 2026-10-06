@@ -43,8 +43,8 @@
           </el-select>
         </section>
 
-        <!-- 提示词兜底：现在等于「协议包总开关」—— 协议条目存在人物卡的世界书里，
-             用户可逐卡编辑 / 停用 / 删除；这里一键决定本对话要不要注入它们 -->
+        <!-- 提示词兜底 = 协议包总开关（控制"全部"）：协议条目存在人物卡的世界书里，
+             条目自己的开关控制"单独"，两层都开才会注入 -->
         <section class="cv-panel">
           <header class="cv-panel__head">
             <span class="cv-tick" aria-hidden="true"></span>
@@ -61,8 +61,38 @@
             <el-switch v-model="form.append_prompt_enabled" />
           </div>
           <p class="cv-panel__hint">
-            {{ t('控制「创作与内容协议」「剧情推进与体验协议」两条；面板结构由下面的「丰富面板内容」单独控制。协议条目在「人物卡 → 世界书」里，可逐条编辑、停用或删除。',
-              'Controls the writing/content and pacing protocol entries; the panel structure is controlled separately by “Rich Panel Content” below. Entries live in Persona → Worldbook and can be edited, disabled or deleted one by one.') }}
+            {{ t('总开关（控制全部）：创作与内容 / 剧情推进与体验 / 玩法包都归它管；输出结构协议由下面的「丰富面板内容」单独控制。',
+              'Master switch (controls all): writing & content, pacing, and play packs. The output-structure protocol is controlled separately by “Rich Panel Content” below.') }}
+          </p>
+          <!-- 两层开关的第二层在人物卡里：总开关开了但条目没开时，注入仍然是 0 —— 明确提示并给一键入口 -->
+          <p
+            v-if="form.append_prompt_enabled && appendStats.total"
+            class="cv-panel__hint cv-panel__hint--stat"
+            :class="{ 'is-warn': !appendStats.enabled }"
+          >
+            {{ t('该人物卡已启用', 'Persona card enabled') }}
+            <b>{{ appendStats.enabled }}/{{ appendStats.total }}</b>
+            {{ t('条内容类条目（总开关 + 卡片条目开关都要开才会注入）',
+              'content entries (both the master switch and the per-entry switch in the card must be on)') }}
+            <el-button
+              v-if="appendStats.enabled < appendStats.total"
+              size="small"
+              text
+              type="primary"
+              :loading="protoBusy"
+              @click="toggleProtocolEntries('append', true)"
+            >
+              {{ t('一键开启该卡条目', 'Enable all on card') }}
+            </el-button>
+            <el-button
+              v-else
+              size="small"
+              text
+              :loading="protoBusy"
+              @click="toggleProtocolEntries('append', false)"
+            >
+              {{ t('全部关闭', 'Disable all') }}
+            </el-button>
           </p>
         </section>
 
@@ -102,6 +132,37 @@
               </div>
               <el-switch v-model="form.prompt_enhance" />
             </div>
+
+            <!-- 结构协议同样是两层开关：这里的总开关 + 卡片里那条「① 输出结构协议」 -->
+            <p
+              v-if="form.prompt_enhance && structureStats.total"
+              class="cv-panel__hint cv-panel__hint--stat"
+              :class="{ 'is-warn': !structureStats.enabled }"
+            >
+              {{ t('该人物卡已启用', 'Persona card enabled') }}
+              <b>{{ structureStats.enabled }}/{{ structureStats.total }}</b>
+              {{ t('条结构协议条目（总开关 + 卡片条目开关都要开才会注入）',
+                'structure entries (both the master switch and the per-entry switch in the card must be on)') }}
+              <el-button
+                v-if="structureStats.enabled < structureStats.total"
+                size="small"
+                text
+                type="primary"
+                :loading="protoBusy"
+                @click="toggleProtocolEntries('structure', true)"
+              >
+                {{ t('一键开启该卡条目', 'Enable all on card') }}
+              </el-button>
+              <el-button
+                v-else
+                size="small"
+                text
+                :loading="protoBusy"
+                @click="toggleProtocolEntries('structure', false)"
+              >
+                {{ t('全部关闭', 'Disable all') }}
+              </el-button>
+            </p>
 
             <!-- 回复长度：决定每轮正文写多长 -->
             <div class="cv-toggle cv-toggle--sub">
@@ -385,14 +446,14 @@ function readTemplateId(raw) {
   }
 }
 
-/** 取回「提示词增强」开关：未存过时默认关闭（关掉每轮更省 token，用户自己按需开） */
+/** 取回「丰富面板内容」开关：未存过时默认开启（默认只开前两轮，之后后端会自动关掉） */
 function readPromptEnhance(raw) {
-  if (!raw) return false
+  if (!raw) return true
   try {
     const data = typeof raw === 'string' ? JSON.parse(raw) : raw
-    return data && data.enhance === true
+    return data && data.enhance === false ? false : true
   } catch (e) {
-    return false
+    return true
   }
 }
 
@@ -442,8 +503,8 @@ const form = reactive({
   rich_marker_enabled: true,
   // 回复渲染模板：默认使用档案风（不再有"不使用"这一档）
   reply_template_id: DEFAULT_TEMPLATE_ID,
-  // 丰富面板内容：默认关闭，由用户自己按需开启
-  prompt_enhance: false,
+  // 丰富面板内容：默认开启，但只开前两轮（后端在第 2 轮结束后自动关掉，并弹窗提示）
+  prompt_enhance: true,
   // 回复长度：默认长文
   reply_length_id: DEFAULT_LENGTH,
 })
@@ -492,8 +553,60 @@ function resetForm() {
   form.reply_template_id = readTemplateId(conv.reply_template)
   form.prompt_enhance = readPromptEnhance(conv.reply_template)
   form.reply_length_id = readLengthId(conv.reply_template)
+  // 协议条目的启用统计（两层开关里"卡片那一层"的现状），打开设置时刷新
+  loadProtocolStats()
   // 让本轮回填引起的 watch 在同一微任务里被忽略，下一轮才恢复自动保存
   nextTick(() => { suppressAuto = false })
+}
+
+// ---------------------------------------------------------------------------
+// 协议条目：两层开关
+//   总开关（本面板）控制"全部"，人物卡世界书里每条自己的开关控制"单独"；
+//   两层都开才会注入。这里显示第一条的统计，并提供一键批量开关的入口。
+// ---------------------------------------------------------------------------
+const EMPTY_STATS = () => ({ enabled: 0, total: 0 })
+const protocolStats = ref({ append: EMPTY_STATS(), structure: EMPTY_STATS() })
+const protoBusy = ref(false)
+
+const appendStats = computed(() => protocolStats.value.append || EMPTY_STATS())
+const structureStats = computed(() => protocolStats.value.structure || EMPTY_STATS())
+
+async function loadProtocolStats() {
+  const id = props.conversation?.id
+  protocolStats.value = { append: EMPTY_STATS(), structure: EMPTY_STATS() }
+  if (!id) return
+  try {
+    const res = await conversationApi.protocolStats(id)
+    if (res.code === 200) {
+      protocolStats.value = {
+        append: { ...EMPTY_STATS(), ...(res.data?.stats?.append || {}) },
+        structure: { ...EMPTY_STATS(), ...(res.data?.stats?.structure || {}) },
+      }
+    }
+  } catch (e) {
+    // 统计拿不到不影响设置面板本身，静默降级（提示行不显示）
+  }
+}
+
+/** 批量开关该人物卡上的协议条目（scope: append / structure / all） */
+async function toggleProtocolEntries(scope, enabled) {
+  const id = props.conversation?.id
+  if (!id) return
+  protoBusy.value = true
+  try {
+    const res = await conversationApi.enableProtocol(id, scope, enabled)
+    if (res.code === 200) {
+      ElMessage.success(res.message || t('已更新', 'Updated'))
+      if (res.data?.stats) protocolStats.value = res.data.stats
+      else loadProtocolStats()
+    } else {
+      ElMessage.warning(res.message || t('操作失败', 'Failed'))
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || t('操作失败', 'Failed'))
+  } finally {
+    protoBusy.value = false
+  }
 }
 
 watch(() => props.modelValue, (val) => {
@@ -689,6 +802,22 @@ watch(form, () => {
   font-size: 11.5px;
   line-height: 1.55;
   color: var(--text-secondary);
+}
+
+/* 协议条目启用统计行：总开关开了但卡片里一条都没开时用暖色提醒（否则用户会以为没生效） */
+.cv-panel__hint--stat {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: -4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--surface-hover, #f5f7fa);
+}
+.cv-panel__hint--stat.is-warn {
+  background: #fdf2e9;
+  color: #b96b1f;
 }
 
 .cv-field { width: 100%; }

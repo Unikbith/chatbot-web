@@ -418,6 +418,14 @@ const conversationApi = {
   async get(id) {
     return resAi.get(`/api/conversations/${id}`);
   },
+  // 批量开关该对话人物卡上的协议条目（scope: append | structure | all）
+  async enableProtocol(id, scope = 'all', enabled = true) {
+    return resAi.post(`/api/conversations/${id}/enable-protocol`, { scope, enabled });
+  },
+  // 只取协议条目启用统计（轻量，设置面板用）
+  async protocolStats(id) {
+    return resAi.get(`/api/conversations/${id}/protocol-stats`);
+  },
   async update(id, data) {
     return resAi.put(`/api/conversations/${id}`, data);
   },
@@ -484,6 +492,13 @@ const imageApi = {
 };
 
 // 管理后台专用请求实例：使用独立的管理员令牌（admin_token），避免与普通用户令牌冲突
+//
+// 长期免登录（与普通用户同一套思路）：
+//   access（admin_token，7 天，localStorage）+ refresh（admin_refresh_token，30 天）。
+//   access 过期时用 refresh 静默换新并重放本次请求 —— 管理员不需要每次进后台都登录。
+const ADMIN_ACCESS_KEY = "admin_token";
+const ADMIN_REFRESH_KEY = "admin_refresh_token";
+
 const adminReq = axios.create({
   baseURL,
   timeout: 30000,
@@ -491,19 +506,81 @@ const adminReq = axios.create({
 });
 adminReq.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("admin_token");
+    const token = localStorage.getItem(ADMIN_ACCESS_KEY);
     if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
   },
   (error) => Promise.reject(error),
 );
+
+// 续期去重：并发请求同时 401 时只发一次 refresh
+let adminRefreshPromise = null;
+
+/** 用 refresh 换新的 admin access；失败（refresh 也过期）才真正登出 */
+async function tryAdminRefresh() {
+  const refresh = localStorage.getItem(ADMIN_REFRESH_KEY);
+  if (!refresh) return null;
+  if (!adminRefreshPromise) {
+    adminRefreshPromise = axios
+      .post(`${baseURL}/api/admin/refresh`, null, {
+        headers: { Authorization: `Bearer ${refresh}` },
+        timeout: 15000,
+      })
+      .then((res) => {
+        const token = res.data?.data?.access_token;
+        if (!token) throw new Error("续期响应缺少 access_token");
+        localStorage.setItem(ADMIN_ACCESS_KEY, token);
+        return token;
+      })
+      .catch((err) => {
+        const status = err?.response?.status;
+        // 只有服务端明确说 refresh 无效才清掉，网络抖动不该把管理员踢出去
+        if (status === 401 || status === 403 || status === 422) {
+          localStorage.removeItem(ADMIN_REFRESH_KEY);
+          localStorage.removeItem(ADMIN_ACCESS_KEY);
+        }
+        return null;
+      })
+      .finally(() => {
+        adminRefreshPromise = null;
+      });
+  }
+  return adminRefreshPromise;
+}
+
+/**
+ * 启动时确保管理员登录态可用：没有 access 但有 refresh 就静默续期。
+ * 返回 true 表示「可以认为已登录」。
+ */
+export async function ensureAdminSession() {
+  if (localStorage.getItem(ADMIN_ACCESS_KEY)) return true;
+  if (!localStorage.getItem(ADMIN_REFRESH_KEY)) return false;
+  const token = await tryAdminRefresh();
+  return !!token;
+}
+
+/** 管理员退出登录：清掉两个令牌 */
+export function clearAdminSession() {
+  localStorage.removeItem(ADMIN_ACCESS_KEY);
+  localStorage.removeItem(ADMIN_REFRESH_KEY);
+}
+
 adminReq.interceptors.response.use(
   (response) => response.data,
-  (error) => {
-    logger.error("管理后台请求错误", error);
-    if (error.response?.status === 401) {
-      localStorage.removeItem("admin_token");
+  async (error) => {
+    const status = error.response?.status;
+    const original = error.config || {};
+    // access 过期：静默续期后重放一次（只重放一次，避免死循环）
+    if (status === 401 && !original.__retried) {
+      const token = await tryAdminRefresh();
+      if (token) {
+        original.__retried = true;
+        original.headers = { ...(original.headers || {}), Authorization: `Bearer ${token}` };
+        return adminReq.request(original);
+      }
+      clearAdminSession();
     }
+    logger.error("管理后台请求错误", error);
     return Promise.reject(error);
   },
 );
@@ -511,7 +588,15 @@ adminReq.interceptors.response.use(
 // ========== 后台管理 API（管理员） ==========
 const adminApi = {
   async login(username, password) {
-    return adminReq.post('/api/admin/login', { username, password });
+    const res = await adminReq.post('/api/admin/login', { username, password });
+    // 登录成功即落地两个令牌，之后靠静默续期长期免登录
+    const data = res?.data || {};
+    if (data.access_token) localStorage.setItem(ADMIN_ACCESS_KEY, data.access_token);
+    if (data.refresh_token) localStorage.setItem(ADMIN_REFRESH_KEY, data.refresh_token);
+    return res;
+  },
+  async refresh() {
+    return tryAdminRefresh();
   },
   async status() {
     return adminReq.get('/api/admin/me');
@@ -576,7 +661,7 @@ const adminApi = {
     return adminReq.post(`/api/admin/personas/batch-delete`, { ids });
   },
   async exportConversation(convId) {
-    const token = localStorage.getItem("admin_token");
+    const token = localStorage.getItem(ADMIN_ACCESS_KEY);
     const response = await fetch(`${baseURL}/api/admin/conversations/${convId}/export`, {
       method: "GET",
       headers: { ...(token && { Authorization: `Bearer ${token}` }) },
@@ -657,7 +742,7 @@ const adminApi = {
     return adminReq.post(`/api/feedback/admin/support-chats/${threadId}`, { content, image_url: imageUrl || undefined });
   },
   logout() {
-    localStorage.removeItem("admin_token");
+    clearAdminSession();
     localStorage.removeItem("admin_username");
   },
 };

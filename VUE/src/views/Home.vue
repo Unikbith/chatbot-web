@@ -763,19 +763,46 @@ function onReplyDone(convId) {
   loadLongTermMemory()
 }
 
-// 说明：后端原本会在「聊满 3 轮」时自动关闭提示词兜底、在「聊满 2 轮」时自动关闭
-// 提示词增强，前端这里曾有两个回调同步开关状态并弹窗。两个自动关闭都已移除
-// （会让用户刚打开的开关自己关掉；且关掉增强后输出结构规范不再注入，界面结构会漂移），
-// 因此这两个回调及其事件接线一并删除。
+// 「丰富面板内容」默认只开前两轮：第 2 轮结束后后端会自动关掉并下发事件。
+// 这里同步本地会话状态（设置面板读的就是 currentConv.reply_template）并弹窗说明，
+// 免得用户以为面板突然坏了 —— 面板本来就会照着上下文里已有的格式继续输出。
+function onPromptEnhanceDisabled() {
+  if (currentConv.value) {
+    try {
+      const tpl = typeof currentConv.value.reply_template === 'string'
+        ? JSON.parse(currentConv.value.reply_template || '{}')
+        : { ...(currentConv.value.reply_template || {}) }
+      tpl.enhance = false
+      currentConv.value.reply_template = JSON.stringify(tpl)
+    } catch (e) {
+      // 模板解析失败不影响提示本身
+    }
+  }
+  ElMessageBox.alert(
+    t('前两轮带上「丰富面板内容」是为了让 AI 学会面板格式，现在已自动关闭以节省 token（之后每轮省约 3k 字）。\n\n如果后续回复里的状态、面板、内心、选项显示不正常，请到「对话设置 → 界面标记 → 丰富面板内容」重新打开，设置里可以随时开启。',
+      'The first two rounds included "Rich Panel Content" so the AI learns the panel format; it is now off automatically to save tokens. If panels look wrong later, turn it back on in Conversation Settings → Rich Markers → Rich Panel Content.'),
+    t('已自动关闭「丰富面板内容」', '"Rich Panel Content" turned off'),
+    { confirmButtonText: t('知道了', 'Got it'), type: 'success' }
+  ).catch(() => {})
+}
 
 async function loadLongTermMemory() {
   if (!currentConvId.value) { longTermMemory.value = []; return }
   try {
     const res = await conversationApi.summaries(currentConvId.value)
     if (res.code === 200) {
-      // 取最近几条即可：更早的摘要已并入后续摘要，全列出来反而冗长
-      const items = res.data.items || []
-      longTermMemory.value = items.slice(-3).map(it => it.content).filter(Boolean)
+      const data = res.data || {}
+      // 长记忆 = 当前滚动摘要（每次压缩都是「旧摘要 + 新对话 → 新摘要」，
+      // 所以 current_summary 已经包含历次压缩的内容，且超长时会被再压缩）。
+      // 历次记录只是历史快照，直接列出来会把同一件事重复展示三遍，这里只做兜底：
+      // 老数据没有 current_summary 时才回落到最近几条记录。
+      const current = (data.current_summary || '').trim()
+      if (current) {
+        longTermMemory.value = [current]
+      } else {
+        const items = data.items || []
+        longTermMemory.value = items.slice(-3).map(it => it.content).filter(Boolean)
+      }
     }
   } catch (e) {
     logger.warn('加载长期记忆失败', e)
@@ -1412,6 +1439,7 @@ async function handleConvoSettingsSaved(payload) {
       :reply-template="replyTemplate"
       :long-term-memory="longTermMemory"
       @reply-done="onReplyDone"
+      @prompt-enhance-disabled="onPromptEnhanceDisabled"
       :is-free-api="chatStatus.is_free"
       :logged-in="isLoggedIn"
       :persona-greeting="currentPersona?.greeting || ''"

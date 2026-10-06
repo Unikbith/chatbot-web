@@ -8,14 +8,18 @@
     所以线上需要执行一次本脚本。
 
 新版开关语义（重要）
-    「对话设置」里的两个开关**默认都是关**，由用户按需打开，避免每轮白付 token：
-      · 提示词兜底（append_prompt_enabled）—— 协议包总开关：控制「创作与内容协议」
-        与「剧情推进与体验协议」，关掉就不注入这两条；
-      · 界面标记 + 丰富面板内容（rich_marker_enabled / enhance）—— 只控制「输出结构协议」，
-        两个都开才注入。
-    玩法包不看这两个开关，靠关键词按需命中（用户点明玩法时才注入）。
-    本脚本会把线上已有的会话统一改成「关」（上一版升级曾把它们改成「开」），
-    协议条目本身不删除，用户随时可以逐条启用或在设置里一键打开。
+    「对话设置」里两层的总开关（控制"全部"）：
+      · 提示词兜底（append_prompt_enabled）—— 控制创作与内容、剧情推进与体验、玩法包；
+        默认**关闭**；
+      · 界面标记 + 丰富面板内容（rich_marker_enabled / enhance）—— 控制「输出结构协议」；
+        默认**开前两轮**：前两轮把面板格式"教"给模型，第 2 轮结束后 chat.py
+        自动关掉（前端弹窗提示，用户想要常开可在设置里再打开）。
+    人物卡世界书里的每条协议条目还有自己的开关（控制"单独"）：**两层都开才会注入**。
+      ① 输出结构协议 = 默认开（配合上面两轮）；② 创作内容 / ③ 剧情体验 = 默认关；
+      玩法包 = 默认开（只有关键词命中才真的注入，平时不花 token）。
+
+    一次性的破坏性步骤用 deploy_markers 表打标记，**重复执行不会覆盖用户后来的选择**
+    （比如用户自己打开的开关，第二次跑脚本不会被再关掉）。
 
 执行顺序（线上推荐）
     1) 备份数据库：  sqlite3 instance/chatbot.db ".backup 'backup_before_upgrade.db'"
@@ -45,6 +49,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from sqlalchemy import text
+
 from app import create_app
 from extensions import db
 from models import (Conversation, PersonaTemplate, WorldBookEntry,
@@ -57,7 +63,39 @@ FIX_LEGACY = '--fix-legacy' in sys.argv
 FILL_USER_PROMPT = '--fill-user-prompt' in sys.argv
 DUP_CHECK = '--dup-check' in sys.argv
 
+# 一次性破坏性步骤的标记名（写进 deploy_markers 表；已打过就跳过）
+MARK_SWITCHES_OFF = 'switches_default_off_v1'
+MARK_ENTRIES_OFF = 'protocol_entries_default_off_v1'
+MARK_STRUCTURE_ON = 'structure_entry_default_on_v1'
+
 app = create_app()
+
+
+def ensure_marker_table():
+    """建标记表（脚本自己建，不依赖 app 启动迁移）。"""
+    db.session.execute(text(
+        'CREATE TABLE IF NOT EXISTS deploy_markers ('
+        '  name VARCHAR(64) PRIMARY KEY,'
+        '  applied_at DATETIME'
+        ')'
+    ))
+    db.session.commit()
+
+
+def marker_done(name):
+    row = db.session.execute(
+        text('SELECT name FROM deploy_markers WHERE name = :n'), {'n': name}
+    ).first()
+    return row is not None
+
+
+def mark_done(name):
+    db.session.execute(
+        text('INSERT OR IGNORE INTO deploy_markers (name, applied_at) '
+             'VALUES (:n, :t)'),
+        {'n': name, 't': __import__('datetime').datetime.now()},
+    )
+    db.session.commit()
 summary_rows = []
 
 
@@ -94,12 +132,20 @@ def diagnose_conversations():
             '标记=' + ('开' if resolve_rich_marker_enabled(conv) else '关'),
             '面板=' + ('开' if opts.get('enhance') is True else '关'),
         ])
+        # 卡片里条目自身的开关（控制"单独"）：统计已启用条数，帮用户定位"总开关开了还是没生效"
+        entries = WorldBookEntry.query.filter(
+            WorldBookEntry.user_id == conv.user_id,
+            WorldBookEntry.category == 'protocol',
+            db.or_(WorldBookEntry.persona_id == pid, WorldBookEntry.persona_id.is_(None)),
+        ).all() if pid else []
+        on_entries = sum(1 for e in entries if e.enabled)
+        entry_info = f' 条目={on_entries}/{len(entries)}' if entries else ''
         block = _protocol_block(conv.user_id, pid, [], conv)
         if block:
             injecting += 1
         state = f'注入 {len(block):>5} 字' if block else '注入     0 字'
         flag = ('  ⚠ ' + '；'.join(problems)) if problems else ''
-        print(f'    #{conv.id:<5} 用户{conv.user_id:<3} {state} [{switches}]{flag}')
+        print(f'    #{conv.id:<5} 用户{conv.user_id:<3} {state} [{switches}{entry_info}]{flag}')
     print(f'  当前每轮实际注入协议包的会话：{injecting} / {len(rows)} 个'
           f'（其余都是开关关着，省 token）')
     return injecting
@@ -155,6 +201,7 @@ def check_duplicate_injection():
 
 
 with app.app_context():
+    ensure_marker_table()
     print('=' * 68)
     print('线上升级' + ('（dry-run：不写库）' if DRY else '')
           + ('（诊断模式：只读）' if DIAGNOSE else ''))
@@ -220,48 +267,115 @@ with app.app_context():
     report('AI 人物卡总数', len(cards))
     report('新增协议条目', created_total)
     report('刷新协议条目正文', updated_total)
-    # 三条核心协议（结构 / 创作与内容 / 剧情推进）不再是世界书里的「常驻」：
-    # 它们由会话开关控制，条目自身的 always_on 已经没有意义，统一清掉以免界面上
-    # 显示成「常驻」误导用户（玩法包仍旧靠关键词按需触发）。
-    core_rows = WorldBookEntry.query.filter(
-        WorldBookEntry.category == 'protocol',
-        WorldBookEntry.kind.in_(['structure', 'content', 'experience']),
-        WorldBookEntry.always_on.is_(True),
-    ).all()
-    report('核心协议条目取消「常驻」标记', len(core_rows))
-    if not DRY:
-        for row in core_rows:
-            row.always_on = False
+
+    # 1b. 核心协议条目：默认改成「关」（一次性）
+    # 两层开关里"卡片这一层"：三条核心条目种入即关，用户自己在卡片里逐条打开，
+    # 或在「对话设置」点「一键开启该卡条目」。玩法包保持开（只有关键词命中才注入）。
+    # 这一步会覆盖用户过去的开关状态，所以只在第一次执行时做（打标记），
+    # 之后再跑脚本不会把用户自己打开的条目又关掉。
+    already = marker_done(MARK_ENTRIES_OFF)
+    if already:
+        print('\n[1b] 核心协议条目默认关闭 —— 已执行过（跳过，不覆盖用户后来的选择）')
+    else:
+        print('\n[1b] 核心协议条目：默认关闭（用户按需在卡片里逐条打开）')
+        rows = WorldBookEntry.query.filter(
+            WorldBookEntry.category == 'protocol',
+            WorldBookEntry.kind.in_(['structure', 'content', 'experience']),
+        ).all()
+        report('核心协议条目总数', len(rows))
+        report('其中当前是开启的（将被关闭）', sum(1 for r in rows if r.enabled))
+        report('核心协议条目取消「常驻」标记', sum(1 for r in rows if r.always_on))
+        if not DRY:
+            for row in rows:
+                row.enabled = False
+                row.always_on = False
+            mark_done(MARK_ENTRIES_OFF)
+        else:
+            print('       （dry-run：未打标记，正式执行时才生效）')
+
     protocol_now = WorldBookEntry.query.filter_by(category='protocol').count()
     report('协议条目现有总数', protocol_now)
+    report('协议条目中已启用的', WorldBookEntry.query.filter_by(
+        category='protocol', enabled=True).count())
 
-    # ---------- 2. 会话开关：跟着新默认走（都关，省 token） ----------
-    print('\n[2] 会话开关：提示词兜底（新默认关）、丰富面板内容（新默认关）')
+    # 1c. ① 输出结构协议：默认改成「开」（一次性）
+    # 它的总开关「丰富面板内容」默认开前两轮，条目关着那两轮就白开了。
+    if marker_done(MARK_STRUCTURE_ON):
+        print('\n[1c] 输出结构协议默认开启 —— 已执行过（跳过）')
+    else:
+        print('\n[1c] 输出结构协议：默认开启（配合「丰富面板内容」默认开前两轮）')
+        rows = WorldBookEntry.query.filter(
+            WorldBookEntry.category == 'protocol',
+            WorldBookEntry.kind == 'structure',
+        ).all()
+        report('结构协议条目总数', len(rows))
+        report('其中当前是关闭的（将被开启）', sum(1 for r in rows if not r.enabled))
+        if not DRY:
+            for row in rows:
+                row.enabled = True
+            mark_done(MARK_STRUCTURE_ON)
+        else:
+            print('       （dry-run：未打标记，正式执行时才生效）')
+
+    # ---------- 2. 会话开关：一次性刷成新默认（历史会话都关，省 token） ----------
+    print('\n[2] 一次性：历史会话的开关刷成默认关闭（提示词兜底 / 丰富面板内容）')
     # 上一版把老会话一律改成「开」，协议包每轮无条件注入 ~8k 字，token 消耗偏高。
     # 新默认改为「关」：由用户在「对话设置」里按需开；协议条目本身仍留在卡的
     # 世界书里，用户随时可以逐条编辑 / 启用，内容没有被删。
-    flag_rows = Conversation.query.filter(
-        db.or_(Conversation.append_prompt_enabled.is_(None),
-               Conversation.append_prompt_enabled.is_(True))
-    ).all()
-    report('提示词兜底需要改为关闭', len(flag_rows))
-    if not DRY:
-        for conv in flag_rows:
-            conv.append_prompt_enabled = False
+    # 同样只在第一次执行时改，避免二次运行把用户后来打开的开关又关掉。
+    if marker_done(MARK_SWITCHES_OFF):
+        print('  已执行过（跳过，不覆盖用户后来的开关选择）')
+    else:
+        flag_rows = Conversation.query.filter(
+            db.or_(Conversation.append_prompt_enabled.is_(None),
+                   Conversation.append_prompt_enabled.is_(True))
+        ).all()
+        report('提示词兜底需要改为关闭', len(flag_rows))
+        if not DRY:
+            for conv in flag_rows:
+                conv.append_prompt_enabled = False
 
-    enh_ids = []
+        enh_ids = []
+        for conv in Conversation.query.filter(Conversation.reply_template.isnot(None)).all():
+            try:
+                tpl = json.loads(conv.reply_template)
+            except (TypeError, ValueError):
+                continue
+            # 缺字段（None）也算「不是关」，一并补成 false —— 与前端默认一致
+            if isinstance(tpl, dict) and tpl.get('enhance') is not False:
+                tpl['enhance'] = False
+                enh_ids.append(conv.id)
+                if not DRY:
+                    conv.reply_template = json.dumps(tpl, ensure_ascii=False)
+        report('丰富面板内容需要改为关闭', len(enh_ids))
+        if not DRY:
+            mark_done(MARK_SWITCHES_OFF)
+        else:
+            print('       （dry-run：未打标记，正式执行时才生效）')
+
+    # 2b. 还处在「前两轮」窗口里的会话：把「丰富面板内容」补开
+    # 新默认是「开前两轮，之后自动关」。已经聊过两轮的老会话保持关闭（格式早已在上下文里），
+    # 但刚建的新会话/只聊了一轮的会话如果被上面那步关了，就永远学不到面板格式 —— 补回来。
+    # 这一步不需要标记：跑完第 2 轮后 chat.py 自己会关，收敛且幂等。
+    print('\n[2b] 前两轮窗口内的会话补开「丰富面板内容」')
+    from models import Message  # 局部导入：脚本其它地方用不到
+    from routes.chat import ENHANCE_ROUNDS_BEFORE_OFF  # 与注入侧保持同一个阈值
+    fixed_enh = 0
     for conv in Conversation.query.filter(Conversation.reply_template.isnot(None)).all():
         try:
             tpl = json.loads(conv.reply_template)
         except (TypeError, ValueError):
             continue
-        # 缺字段（None）也算「不是关」，一并补成 false —— 与前端默认一致
-        if isinstance(tpl, dict) and tpl.get('enhance') is not False:
-            tpl['enhance'] = False
-            enh_ids.append(conv.id)
-            if not DRY:
-                conv.reply_template = json.dumps(tpl, ensure_ascii=False)
-    report('丰富面板内容需要改为关闭', len(enh_ids))
+        if not isinstance(tpl, dict) or tpl.get('enhance') is True:
+            continue
+        rounds = Message.query.filter_by(conversation_id=conv.id, role='user').count()
+        if rounds >= ENHANCE_ROUNDS_BEFORE_OFF:
+            continue
+        tpl['enhance'] = True
+        fixed_enh += 1
+        if not DRY:
+            conv.reply_template = json.dumps(tpl, ensure_ascii=False)
+    report(f'轮次 < {ENHANCE_ROUNDS_BEFORE_OFF} 的会话补开', fixed_enh)
 
     # ---------- 3. 会话：补绑人物卡（协议条目按卡存） ----------
     print('\n[3] 给没绑定人物卡的会话补绑默认卡')

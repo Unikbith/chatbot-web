@@ -86,7 +86,7 @@ console.log('\n[4] 世界书编辑器自身：条目可选、有上限')
   ok('说明可不填', wb.includes('可不填'))
 }
 
-console.log('\n[5] 会话设置：「角色阵容」已下线，两个开关默认关闭（省 token）')
+console.log('\n[5] 会话设置：两个总开关（兜底默认关、面板默认开两轮）')
 {
   const vue = read('components/ConversationSettings.vue')
   // 注释里会提到"角色阵容已下线"，所以只断言界面上不再有这个面板标题
@@ -99,12 +99,16 @@ console.log('\n[5] 会话设置：「角色阵容」已下线，两个开关默�
   ok('提示词兜底表单默认 false', /append_prompt_enabled:\s*false/.test(vue))
   ok('提示词兜底回填时 NULL 视为关闭',
     /form\.append_prompt_enabled = conv\.append_prompt_enabled == null \? false/.test(vue))
-  ok('丰富面板内容回填时默认关闭', /function readPromptEnhance[\s\S]{0,200}?return false/.test(vue))
-  ok('丰富面板内容表单默认 false', /prompt_enhance:\s*false/.test(vue))
+  ok('丰富面板内容回填时默认开启（只开前两轮）',
+    /function readPromptEnhance[\s\S]{0,300}?return true/.test(vue))
+  ok('丰富面板内容表单默认 true', /prompt_enhance:\s*true/.test(vue))
   ok('提示词兜底文案说明「注入协议条目控制输出内容，关掉后每轮更省 token」',
     vue.includes('注入协议条目控制输出内容，关掉后每轮更省 token'))
-  ok('新对话默认模板里 enhance=false',
-    /enhance:\s*false/.test(read('utils/replyTemplates.js')))
+  ok('新对话默认模板里 enhance=true（前两轮）',
+    /enhance:\s*true/.test(read('utils/replyTemplates.js')))
+  ok('总开关旁显示卡片里条目的启用情况（两层开关提示）',
+    vue.includes('appendStats') && vue.includes('structureStats')
+    && vue.includes("t('一键开启该卡条目', 'Enable all on card')"))
 }
 
 console.log('\n[6] 后端：开关默认值与门控逻辑')
@@ -120,27 +124,44 @@ console.log('\n[6] 后端：开关默认值与门控逻辑')
   ok('协议包：硬注入已移除（_get_system_prompt 不再拼兜底词）',
     !/_append_global_prompt\(body/.test(chat))
   ok('协议包：三条核心协议都不是常驻条目（改由会话开关控制）',
-    /'source_key': 'protocol:structure'[\s\S]{0,200}?'always_on': False/.test(pack)
-    && /'source_key': 'protocol:content'[\s\S]{0,200}?'always_on': False/.test(pack)
-    && /'source_key': 'protocol:experience'[\s\S]{0,200}?'always_on': False/.test(pack))
+    /'source_key': 'protocol:structure'[\s\S]{0,220}?'always_on': False/.test(pack)
+    && /'source_key': 'protocol:content'[\s\S]{0,220}?'always_on': False/.test(pack)
+    && /'source_key': 'protocol:experience'[\s\S]{0,220}?'always_on': False/.test(pack))
   ok('协议包：结构协议由「界面标记 + 丰富面板内容」门控',
     /'gate': 'enhance'/.test(pack)
     && /if not \(structure_on and enhance\):\s*\n\s*continue/.test(chat))
-  ok('协议包：创作/体验协议由「提示词兜底」门控（与面板开关互相独立）',
+  ok('协议包：创作/体验/玩法都归「提示词兜底」总闸管',
     /'gate': 'append'/.test(pack)
-    && /if kind in \('content', 'experience'\):[\s\S]{0,200}?if not append_on:\s*\n\s*continue/.test(chat))
+    && /if not append_on:\s*\n\s*continue/.test(chat))
   ok('协议包：三个开关全关时一个字都不注入', 
     /if not fixed_bodies and not play_bodies:\s*\n\s*return ''/.test(chat))
   ok('协议包：玩法扩展包是按需触发（关键词命中才注入）',
     /'kind': 'play',\s*\n\s*'gate': 'play',\s*\n\s*'always_on': False/.test(pack))
+  ok('协议包：卡片里结构条目默认开、内容/体验默认关',
+    /'source_key': 'protocol:structure'[\s\S]{0,220}?'default_enabled': True/.test(pack)
+    && /'source_key': 'protocol:content'[\s\S]{0,220}?'default_enabled': False/.test(pack)
+    && /'source_key': 'protocol:experience'[\s\S]{0,220}?'default_enabled': False/.test(pack))
+  ok('丰富面板内容：第 2 轮后自动关闭并下发事件',
+    /ENHANCE_ROUNDS_BEFORE_OFF = 2/.test(chat)
+    && /def _maybe_disable_enhance/.test(chat)
+    && /prompt_enhance_disabled/.test(chat))
   ok('协议包含双男主与色情玩法包',
     pack.includes('protocol:play:multi') && pack.includes('protocol:play:sex'))
-  ok('enhance 未设置时按关闭处理',
-    /enhance = opts\.get\('enhance'\) is True/.test(rich))
+  ok('enhance 未设置时按开启处理（默认开两轮）',
+    /enhance = True if conv is None else \(opts\.get\('enhance'\) is True\)/.test(chat)
+    && /enhance = opts\.get\('enhance'\) is True/.test(rich))
   ok('篇幅要求跟着协议一起注入（全关时不多付）',
     /length_text = reply_spec\.LENGTH_PROMPTS\.get\(length_id\)/.test(chat))
+  ok('长记忆超长时会再压缩而不是直接截断',
+    /SUMMARY_CONDENSE_TRIGGER/.test(chat) && /def _condense_long_memory/.test(chat)
+    && /def _maybe_condense_long_memory/.test(chat) && /SUMMARY_CONDENSE_PROMPT/.test(chat))
+  ok('长记忆再压缩有冷却，避免每轮白花一次调用',
+    /SUMMARY_CONDENSE_COOLDOWN_HOURS/.test(chat) && /memory_condense/.test(chat))
+  ok('注入侧超长只按整行截断（兜底，尽量不切掉半条事实）',
+    /def _truncate_memory_on_line/.test(chat))
+  ok('导出的长记忆以当前滚动摘要为准（旧快照不再拼接）',
+    /if row\.msg_from != row\.msg_to:\s*\n\s*continue/.test(chat))
   ok('不再有「聊满三轮自动关闭提示词兜底」', !chat.includes('提示词兜底已自动关闭'))
-  ok('不再有「聊满两轮自动关闭丰富面板内容」', !chat.includes('已自动关闭，以减少后续 Token 消耗'))
   ok('多角色注入函数已移除',
     !chat.includes('_multi_character_block') && !chat.includes('【角色阵容】'))
 }
@@ -161,8 +182,9 @@ console.log('\n[7] 协议包 UI：卡片里能看见、能恢复、排版分组'
     /personaApi\.removeWorldBook[\s\S]{0,300}?ElMessage\.error/.test(panel))
   ok('世界书表头有窄屏适配', /@media \(max-width: 768px\) \{[\s\S]{0,200}?\.wb-head/.test(panel))
   ok('缺失的 .form-hint 已补样式', /\.form-hint\s*\{/.test(panel))
-  ok('对话设置里说明协议条目位置',
-    conv.includes('协议条目在「人物卡 → 世界书」里') || conv.includes('Protocol entries live in Persona'))
+  ok('对话设置里说明协议条目位置（世界书 / 两层开关）',
+    conv.includes('协议条目') && conv.includes('世界书')
+    || conv.includes('Protocol entries live in Persona'))
   // 世界书排版：分组 + 默认收起 + 展开看全文
   ok('世界书按「协议包 / 我的设定条目」分组',
     panel.includes('wbGroups') && panel.includes("t('协议包', 'Protocol pack')")

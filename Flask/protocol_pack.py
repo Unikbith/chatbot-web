@@ -187,6 +187,16 @@ def protocol_entries():
     """返回要种入每张人物卡的协议条目定义（供幂等种入使用）。
 
     每条都自带 source_key：同 key 视为同一条，重复种入只会更新内容，不会产生副本。
+
+    两层开关（都要开才注入）：
+      · 对话设置里的总开关（提示词兜底 / 界面标记 + 丰富面板内容）—— 控制"这一整类"；
+      · 卡片里条目自己的开关（WorldBookEntry.enabled）—— 控制"这一条"。
+    default_enabled 的取值理由：
+      · ① 输出结构协议 = True —— 它的总开关（丰富面板内容）默认开前两轮，
+        条目必须是开的，那两轮才真的注入到结构规范（之后总开关自动关闭）；
+      · ② 创作与内容 / ③ 剧情推进与体验 = False —— 总开关（提示词兜底）默认关闭，
+        条目也默认关，用户想要创作规范时自己在卡片里逐条打开；
+      · 玩法包 = True —— 本来就只有关键词命中才注入，平时不花 token。
     """
     # 结构协议 = 标记词表 + 每轮输出结构（**不含篇幅档**）：
     # 篇幅是会话级设置，由 _protocol_block 按当前档位动态追加；
@@ -200,6 +210,8 @@ def protocol_entries():
             'kind': 'structure',
             'gate': 'enhance',
             'always_on': False,
+            # 默认开：它的总开关默认开前两轮，条目关着那两轮就白开了（见上方说明）
+            'default_enabled': True,
             'keywords': '',
             'weight': 100,
             'content': structure,
@@ -210,6 +222,7 @@ def protocol_entries():
             'kind': 'content',
             'gate': 'append',
             'always_on': False,   # 不再常驻：默认关闭，由会话开关决定是否注入
+            'default_enabled': False,
             'keywords': '',
             'weight': 90,
             'content': _content_protocol(),
@@ -220,6 +233,7 @@ def protocol_entries():
             'kind': 'experience',
             'gate': 'append',
             'always_on': False,   # 同上
+            'default_enabled': False,
             'keywords': '',
             'weight': 80,
             'content': _EXPERIENCE,
@@ -232,6 +246,7 @@ def protocol_entries():
             'kind': 'play',
             'gate': 'play',
             'always_on': False,          # 玩法包按需触发（关键词命中才注入）
+            'default_enabled': True,     # 只有命中关键词才会真的花 token，保持可用
             'keywords': pack['keywords'],
             'weight': 10,
             'content': pack['content'],

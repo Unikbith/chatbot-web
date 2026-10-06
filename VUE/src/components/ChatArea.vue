@@ -74,6 +74,8 @@ const emit = defineEmits([
   'modelChange',
   // 本轮回复结束：父组件借此刷新长期记忆（记忆回廊）等派生数据
   'reply-done',
+  // 「丰富面板内容」被后端自动关闭（默认只开前两轮）：父组件同步开关状态并弹窗提示
+  'prompt-enhance-disabled',
   'toggleSidebar',
   'openMemoryTransfer'
 ]);
@@ -576,7 +578,10 @@ const handleSend = async () => {
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; applyRichRawStreaming(aiMsg); }
       if (tokens) aiMsg.tokens = tokens;
-      if (data.choices?.[0]?.delta?.message_id) aiMsg.id = data.choices[0].delta.message_id;
+      const delta = data.choices?.[0]?.delta || {};
+      if (delta.message_id) aiMsg.id = delta.message_id;
+      // 「丰富面板内容」到达设定轮次后由后端自动关闭：交给父组件弹窗并同步开关状态
+      if (delta.prompt_enhance_disabled) emit('prompt-enhance-disabled');
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 
@@ -861,7 +866,10 @@ const handleVisionChat = async (text) => {
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; applyRichRawStreaming(aiMsg); }
       if (tokens) aiMsg.tokens = tokens;
-      if (data.choices?.[0]?.delta?.message_id) aiMsg.id = data.choices[0].delta.message_id;
+      const delta = data.choices?.[0]?.delta || {};
+      if (delta.message_id) aiMsg.id = delta.message_id;
+      // 「丰富面板内容」到达设定轮次后由后端自动关闭：交给父组件弹窗并同步开关状态
+      if (delta.prompt_enhance_disabled) emit('prompt-enhance-disabled');
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 
@@ -1080,7 +1088,10 @@ const regenerate = async (assistantIndex = null) => {
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; applyRichRawStreaming(aiMsg); }
       if (tokens) aiMsg.tokens = tokens;
-      if (data.choices?.[0]?.delta?.message_id) aiMsg.id = data.choices[0].delta.message_id;
+      const delta = data.choices?.[0]?.delta || {};
+      if (delta.message_id) aiMsg.id = delta.message_id;
+      // 「丰富面板内容」到达设定轮次后由后端自动关闭：交给父组件弹窗并同步开关状态
+      if (delta.prompt_enhance_disabled) emit('prompt-enhance-disabled');
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 

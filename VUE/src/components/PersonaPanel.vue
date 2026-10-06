@@ -161,7 +161,7 @@
               </div>
               <div class="wb-desc">
                 {{ t('只在聊到相关词时才加载的设定，省 token 也能写更多内容。', 'Lore loaded only when relevant — saves tokens, holds more.') }}
-                <b>{{ t('常驻', 'Always') }}</b>{{ t('＝每轮都注入；其余按触发词命中才注入。协议包的三条核心协议由「对话设置」里的开关控制，不占这里的常驻。', ' = injected every turn; others load when a trigger word appears. The three core protocol entries are controlled by switches in Conversation Settings instead.') }}
+                <b>{{ t('常驻', 'Always') }}</b>{{ t('＝每轮都注入；其余按触发词命中才注入。协议条目默认是关的：先在这里打开单条，再到「对话设置」打开对应的总开关，两层都开才会注入。', ' = injected every turn; others load when a trigger word appears. Protocol entries are off by default: turn the entry on here and the matching master switch in Conversation Settings — both are required.') }}
                 <span v-if="!editingPersona" class="wb-draft-note">{{ t('新建模式下条目会随人物卡一起保存。', 'In create mode, entries are saved with the card.') }}</span>
               </div>
             </div>
@@ -480,8 +480,8 @@ const wbGroups = computed(() => {
     groups.push({
       key: 'protocol',
       name: t('协议包', 'Protocol pack'),
-      hint: t('三条核心协议在「对话设置」里用开关控制（提示词兜底 / 界面标记 + 丰富面板内容），玩法包按触发词命中才注入。可停用、改写或删除。',
-        'The three core protocols are controlled by switches in Conversation Settings; play packs load on trigger words. Editable and removable.'),
+      hint: t('默认关闭。两层开关都要开才会注入：这里打开单条 + 「对话设置」里的总开关（提示词兜底 / 界面标记 + 丰富面板内容）。玩法包按触发词命中才注入。',
+        'Off by default. Two switches must both be on: the entry here, plus the master switch in Conversation Settings. Play packs load on trigger words.'),
       items: protocol,
     })
   }
@@ -501,7 +501,7 @@ async function restoreProtocolPack() {
   if (!editingPersona.value) return
   try {
     await ElMessageBox.confirm(
-      t('将把协议条目（输出结构 / 创作与内容 / 剧情推进 / 玩法扩展包）恢复成默认内容并重新启用，你改写过的协议条目会被覆盖。继续？', 'This restores all protocol entries to their defaults and re-enables them. Your edits to protocol entries will be overwritten. Continue?'),
+      t('将把协议条目（输出结构 / 创作与内容 / 剧情推进 / 玩法扩展包）恢复成默认内容并启用，你改写过的协议条目会被覆盖。注意：是否真的注入还取决于「对话设置」里的总开关（提示词兜底 / 界面标记 + 丰富面板内容）。继续？', 'This restores all protocol entries to their defaults and enables them. Your edits to protocol entries will be overwritten. Whether they are injected still depends on the master switches in Conversation Settings. Continue?'),
       t('恢复默认协议包', 'Restore protocol pack'),
       { type: 'warning', confirmButtonText: t('恢复', 'Restore'), cancelButtonText: t('取消', 'Cancel') }
     )

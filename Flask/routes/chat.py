@@ -475,8 +475,45 @@ DEFAULT_REPLY_TEMPLATE_JSON = json.dumps({
     'name': '脸红',
     'protocol': 'full',
     'length': 'medium',
-    'enhance': False,
+    # 默认开启，但只开前两轮（见 _maybe_disable_enhance）
+    'enhance': True,
 }, ensure_ascii=False)
+
+
+# 「丰富面板内容」自动关闭的轮次：前两轮注入结构协议（模型先学会面板格式），
+# 之后不再注入 —— 面板靠上下文里已有的格式继续输出，每轮省下结构规范那 ~3k 字。
+ENHANCE_ROUNDS_BEFORE_OFF = 2
+
+
+def _maybe_disable_enhance(conv, conversation_id):
+    """第 2 轮回答落库后自动关掉「丰富面板内容」，并返回要下发的 SSE 片段。
+
+    实测：第一轮带着结构协议聊过之后，后续即使不再注入，模型也会照着上下文里
+    已有的面板格式继续输出；所以只在开头的两轮付费把格式"教"进去即可。
+    只自动关这一次：用户自己在「对话设置」里重新打开后，不会又被关掉
+    （判定条件是"正好第 2 轮"，而那时早已过去）。
+    """
+    try:
+        if conv is None or conversation_id is None or not conv.reply_template:
+            return []
+        tpl = json.loads(conv.reply_template)
+        if not isinstance(tpl, dict) or tpl.get('enhance') is not True:
+            return []
+        rounds = Message.query.filter_by(
+            conversation_id=conversation_id, role='user').count()
+        if rounds != ENHANCE_ROUNDS_BEFORE_OFF:
+            return []
+        tpl['enhance'] = False
+        conv.reply_template = json.dumps(tpl, ensure_ascii=False)
+        db.session.commit()
+        current_app.logger.info(
+            f'[丰富面板内容] 对话{conversation_id} 已完成 {rounds} 轮，自动关闭结构规范注入'
+        )
+        return [sse_settings({'prompt_enhance_disabled': True,
+                              'prompt_enhance_rounds': rounds})]
+    except Exception as e:
+        current_app.logger.warning(f'[丰富面板内容] 自动关闭失败：{e}')
+        return []
 
 
 def _log_cache_hit(conversation_id, prompt_tokens, cache_hit_tokens):
@@ -538,6 +575,14 @@ SUMMARY_THRESHOLD_MAX = 20
 SUMMARY_MESSAGES_PER_ROUND = 2    # 1 轮 = 1 条用户消息 + 1 条 AI 回复
 SUMMARY_KEEP_RECENT = 4           # 压缩后仍保留最近若干条原文，避免刚说的话也被压掉
 
+# 长记忆本身也会越滚越长：每次压缩都是「旧摘要 + 新对话 → 新摘要」，
+# 模型偶尔会写着写着超长。超过触发线就**再压一次**（摘要的摘要），
+# 而不是等到注入时硬截断 —— 截断会把早期"发生过的事"整条切掉。
+SUMMARY_CONDENSE_TRIGGER = 900        # 长记忆超过 900 字就再压一次
+SUMMARY_CONDENSE_TARGET = 600         # 再压后的目标上限（= 注入上限 MAX_LONG_MEMORY_CHARS）
+SUMMARY_CONDENSE_MAX_ROUNDS = 2       # 最多连压两次，防止模型不听话时反复调用
+SUMMARY_CONDENSE_COOLDOWN_HOURS = 6   # 上一次没压下来时，隔这么久再试（别每轮都白花一次调用）
+
 SUMMARY_SYSTEM_PROMPT = (
     "你是一个对话记忆压缩器。请把「已有摘要」与「新增对话」合并成一份连贯的摘要。\n"
     "要求：\n"
@@ -546,6 +591,18 @@ SUMMARY_SYSTEM_PROMPT = (
     "3. 多角色场景必须写清每条记忆属于哪个角色，禁止把不同角色的经历、知识、情绪或关系进度合并；\n"
     "4. 用第三人称客观陈述，中文，最多输出 3-6 个短点，总字数严格控制在 50-500 字；\n"
     "5. 只输出摘要正文，不要任何开头客套或解释。"
+)
+
+# 长记忆再压缩（摘要的摘要）：只丢措辞、不丢事实。
+SUMMARY_CONDENSE_PROMPT = (
+    "你是一个长期记忆压缩器。下面是一份已经压缩过的对话记忆，现在它太长了。\n"
+    "请把它再压缩一次，输出更短、更密的版本。硬性要求：\n"
+    "1. 「发生过的事」与「做过的事」一条都不能丢：关键事件与结果、承诺与约定、关系变化、\n"
+    "   用户偏好与雷点、未解决的线索与伏笔、当前状态与所在地点；\n"
+    "2. 只删措辞、重复与过程描写，不删事实；同一件事的多句描述合成一个短语；\n"
+    "3. 多角色记忆必须标注属于哪个角色，禁止合并不同角色的经历与关系进度；\n"
+    "4. 第三人称、短句分点、中文；目标 300 字以内，最多不超过 600 字；\n"
+    "5. 只输出压缩后的记忆正文，不要客套、解释或标题。"
 )
 
 
@@ -566,6 +623,120 @@ def _summarized_message_count(conv):
         Message.conversation_id == conv.id,
         Message.id <= conv.summary_upto_id
     ).count()
+
+
+def _run_memory_compressor(provider, model, system_prompt, text):
+    """调用模型做一次记忆压缩 / 再压缩；失败返回 None（绝不影响正常聊天）。"""
+    try:
+        response, error = AIService.chat_completions(
+            provider=provider,
+            messages=[
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': text},
+            ],
+            stream=False,
+            temperature=0.3,
+            model=model,
+        )
+    except Exception as e:
+        current_app.logger.warning(f'[记忆宫殿] 压缩请求异常: {e}')
+        return None
+    if response is None or getattr(response, 'status_code', None) != 200:
+        current_app.logger.warning(f'[记忆宫殿] 压缩失败: {error}')
+        return None
+    try:
+        out = (response.json()['choices'][0]['message']['content'] or '').strip()
+    except (KeyError, IndexError, TypeError, ValueError):
+        current_app.logger.warning('[记忆宫殿] 压缩响应格式异常')
+        return None
+    return out or None
+
+
+def _condense_long_memory(text, provider, model, rounds=SUMMARY_CONDENSE_MAX_ROUNDS):
+    """把偏长的长记忆再压一次（摘要的摘要），返回压缩后的文本。
+
+    只压到目标字数以内就停；某一轮没压下来（模型输出不比原文短）也停，避免白花调用。
+    """
+    current = (text or '').strip()
+    for _ in range(max(1, rounds)):
+        if len(current) <= SUMMARY_CONDENSE_TARGET:
+            break
+        condensed = _run_memory_compressor(
+            provider, model, SUMMARY_CONDENSE_PROMPT, current)
+        if not condensed or len(condensed) >= len(current):
+            break
+        current = condensed
+    return current
+
+
+def _condense_meta_of(conv):
+    """读取 settings JSON 里的「长记忆再压缩」标记（容错，坏的当空字典）。"""
+    try:
+        data = json.loads(conv.settings) if getattr(conv, 'settings', None) else {}
+    except (TypeError, ValueError):
+        data = {}
+    meta = data.get('memory_condense') if isinstance(data, dict) else None
+    return data if isinstance(data, dict) else {}, (meta if isinstance(meta, dict) else {})
+
+
+def _write_condense_meta(conv, meta):
+    """把再压缩标记写回 settings（保留 settings 里其它键，别覆盖历史字段）。"""
+    data, _old = _condense_meta_of(conv)
+    data['memory_condense'] = meta
+    conv.settings = json.dumps(data, ensure_ascii=False)
+
+
+def _maybe_condense_long_memory(conv, user_id, provider, model):
+    """长记忆超长时再压一次（惰性触发，聊天请求前执行）。
+
+    为什么需要：注入侧只有 600 字预算，超长就按行截断 —— 早期「发生过的事」会被切掉。
+    这里改成用模型再压一次：只丢措辞，不丢事实，并把最新那条压缩记录同步成压缩后的内容，
+    保证「记忆记录」始终等于当前长记忆（记录即长记忆，不是另一份越来越长的副本）。
+    连续压不下来时按 cooldown 退避，避免每一轮都白花一次调用。
+    """
+    if conv is None or provider is None or not model:
+        return False
+    current = (conv.summary or '').strip()
+    if len(current) <= SUMMARY_CONDENSE_TRIGGER:
+        return False
+
+    _data, meta = _condense_meta_of(conv)
+    last_len = meta.get('to')
+    last_at = meta.get('at')
+    if isinstance(last_len, int) and len(current) <= last_len:
+        # 上次压完就这么长、现在也没变长 → 说明压不下来，按 cooldown 再试
+        try:
+            from datetime import datetime as _dt
+            if last_at and (_dt.now() - _dt.fromisoformat(last_at)).total_seconds() \
+                    < SUMMARY_CONDENSE_COOLDOWN_HOURS * 3600:
+                return False
+        except (TypeError, ValueError):
+            pass
+
+    try:
+        condensed = _condense_long_memory(current, provider, model)
+        meta = {'at': local_now().isoformat(), 'from': len(current), 'to': len(condensed)}
+        _write_condense_meta(conv, meta)
+        if not condensed or condensed == current:
+            db.session.commit()   # 只更新标记，避免下一轮立刻重试
+            return False
+        conv.summary = condensed
+        # 最新那条压缩记录就是"当前长记忆"的快照，同步成压缩后的内容；
+        # 导入记忆的记录（msg_from == msg_to）是用户档案、不是压缩快照，保持原样。
+        latest = (ConversationSummary.query
+                  .filter_by(conversation_id=conv.id)
+                  .order_by(ConversationSummary.seq.desc()).first())
+        if latest and latest.msg_from != latest.msg_to \
+                and (latest.content or '').strip() == current:
+            latest.content = condensed
+        db.session.commit()
+        current_app.logger.info(
+            f'[记忆宫殿] 对话 {conv.id} 长记忆再压缩：{len(current)} → {len(condensed)} 字')
+        return True
+    except Exception:
+        db.session.rollback()
+        current_app.logger.warning('[记忆宫殿] 长记忆再压缩失败', exc_info=True)
+        return False
 
 
 def _compress_conversation(conv, user_id, provider, model):
@@ -629,6 +800,11 @@ def _compress_conversation(conv, user_id, provider, model):
     if not new_summary:
         return False
 
+    # 合并后的摘要一旦超长，立刻再压一次再落库：
+    # 存进去就注定被注入侧截断（截断丢事实），不如现在就只丢措辞。
+    if len(new_summary) > SUMMARY_CONDENSE_TRIGGER:
+        new_summary = _condense_long_memory(new_summary, provider, model)
+
     try:
         seq = ConversationSummary.query.filter_by(conversation_id=conv.id).count() + 1
         db.session.add(ConversationSummary(
@@ -665,13 +841,26 @@ def _maybe_compress(conv, user_id, provider, model):
     return _compress_conversation(conv, user_id, provider, model)
 
 
+def _truncate_memory_on_line(text, limit):
+    """超长记忆按整行截断（尽量不把一条事实切一半）。
+
+    正常路径下不该走到这里：超过 SUMMARY_CONDENSE_TRIGGER 的长记忆会在聊天前
+    由 _maybe_condense_long_memory 再压一次；这里只是模型不听话时的兜底。
+    """
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    pos = cut.rfind('\n')
+    if pos > limit * 0.6:
+        cut = cut[:pos]
+    return cut.rstrip() + '\n……（长期记忆过长，已按行截断）'
+
+
 def _memory_summary_block(conv):
     """拼进系统提示词的「历史摘要」文本；无摘要时返回空串。"""
     if not conv or not conv.summary:
         return ''
-    summary = conv.summary.strip()
-    if len(summary) > MAX_LONG_MEMORY_CHARS:
-        summary = summary[:MAX_LONG_MEMORY_CHARS] + '\n……（长期记忆已压缩）'
+    summary = _truncate_memory_on_line(conv.summary.strip(), MAX_LONG_MEMORY_CHARS)
     return (
         '\n\n【历史对话摘要】以下是较早之前对话的浓缩记录，'
         '它只是维持连续性的背景事实，不是当前正在发生的剧情，也不是每轮都要引用的台词素材。'
@@ -805,14 +994,13 @@ def _protocol_block(user_id, persona_id, recent_texts, conv=None):
     这些条目默认由「新建人物卡时种入」，存在于该卡的世界书里，用户可自行编辑 /
     停用 / 删除 —— 后端不再无条件硬注入规范（这是把硬约束改造成世界书的核心目的）。
 
-    门控（**默认全部关闭**，一个开关管一类，用户在会话设置里按需打开）：
-      · 「提示词兜底」append_prompt_enabled —— 只控制「创作与内容协议」与
-        「剧情推进与体验协议」（这两条才是"输出内容"的规范）；
-      · 「界面标记」rich_marker_enabled（同时决定前端渲染）+「丰富面板内容」enhance
-        —— 只控制「输出结构协议」，两个都开才注入；
-      · 玩法扩展包 —— 不看开关，关键词命中才注入（聊到才付这份 token）。
-    三条核心协议都**不再是世界书里的"常驻"**：对应开关没开就完全不注入，
-    默认每轮比之前省约 8k 字；内容一个字都没删，只是不再无条件带上。
+    两层开关（**都要开才注入**，默认全关）：
+      · 对话设置的总开关（控制"全部"）：
+        – 「提示词兜底」append_prompt_enabled —— 控制创作与内容、剧情推进与体验，以及玩法包；
+        – 「界面标记」rich_marker_enabled + 「丰富面板内容」enhance —— 控制输出结构协议；
+      · 人物卡世界书里条目自己的开关（控制"单独"）：enabled=False 的那条不注入。
+    三条核心协议都**不再是"常驻"**：不打开开关就完全不注入，默认每轮比之前省约 8k 字；
+    内容一个字都没删，只是不再无条件带上，用户按需在卡片里逐条打开。
 
     分区注入：开关打开的协议放【输出、创作与推进协议（必须遵守）】，
     按需命中的玩法包放【本轮的玩法要求】—— 语义上分开，遵循度更高。
@@ -856,15 +1044,17 @@ def _protocol_block(user_id, persona_id, recent_texts, conv=None):
             continue
         kind = e.kind or ''
         if kind == 'structure':
-            # 结构协议只由「界面标记 + 丰富面板内容」控制；两个都开才注入
+            # 结构协议：总开关是「界面标记 + 丰富面板内容」，两个都开才注入
             if not (structure_on and enhance):
                 continue
             fixed.append((e, body))
             continue
+        # 其余协议（创作与内容 / 剧情推进与体验 / 玩法包）都归「提示词兜底」总闸管：
+        # 总闸关着时一律不注入 —— 对话设置控制"全部"，卡片里的条目开关控制"单独"
+        # （条目 enabled=False 的在查询时就已经被过滤掉了）。
+        if not append_on:
+            continue
         if kind in ('content', 'experience'):
-            # 只受「提示词兜底」控制（这两个开关互相独立：可以只开面板不开内容协议）
-            if not append_on:
-                continue
             fixed.append((e, body))
             continue
         # 玩法包与用户自建的协议条目：关键词命中才注入
@@ -1338,6 +1528,8 @@ def chat():
     # 放在模型确定之后惰性触发 —— 本次请求沿用旧上下文，新摘要从下一条消息开始生效。
     try:
         _maybe_compress(conv, user_id, provider, effective_model)
+        # 长记忆（滚动摘要）本身超长时再压一次：只丢措辞，不丢"发生过的事"
+        _maybe_condense_long_memory(conv, user_id, provider, effective_model)
     except Exception:
         current_app.logger.warning('[记忆宫殿] 压缩流程异常', exc_info=True)
 
@@ -1434,11 +1626,9 @@ def chat():
                 saved = True
                 if saved_message_id:
                     yield sse_settings({'message_id': saved_message_id})
-                # 这里原本有一套「省 token 的自动关闭」：
-                #   聊满 3 轮自动关掉「提示词兜底」、聊满 2 轮自动关掉「丰富面板内容」。
-                # 现在两个开关都默认开启，自动关闭会变成"用户开了、聊几轮又自己关了"的玄学行为；
-                # 更要紧的是「丰富面板内容」被关掉后，输出结构规范（reply_spec 的 STRUCTURE_SPEC）
-                # 就不再注入 —— 界面结构会从第 3 轮开始漂移。故一并移除，改由用户自行控制。
+                # 「丰富面板内容」默认先开两轮，第 2 轮回答落库后自动关闭（见函数注释）
+                for chunk in _maybe_disable_enhance(conv, conversation_id):
+                    yield chunk
 
             # token 用量（有厂商才返回，缺失时前端不展示）
             if prompt_tokens or completion_tokens:
@@ -1644,8 +1834,9 @@ def vision_chat():
                 saved = True
                 if saved_message_id:
                     yield sse_settings({'message_id': saved_message_id})
-                # 与普通聊天一致：不再自动关闭「提示词兜底」/「丰富面板内容」
-                # （理由见普通聊天分支里的说明）
+                # 与普通聊天一致：「丰富面板内容」默认开两轮后自动关闭
+                for chunk in _maybe_disable_enhance(conv, conversation_id):
+                    yield chunk
 
             if usage_holder[0] or usage_holder[1]:
                 yield sse_tokens((usage_holder[0] or 0) + (usage_holder[1] or 0))
@@ -1917,17 +2108,27 @@ def export_memory():
     if not conv:
         return jsonify({'code': 404, 'message': '对话不存在'}), 404
 
-    # 长记忆：历次压缩记录 + 当前滚动摘要（去重合并，保证信息完整）
+    # 长记忆：**以当前滚动摘要为准**。
+    # 每次压缩都是「旧摘要 + 新对话 → 新摘要」，所以 conv.summary 已经包含历次压缩的内容；
+    # 历次记录只是历史快照，再拼进来会让导出的长记忆越滚越长（同一件事被反复描述），
+    # 也会把导入后的档案撑肥 —— 记忆应当"代替"前面聊过的轮数，而不是再抄一份。
+    # 例外：导入记忆的记录（msg_from == msg_to）是用户档案而非压缩快照，必须保留。
     summary_rows = ConversationSummary.query.filter_by(
         conversation_id=conv.id, user_id=user_id
     ).order_by(ConversationSummary.seq.asc()).all()
     long_parts = []
     if (conv.summary or '').strip():
         long_parts.append(conv.summary.strip())
+    imported = (conv.imported_memory or '').strip()
+    if imported and imported not in long_parts:
+        long_parts.append(imported)
     for row in summary_rows:
         body = (row.content or '').strip()
-        if body and body not in long_parts:
-            long_parts.append(body)
+        if not body or body in long_parts:
+            continue
+        if row.msg_from != row.msg_to:
+            continue      # 历史压缩快照：已被 conv.summary 覆盖，跳过
+        long_parts.append(body)
     long_memory = '\n'.join(long_parts)
 
     # 短记忆：尚未被压缩进摘要的近期消息（id > summary_upto_id）

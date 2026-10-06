@@ -1283,7 +1283,7 @@ import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Back, SwitchButton, Monitor, View, Download, Delete, Edit, ChatLineRound, Document, Search, Picture, User, Lock } from '@element-plus/icons-vue'
-import { adminApi, resAi, uploadApi } from '@/utils/resAi'
+import { adminApi, resAi, uploadApi, ensureAdminSession } from '@/utils/resAi'
 import logger from '@/utils/logger'
 import { t } from '../i18n'
 import ThumbIcon from '../components/ThumbIcon.vue'
@@ -1291,7 +1291,8 @@ import brandIcon from '@/assets/icon/ChatBotIcon.png'
 
 const router = useRouter()
 const adminName = ref(localStorage.getItem('admin_username') || '')
-// 管理后台唯一入口 /chatbotadmin：未登录时展示内嵌登录页，不再跳转独立 /admin 路由
+// 管理后台唯一入口 /chatbotadmin：未登录时展示内嵌登录页，不再跳转独立 /admin 路由。
+// 登录态与普通用户同一套：access 7 天 + refresh 30 天，启动时静默续期，不用每次登录。
 const authed = ref(!!localStorage.getItem('admin_token'))
 const loginUsername = ref('')
 const loginPassword = ref('')
@@ -1304,9 +1305,9 @@ async function doLogin() {
   }
   loginLoading.value = true
   try {
+    // adminApi.login 内部已把 access / refresh 两个令牌写进 localStorage
     const res = await adminApi.login(loginUsername.value.trim(), loginPassword.value)
     if (res.code === 200) {
-      localStorage.setItem('admin_token', res.data.access_token)
       localStorage.setItem('admin_username', res.data.username)
       adminName.value = res.data.username
       authed.value = true
@@ -2348,11 +2349,14 @@ function doLogout() {
 }
 
 onMounted(async () => {
+  // 启动先确保登录态：access 过期但 refresh 还在就静默续期（30 天内不用重新登录）
+  await ensureAdminSession()
   // 校验令牌是否仍有效，失效则回到内嵌登录页
   try {
     const res = await adminApi.status()
     if (res.code !== 200) authed.value = false
   } catch (e) {
+    // 401 时 adminReq 已尝试续期；到这里仍失败说明 refresh 也过期了
     authed.value = false
   }
   if (authed.value) await loadAll()

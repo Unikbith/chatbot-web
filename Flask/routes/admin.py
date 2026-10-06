@@ -5,7 +5,9 @@
 所有数据接口均要求该管理员令牌，避免越权访问。
 """
 from flask import Blueprint, request, jsonify, current_app, Response
-from flask_jwt_extended import jwt_required, get_jwt, create_access_token
+from flask_jwt_extended import (
+    jwt_required, get_jwt, create_access_token, create_refresh_token,
+)
 from sqlalchemy import case, func, or_ as _or
 from sqlalchemy.orm import joinedload, selectinload
 from functools import wraps
@@ -20,8 +22,11 @@ from models import (
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
-# 管理员令牌有效期（天）：后台不常开，给足 7 天避免反复登录
+# 管理员令牌有效期：和普通用户一个思路 —— 短期 access + 长期 refresh，
+# 前端在 access 过期时静默续期，所以「打开后台不用重新登录」。
+# 后台不常开，access 直接给 7 天，refresh 给 30 天（与用户 refresh 一致）。
 ADMIN_TOKEN_DAYS = 7
+ADMIN_REFRESH_DAYS = 30
 
 
 def _arg_int(name, default, *, minimum=None, maximum=None):
@@ -68,7 +73,36 @@ def admin_login():
     if username != expected_user or password != expected_pass:
         return jsonify({'code': 401, 'message': '管理员账号或密码错误'}), 401
 
-    # 管理员后台不常开，token 给 7 天，避免每次进后台都要重新登录（默认只有 2 小时）
+    # 管理员后台不常开：access 给 7 天，另外发一个 30 天的 refresh，
+    # 前端在 access 过期/临近过期时静默换新 —— 与普通用户的长期免登录一致。
+    token = create_access_token(
+        identity='admin',
+        additional_claims={'role': 'admin'},
+        expires_delta=timedelta(days=ADMIN_TOKEN_DAYS),
+    )
+    refresh = create_refresh_token(
+        identity='admin',
+        additional_claims={'role': 'admin'},
+        expires_delta=timedelta(days=ADMIN_REFRESH_DAYS),
+    )
+    return jsonify({
+        'code': 200,
+        'message': '登录成功',
+        'data': {
+            'access_token': token,
+            'refresh_token': refresh,
+            'expires_in_days': ADMIN_TOKEN_DAYS,
+            'username': username,
+        }
+    })
+
+
+@admin_bp.route('/refresh', methods=['POST'])
+@jwt_required(refresh=True)
+def admin_refresh():
+    """用 30 天的 refresh 换新的 access（管理员长期免登录）。"""
+    if get_jwt().get('role') != 'admin':
+        return jsonify({'code': 403, 'message': '无权限访问'}), 403
     token = create_access_token(
         identity='admin',
         additional_claims={'role': 'admin'},
@@ -76,8 +110,8 @@ def admin_login():
     )
     return jsonify({
         'code': 200,
-        'message': '登录成功',
-        'data': {'access_token': token, 'username': username}
+        'message': '已续期',
+        'data': {'access_token': token, 'expires_in_days': ADMIN_TOKEN_DAYS},
     })
 
 

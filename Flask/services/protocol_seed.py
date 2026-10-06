@@ -1,13 +1,18 @@
 """协议包种入：把 protocol_pack 里的条目挂到人物卡名下（幂等）。
 
 为什么做成"种入到卡"而不是"全局注入"：
-    用户要的是「默认在每张卡里打开并执行，新建也能选择打开和删除」——
-    所以条目必须真实存在于该卡的世界书里，用户在自己的卡片面板就能编辑 / 停用 / 删除。
-    后端不再无条件硬注入，注入与否由条目自己的开关决定。
+    用户要的是「默认在每张卡里都有、也能选择打开和删除」——
+    所以条目必须真实存在于该卡的世界书里，用户在自己的卡片面板就能编辑 / 启用 / 删除。
+
+两层开关（**都要开才注入**）：
+    · 对话设置里的总开关：提示词兜底（内容类）/ 界面标记 + 丰富面板内容（结构类）；
+    · 卡片里条目自己的开关（WorldBookEntry.enabled）。
+    所以三条核心条目种入时是**关**的（`default_enabled=False`），用户在卡片里单独打开；
+    玩法包种入即开（只有关键词命中才会真的注入，平时不花 token）。
 
 幂等规则：以 (user_id, persona_id, source_key) 为唯一键。
-    已存在 → 只更新标题 / 正文 / 权重等系统维护字段，**不动用户的 always_on 与 enabled**，
-    避免用户刚关掉的玩法包又被下一次种入打开。
+    已存在 → 只更新标题 / 正文 / 权重等系统维护字段，**不动用户的 enabled 与 always_on**，
+    避免用户刚关掉的条目又被下一次种入打开。
 """
 from extensions import db
 from models import WorldBookEntry
@@ -42,7 +47,8 @@ def seed_protocol_entries(user_id, persona_id, only_missing=False):
                 keywords=spec['keywords'],
                 content=spec['content'],
                 always_on=bool(spec['always_on']),
-                enabled=True,
+                # 新条目按 spec 的默认开关：核心条目=关，玩法包=开
+                enabled=bool(spec.get('default_enabled', True)),
                 weight=spec['weight'],
                 category='protocol',
                 kind=spec['kind'],
@@ -70,7 +76,11 @@ def seed_protocol_entries(user_id, persona_id, only_missing=False):
 
 
 def restore_protocol_entry(user_id, persona_id, source_key):
-    """把某条协议条目恢复成默认正文并重新启用（用户删掉/改坏后的救援入口）。"""
+    """把某条协议条目恢复成默认正文并启用（用户删掉/改坏后的救援入口）。
+
+    「恢复默认协议包」是用户主动点的救援动作 —— 恢复内容的同时把条目**打开**，
+    否则点了按钮还是没反应（是否真的注入仍由「对话设置」的总开关决定）。
+    """
     content = protocol_pack.entry_content_of(source_key)
     if not content:
         return None
