@@ -96,6 +96,12 @@ with app.app_context():
     print('线上升级' + ('（dry-run：不写库）' if DRY else '')
           + ('（诊断模式：只读）' if DIAGNOSE else ''))
     print('=' * 68)
+    # 先把「用的是哪个解释器、哪个数据库文件」打出来：
+    # 线上最常见的坑就是升级脚本跑在另一个 venv / 另一个库上，白忙一场。
+    print(f'\n运行环境')
+    print(f'  解释器   {sys.executable}')
+    print(f'  数据库   {db.engine.url}')
+    print(f'  工作目录 {os.getcwd()}')
 
     if DIAGNOSE:
         print('\n[诊断] 协议包为什么没生效')
