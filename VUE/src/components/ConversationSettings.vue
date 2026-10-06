@@ -37,7 +37,22 @@
               <el-option :label="t('适度主动', 'Balanced')" value="适度主动：提供推动，但把关键决定交给用户" />
               <el-option :label="t('更主动', 'High')" value="高主动：主动创造事件与话题，但不替用户决定" />
             </el-select>
+            <el-select v-model="form.directive_role_mode" :placeholder="t('扮演模式', 'Role mode')" clearable>
+              <el-option :label="t('单角色', 'Single character')" value="single" />
+              <el-option :label="t('多角色', 'Multiple characters')" value="ensemble" />
+            </el-select>
+            <el-select v-model="form.directive_romance_style" :placeholder="t('互动风格', 'Interaction style')" clearable>
+              <el-option :label="t('含蓄暧昧', 'Subtle chemistry')" value="含蓄暧昧：通过语气、距离和细节自然表达，不急于挑明" />
+              <el-option :label="t('明显调情', 'Expressive flirting')" value="明显调情：更主动地表达吸引与试探，同时尊重回应和拒绝" />
+              <el-option :label="t('浪漫亲密', 'Romantic intimacy')" value="浪漫亲密：重视情绪、信任、同意和关系推进" />
+              <el-option :label="t('亲密场景淡出', 'Fade to black')" value="亲密场景淡出：营造亲密氛围，在露骨细节前自然转场" />
+            </el-select>
           </div>
+          <template v-if="form.directive_role_mode === 'ensemble'">
+            <p class="cv-panel__hint">{{ t('请写清每个角色的姓名、身份、性格差异、与用户及彼此的关系。', 'List each character’s name, identity, personality, and relationships.') }}</p>
+            <el-input v-model="form.directive_cast" type="textarea" :rows="4" maxlength="4000" show-word-limit :placeholder="t('例如：顾言——冷静克制的医生；陆川——外向直接的摄影师。两人知道的信息与情绪彼此独立。', 'Example: Alex — reserved doctor; Ryan — outgoing photographer. Keep their knowledge and emotions separate.')" />
+            <el-input v-model="form.directive_focus_rule" class="cv-field" maxlength="1000" show-word-limit :placeholder="t('镜头偏好，例如：优先回应用户点名或正在互动的角色。', 'Focus rule, e.g. prioritize the named or currently engaged character.')" />
+          </template>
           <el-input v-model="form.directive_boundaries" type="textarea" :rows="2" maxlength="2000" show-word-limit :placeholder="t('边界或禁区，例如：不要替我说话；重大转折前先询问。', 'Boundaries, e.g. never speak for me; ask before major turns.')" />
         </section>
         <!-- 人物设定 -->
@@ -465,7 +480,8 @@ const form = reactive({
   // 回复长度：默认短文
   reply_length_id: DEFAULT_LENGTH,
   directive_goal: '', directive_tone: '', directive_pace: '',
-  directive_initiative: '', directive_boundaries: '',
+  directive_initiative: '', directive_boundaries: '', directive_role_mode: '',
+  directive_cast: '', directive_focus_rule: '', directive_romance_style: '',
 })
 
 // 参数微调的量表定义：模板用 v-for 渲染，避免三段结构重复
@@ -516,6 +532,10 @@ function resetForm() {
   form.directive_pace = directives.pace || ''
   form.directive_initiative = directives.initiative || ''
   form.directive_boundaries = directives.boundaries || ''
+  form.directive_role_mode = directives.role_mode || ''
+  form.directive_cast = directives.cast || ''
+  form.directive_focus_rule = directives.focus_rule || ''
+  form.directive_romance_style = directives.romance_style || ''
   // 让本轮回填引起的 watch 在同一微任务里被忽略，下一轮才恢复自动保存
   nextTick(() => { suppressAuto = false })
 }
@@ -597,6 +617,8 @@ function buildPayload() {
     conversation_directives: {
       goal: form.directive_goal, tone: form.directive_tone, pace: form.directive_pace,
       initiative: form.directive_initiative, boundaries: form.directive_boundaries,
+      role_mode: form.directive_role_mode, cast: form.directive_cast,
+      focus_rule: form.directive_focus_rule, romance_style: form.directive_romance_style,
     },
   }
 }

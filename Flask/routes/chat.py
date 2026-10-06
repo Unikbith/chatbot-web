@@ -540,9 +540,10 @@ SUMMARY_SYSTEM_PROMPT = (
     "你是一个对话记忆压缩器。请把「已有摘要」与「新增对话」合并成一份连贯的摘要。\n"
     "要求：\n"
     "1. 只保留会影响后续关系与剧情连续性的关键记忆：人物关系变化、重要承诺、用户偏好与雷点、关键事件结果；\n"
-    "2. 删除寒暄、重复表述、过程性描写、气氛描写、已经失效的临时状态和无关闲聊；\n"
-    "3. 用第三人称客观陈述，中文，最多输出 3-6 个短点，总字数严格控制在 50-500 字；\n"
-    "4. 只输出摘要正文，不要任何开头客套或解释。"
+    "2. 删除寒暄、重复表述、过程性的亲密或身体描写、气氛描写、已经失效的临时状态和无关闲聊；\n"
+    "3. 多角色场景必须写清每条记忆属于哪个角色，禁止把不同角色的经历、知识、情绪或关系进度合并；\n"
+    "4. 用第三人称客观陈述，中文，最多输出 3-6 个短点，总字数严格控制在 50-500 字；\n"
+    "5. 只输出摘要正文，不要任何开头客套或解释。"
 )
 
 
@@ -671,9 +672,11 @@ def _memory_summary_block(conv):
         summary = summary[:MAX_LONG_MEMORY_CHARS] + '\n……（长期记忆已压缩）'
     return (
         '\n\n【历史对话摘要】以下是较早之前对话的浓缩记录，'
-        '用于在用户聊起相关话题时保持人设与剧情连贯。'
-        '不要主动回顾、复述或提及这些旧内容；只有当用户主动问起"之前说过/做过什么"'
-        '或聊起相关情节时才呼应（不要向用户提及本摘要的存在）：\n'
+        '它只是维持连续性的背景事实，不是当前正在发生的剧情，也不是每轮都要引用的台词素材。'
+        '当前消息没有触发相关人物、事件、约定或偏好时完全忽略；不要主动回顾、复述用户已经知道的事实，'
+        '不要用“还记得”“之前我们”作为默认开场，也不要把旧的亲密程度、冲突、情绪或身体状态自动恢复到当前场景。'
+        '只有当用户主动问起或当前内容确实相关时才自然体现；同一记忆近期已经体现过就不要重复强调。'
+        '多角色记忆必须严格归属原角色，不得串线；不要向用户提及本摘要或任何内部记忆机制：\n'
         + summary
     )
 
@@ -694,10 +697,11 @@ def _imported_memory_block(conv):
         memory = memory[:MAX_IMPORTED_MEMORY_CHARS] + '\n……（导入记忆过长，已截断）'
     return (
         '\n\n【用户导入的长期记忆】这是用户为你导入的、你们之间的过往经历与设定，'
-        '视同你已经历过并牢记在心。注意：这些记忆是「背景档案」而非聊天话题，'
-        '只有当用户主动聊起或询问与之相关的人、事、约定时，才自然地呼应；'
-        '日常闲聊（如随手小事、削水果之类）不要主动提起这些过往，就像正常对话一样。'
-        '（不要向用户提及"导入""记忆档案"等字眼）：\n'
+        '视同对应角色已经历过并牢记在心。它们是背景档案而非当前剧情或聊天话题：'
+        '当前消息没有触发相关线索时完全忽略，不主动复述、不重复提醒用户已知事实，也不默认延续旧情绪、冲突或亲密状态。'
+        '只有当用户主动聊起或当前行动确实相关时，才通过自然反应体现；同一内容近期已体现过就不再强调。'
+        '多角色场景中只允许知道该记忆的角色使用它，禁止角色间共享未获知的信息。'
+        '不要向用户提及“导入”“记忆档案”等内部机制：\n'
         + memory
     )
 
@@ -855,14 +859,53 @@ def _persona_identity_block(conv, user_id, persona_id=None):
     name = (getattr(persona, 'name', None) or '').strip() if persona else ''
     if not name:
         return ''
+    try:
+        directives = (json.loads(conv.settings) or {}).get('conversation_directives') or {}
+    except (AttributeError, TypeError, ValueError):
+        directives = {}
+    if isinstance(directives, dict) and directives.get('role_mode') == 'ensemble':
+        return (
+            f'\n\n【人物卡基底】「{name}」是当前人物卡的主角色或世界观基底。'
+            '实际出场角色以本会话的角色阵容为准；不要把其他角色误写成这个角色。'
+        )
     return f'\n\n【角色身份】你扮演的角色名称是「{name}」。请在需要自称或被称呼时使用这个名字。'
+
+
+def _multi_character_block(conv):
+    """为单 AI 扮演多角色提供稳定的身份、视角与信息隔离规则。"""
+    if not conv or not conv.settings:
+        return ''
+    try:
+        directives = (json.loads(conv.settings) or {}).get('conversation_directives') or {}
+    except (TypeError, ValueError):
+        return ''
+    if not isinstance(directives, dict) or directives.get('role_mode') != 'ensemble':
+        return ''
+    cast = str(directives.get('cast') or '').strip()
+    focus_rule = str(directives.get('focus_rule') or '').strip()
+    details = []
+    if cast:
+        details.append('【角色阵容】\n' + cast)
+    if focus_rule:
+        details.append('【镜头与焦点偏好】' + focus_rule)
+    suffix = ('\n' + '\n'.join(details)) if details else ''
+    return (
+        '\n\n【多角色扮演规则】你同时扮演多个独立角色。每个角色必须保持各自的身份、目标、关系、'
+        '说话习惯、情绪状态、身体状态和知识范围；任何角色都不能知道自己未亲历、未听见或未被告知的信息。'
+        '不得把不同角色的台词、动作、记忆、称呼或关系进度混在一起。用“角色名：台词”或清楚的叙述主语消除歧义。'
+        '用户点名、称呼、触碰或明显关注某个角色时，优先由该角色回应；未点名时，根据最近互动、空间位置和当前冲突选择最自然的主回应者。'
+        '其他角色只在符合场景时出现，不要为了展示多人而强迫所有角色每轮发言。镜头切换要自然发生，不解释你正在切换角色。'
+        '不要替用户写台词、内心或不可逆的重大行动；用户的最新明确表达优先于你对意图的推断。'
+        + suffix
+    )
 
 
 def _roleplay_subject_block():
     """明确状态面板的主体始终是 AI 角色，而不是用户。"""
     return (
         '\n\n【状态面板主体规则】所有角色面板、好感度、信任值、关系阶段、身体状态、服装与内心活动，'
-        '描述对象永远是你正在扮演的 AI 角色。玩家只有基础玩家信息，不得给玩家生成好感度、信任值或身体状态面板。'
+        '描述对象永远是你正在扮演的 AI 角色；多角色时必须注明面板所属角色，不得把数值或状态合并。'
+        '玩家只有基础玩家信息，不得给玩家生成好感度、信任值或身体状态面板。'
         '即使玩家的性别或设定与角色不同，也必须按 AI 角色设定决定外貌、性别特征、称呼和反应，禁止把 AI 角色默认写成女性。'
     )
 
@@ -887,6 +930,7 @@ def _get_system_prompt(conv, user_id, persona_id=None, custom_prompt=None):
     body = _conversation_directives_block(conv)
     body += _resolve_system_prompt(conv, user_id, persona_id, custom_prompt)
     body = (body or '') + _persona_identity_block(conv, user_id, persona_id)
+    body = (body or '') + _multi_character_block(conv)
     # 玩家设定紧跟 AI 提示词之后：先立住 AI 是谁，再交代玩家是谁
     body = (body or '') + _user_persona_block(conv, user_id, persona_id)
     body = (body or '') + _roleplay_subject_block()
@@ -910,15 +954,25 @@ def _conversation_directives_block(conv):
     labels = {
         'goal': '希望的发展方向', 'tone': '语气', 'pace': '推进节奏',
         'initiative': 'AI 主动程度', 'boundaries': '边界与禁区',
+        'role_mode': '扮演模式', 'romance_style': '亲密互动风格',
     }
-    lines = [f"- {labels[k]}：{str(directives[k]).strip()}"
-             for k in labels if str(directives.get(k) or '').strip()]
+    display_values = dict(directives)
+    display_values['role_mode'] = {
+        'single': '单角色', 'ensemble': '多角色（各角色身份、知识与情绪独立）',
+    }.get(str(directives.get('role_mode') or '').strip(), '')
+    lines = [f"- {labels[k]}：{str(display_values[k]).strip()}"
+             for k in labels if str(display_values.get(k) or '').strip()]
     if not lines:
         return ''
     return (
         '【用户明确指定的对话方向（最高优先级）】\n'
         + '\n'.join(lines)
-        + '\n遵循用户本轮最新明确要求；不要替用户决定重大行动，不要擅自推进越过边界。\n\n'
+        + '\n从用户最新消息的行动、称呼、关注对象、接受或拒绝、情绪和停顿中自然判断下一小步，'
+          '不要向用户汇报或解释你识别到了什么意图。明确要求永远高于推断；信号模糊时只推进可逆的一小步，'
+          '留下自然可回应的情境，不要频繁停下来询问“想怎么继续”。涉及边界、重大关系变化或不可逆转折时再自然确认。'
+          '不要替用户决定重大行动，不要擅自推进越过边界。成年人之间可以表现暧昧、调情和浪漫亲密；'
+          '始终尊重当下的明确同意与撤回，不把过去的亲密或同意视为当前同意；'
+          '亲密场景到需要露骨性行为细节时采用含蓄描写或淡出处理。\n\n'
     )
 
 

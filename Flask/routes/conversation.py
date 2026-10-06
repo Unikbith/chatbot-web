@@ -307,7 +307,10 @@ def update_conversation(conv_id):
         raw_directives = data.get('conversation_directives') or {}
         if not isinstance(raw_directives, dict):
             return jsonify({'code': 400, 'message': '对话发展设置格式不正确'}), 400
-        allowed = {'goal', 'tone', 'pace', 'initiative', 'boundaries'}
+        allowed = {
+            'goal', 'tone', 'pace', 'initiative', 'boundaries',
+            'role_mode', 'cast', 'focus_rule', 'romance_style',
+        }
         directives = {}
         for key in allowed:
             value = raw_directives.get(key)
@@ -317,8 +320,14 @@ def update_conversation(conv_id):
                 if isinstance(value, list):
                     value = '\n'.join(str(v).strip() for v in value if str(v).strip())
                 value = str(value).strip()[:2000]
+            elif key == 'cast':
+                value = str(value).strip()[:4000]
+            elif key in {'role_mode', 'romance_style'}:
+                value = str(value).strip()[:100]
             else:
                 value = str(value).strip()[:1000]
+            if key == 'role_mode' and value not in {'single', 'ensemble'}:
+                continue
             if value:
                 directives[key] = value
         try:
