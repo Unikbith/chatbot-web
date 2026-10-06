@@ -18,7 +18,17 @@
 用法
     python deploy_upgrade.py                 # 执行（幂等）
     python deploy_upgrade.py --dry-run       # 只报告将要改什么，不写库
+    python deploy_upgrade.py --diagnose      # 只读诊断：逐个会话说明「为什么协议包没生效」
+    python deploy_upgrade.py --fix-legacy    # 额外修老会话的「界面标记」开关（见下）
     python deploy_upgrade.py --fill-user-prompt   # 额外给「玩家设定」为空的卡补通用模板
+
+关于 --fix-legacy
+    老版本（升级前）**没有「界面标记」这个开关**，升级后所有老会话该字段为空，
+    启动时会被一次性回填成 .env 里的 RICH_MESSAGE_ENABLED（默认 true）。
+    若线上 .env 里曾经写过 RICH_MESSAGE_ENABLED=false，老会话就全变成「关」：
+    此时结构协议不注入、前端也不渲染面板 —— 表现就是"世界书里有内容，但对话里没生效"。
+    --fix-legacy 会把这类老会话（判定依据：没有 reply_template，即升级前就存在）的
+    「界面标记」重新打开；新版里用户自己关过的会话（有 reply_template）不动。
 """
 import json
 import os
@@ -33,6 +43,8 @@ from models import (Conversation, PersonaTemplate, WorldBookEntry,
 from services.protocol_seed import seed_protocol_entries
 
 DRY = '--dry-run' in sys.argv
+DIAGNOSE = '--diagnose' in sys.argv
+FIX_LEGACY = '--fix-legacy' in sys.argv
 FILL_USER_PROMPT = '--fill-user-prompt' in sys.argv
 
 app = create_app()
@@ -44,10 +56,52 @@ def report(label, value):
     summary_rows.append((label, value))
 
 
+def diagnose_conversations():
+    """逐个会话说明协议包为什么（没）生效 —— 排查"世界书有内容但对话里没生效"用。"""
+    from routes.chat import (_effective_persona_id, _protocol_block, template_prompt)
+    from rich_marker import resolve_rich_marker_enabled, RICH_MESSAGE_ENABLED
+    print(f'  环境变量 RICH_MESSAGE_ENABLED = {RICH_MESSAGE_ENABLED}')
+    rows = Conversation.query.order_by(Conversation.id.desc()).limit(40).all()
+    print(f'  最近 {len(rows)} 个会话：')
+    blocked = 0
+    for conv in rows:
+        reasons = []
+        if conv.append_prompt_enabled is False:
+            reasons.append('提示词兜底=关')
+        pid = _effective_persona_id(conv, conv.user_id)
+        if not pid:
+            reasons.append('无人物卡可回落')
+        else:
+            cnt = WorldBookEntry.query.filter_by(
+                user_id=conv.user_id, persona_id=pid, category='protocol', enabled=True).count()
+            if not cnt:
+                reasons.append(f'卡 #{pid} 没有启用的协议条目')
+        if not resolve_rich_marker_enabled(conv):
+            reasons.append('界面标记=关（结构不注入、前端也不渲染）')
+        opts = template_prompt(conv)
+        if opts.get('enhance') is False:
+            reasons.append('提示词增强=关（结构不注入）')
+        block = _protocol_block(conv.user_id, pid, [], conv)
+        if not block:
+            blocked += 1
+        state = f'注入 {len(block)} 字' if block else '注入 0 字 ← 没生效'
+        flag = ('  ⚠ ' + '；'.join(reasons)) if reasons else ''
+        print(f'    #{conv.id:<5} 用户{conv.user_id:<3} {state}{flag}')
+    print(f'  未生效的会话：{blocked} 个（有 ⚠ 的就是原因）')
+    return blocked
+
+
 with app.app_context():
     print('=' * 68)
-    print('线上升级' + ('（dry-run：不写库）' if DRY else ''))
+    print('线上升级' + ('（dry-run：不写库）' if DRY else '')
+          + ('（诊断模式：只读）' if DIAGNOSE else ''))
     print('=' * 68)
+
+    if DIAGNOSE:
+        print('\n[诊断] 协议包为什么没生效')
+        diagnose_conversations()
+        print('\n诊断结束（未写入任何改动）')
+        sys.exit(0)
 
     # ---------- 0. 结构自检（启动迁移应已建好新表/列） ----------
     print('\n[0] 结构自检')
@@ -136,6 +190,25 @@ with app.app_context():
     report('persona_id 为空的会话', len(unbound))
     report('可补绑', bound)
     report('所属用户没有人物卡（无法补绑）', no_card)
+
+    # ---------- 3b. 老会话的「界面标记」开关（--fix-legacy） ----------
+    if FIX_LEGACY:
+        print('\n[3b] 老会话的「界面标记」开关（旧版本没有这个开关）')
+        # 判定「老会话」：没有 reply_template —— 该字段同样是升级后才有的，
+        # 因此新版里被用户自己关掉的会话（有模板）不会被误改。
+        legacy_off = [c for c in Conversation.query.filter(
+            Conversation.rich_marker_enabled.is_(False)).all()
+            if not (c.reply_template or '').strip()]
+        report('老会话里界面标记为关的', len(legacy_off))
+        if not DRY:
+            for conv in legacy_off:
+                conv.rich_marker_enabled = True
+        print('       （说明：界面标记关掉时，结构协议不注入、前端也不渲染面板）')
+    else:
+        off_cnt = Conversation.query.filter(Conversation.rich_marker_enabled.is_(False)).count()
+        if off_cnt:
+            print(f'\n[3b] 提示：有 {off_cnt} 个会话的「界面标记」是关的；'
+                  f'若是老版本升级上来的，用 --fix-legacy 一并打开')
 
     # ---------- 4. 可选：补玩家设定 ----------
     if FILL_USER_PROMPT:

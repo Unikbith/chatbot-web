@@ -148,18 +148,15 @@
         <!-- 世界书：编辑时立即保存；新建时先作为草稿，随人物卡一起提交 -->
         <div class="form-card">
           <div class="wb-head">
-            <div>
-              <div class="wb-title">{{ t('世界书（设定条目 + 协议包）', 'Worldbook (lore + protocol pack)') }}</div>
-              <div class="wb-desc">
-                把只在特定话题才用得上的设定拆成条目，聊到相关词才加载 —— 省 token，还能写更多设定。
-                <b>常驻</b>条目每次都加载（放核心人设）；其余按触发词命中才加载。
-                <b>一条都不加也不影响</b>，照常聊天。
-                <span v-if="!editingPersona" class="wb-draft-note">新建模式下，条目会随人物卡一起保存。</span>
+            <div class="wb-head-text">
+              <div class="wb-title">
+                {{ t('世界书', 'Worldbook') }}
+                <span class="wb-count">{{ wbEntries.length }}</span>
               </div>
-              <div class="wb-desc wb-desc--protocol">
-                {{ t('标记', 'Entries tagged') }} <span class="wb-tag is-proto">{{ t('协议', 'Protocol') }}</span> {{ t('的是系统默认种入的协议条目：', 'are protocol entries seeded by default:') }}
-                {{ t('①②③ 常驻（输出结构 / 创作与内容 / 剧情推进），玩法包按触发词加载。', '①②③ always on (output structure / writing & content / story pacing); play packs load on trigger words.') }}
-                {{ t('都可以', 'All of them can be') }}<b>{{ t('停用、改写或删除', ' disabled, rewritten or deleted') }}</b>{{ t(' —— 删掉就不再注入，省 token 的开关就在你手里。', ' — deleting one stops its injection, so token saving is in your hands.') }}
+              <div class="wb-desc">
+                {{ t('只在聊到相关词时才加载的设定，省 token 也能写更多内容。', 'Lore loaded only when relevant — saves tokens, holds more.') }}
+                <b>{{ t('常驻', 'Always') }}</b>{{ t('＝每轮都注入；其余按触发词命中才注入。', ' = injected every turn; others load when a trigger word appears.') }}
+                <span v-if="!editingPersona" class="wb-draft-note">{{ t('新建模式下条目会随人物卡一起保存。', 'In create mode, entries are saved with the card.') }}</span>
               </div>
             </div>
             <div class="wb-head-ops">
@@ -178,35 +175,66 @@
             </div>
           </div>
 
-          <div v-if="wbLoading" class="wb-empty">加载中…</div>
+          <div v-if="wbLoading" class="wb-empty">{{ t('加载中…', 'Loading…') }}</div>
           <div v-else-if="!wbEntries.length" class="wb-empty">
             {{ editingPersona ? t('暂无条目 —— 协议包与设定都为空，AI 将没有输出结构与创作规范（可点「恢复默认协议包」一键补回）', 'No entries — neither protocol pack nor lore. The AI will have no structure or writing rules (use Restore protocol pack).') : t('暂无条目，可先添加触发词和设定内容，新建人物卡时会一起保存', 'No entries yet. Add trigger words and content; they are saved with the new card.') }}
           </div>
-          <div v-else class="wb-list">
-            <div v-for="e in wbEntries" :key="e.id" class="wb-item" :class="{ 'is-protocol': e.category === 'protocol' }">
-              <div class="wb-item-main">
-                <div class="wb-item-title">
-                  <span v-if="e.category === 'protocol'" class="wb-tag is-proto">协议</span>
-                  <span class="wb-tag" :class="{ 'is-on': e.always_on }">
-                    {{ e.always_on ? '常驻' : '按需' }}
-                  </span>
-                  <span class="wb-name">{{ e.title || '未命名条目' }}</span>
-                  <span v-if="!e.enabled" class="wb-tag is-off">已停用</span>
-                </div>
-                <div v-if="e.keywords" class="wb-kw">触发词：{{ e.keywords }}</div>
-                <div class="wb-content">{{ e.content }}</div>
+
+          <template v-else>
+            <!-- 分组展示：协议包（系统种入的规范）与自己的设定条目分开，
+                 避免十份长规范把用户自己的设定淹没 -->
+            <div v-for="grp in wbGroups" :key="grp.key" class="wb-group">
+              <div class="wb-group-head">
+                <span class="wb-group-name">{{ grp.name }}</span>
+                <span class="wb-group-hint">{{ grp.hint }}</span>
+                <span class="wb-group-count">{{ grp.items.length }}</span>
               </div>
-              <div class="wb-ops">
-                <el-switch
-                  v-model="e.enabled"
-                  size="small"
-                  @change="(val) => toggleWb(e, val)"
-                />
-                <el-button size="small" text @click="openWbEdit(e)">编辑</el-button>
-                <el-button size="small" text type="danger" @click="removeWb(e)">删除</el-button>
+
+              <div class="wb-list">
+                <div
+                  v-for="e in grp.items"
+                  :key="e.id"
+                  class="wb-item"
+                  :class="{ 'is-protocol': e.category === 'protocol', 'is-off': !e.enabled }"
+                >
+                  <!-- 条目标题行：标记 + 名称 + 触发词摘要 + 操作 -->
+                  <div class="wb-item-head" @click="toggleWbExpand(e)">
+                    <span class="wb-caret" :class="{ open: isWbExpanded(e) }">▸</span>
+                    <span v-if="e.category === 'protocol'" class="wb-tag is-proto">{{ t('协议', 'Protocol') }}</span>
+                    <span class="wb-tag" :class="e.always_on ? 'is-on' : 'is-demand'">
+                      {{ e.always_on ? t('常驻', 'Always') : t('按需', 'On demand') }}
+                    </span>
+                    <span class="wb-name">{{ e.title || t('未命名条目', 'Untitled') }}</span>
+                    <span v-if="!e.enabled" class="wb-tag is-off">{{ t('已停用', 'Disabled') }}</span>
+                    <span v-if="!isWbExpanded(e)" class="wb-preview">{{ wbPreview(e) }}</span>
+                    <span class="wb-size">{{ e.content.length }}{{ t(' 字', ' chars') }}</span>
+                    <div class="wb-ops" @click.stop>
+                      <el-switch
+                        v-model="e.enabled"
+                        size="small"
+                        @change="(val) => toggleWb(e, val)"
+                      />
+                      <el-button size="small" text @click="openWbEdit(e)">{{ t('编辑', 'Edit') }}</el-button>
+                      <el-button size="small" text type="danger" @click="removeWb(e)">{{ t('删除', 'Delete') }}</el-button>
+                    </div>
+                  </div>
+
+                  <!-- 展开后才显示正文与触发词：默认收起，列表才看得清 -->
+                  <div v-if="isWbExpanded(e)" class="wb-item-body">
+                    <div v-if="e.keywords" class="wb-kw-row">
+                      <span class="wb-kw-label">{{ t('触发词', 'Triggers') }}</span>
+                      <span v-for="kw in wbKeywordList(e)" :key="kw" class="wb-kw-chip">{{ kw }}</span>
+                      <span v-if="!wbKeywordList(e).length" class="wb-kw-none">{{ t('（常驻，无需触发词）', '(always on)') }}</span>
+                    </div>
+                    <pre class="wb-content">{{ e.content }}</pre>
+                    <div v-if="e.source_key" class="wb-source">
+                      {{ t('系统条目', 'System entry') }} · {{ e.source_key }}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          </template>
         </div>
 
       </el-form>
@@ -373,7 +401,62 @@ const wbDialogVisible = ref(false)
 const wbEditing = ref(null)
 const wbSaving = ref(false)
 const protocolRestoring = ref(false)
+// 展开的条目 id 集合：世界书默认全部收起，否则十份长规范会把面板撑成一片文字墙
+const wbExpanded = ref(new Set())
 let wbDraftSeq = 0
+
+function isWbExpanded(entry) {
+  return wbExpanded.value.has(entry.id)
+}
+
+function toggleWbExpand(entry) {
+  const next = new Set(wbExpanded.value)
+  if (next.has(entry.id)) next.delete(entry.id)
+  else next.add(entry.id)
+  wbExpanded.value = next
+}
+
+// 收起状态下的一行摘要：去掉换行、标记，截断到 ~60 字
+function wbPreview(entry) {
+  const text = String(entry.content || '')
+    .replace(/【[^】]*】/g, '')
+    .replace(/^[·\-*\s]+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text.length > 60 ? text.slice(0, 60) + '…' : text
+}
+
+function wbKeywordList(entry) {
+  return String(entry.keywords || '')
+    .split(/[,，;；\n\r]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+}
+
+// 分组：协议包（系统种入）在前，自己的设定条目在后
+const wbGroups = computed(() => {
+  const protocol = wbEntries.value.filter(e => e.category === 'protocol')
+  const lore = wbEntries.value.filter(e => e.category !== 'protocol')
+  const groups = []
+  if (protocol.length) {
+    groups.push({
+      key: 'protocol',
+      name: t('协议包', 'Protocol pack'),
+      hint: t('输出结构 / 创作与内容 / 剧情推进（常驻）＋ 玩法包（按触发词）。可停用、改写或删除。',
+        'Structure / writing & content / pacing (always on) + play packs (on trigger). Editable and removable.'),
+      items: protocol,
+    })
+  }
+  if (lore.length) {
+    groups.push({
+      key: 'lore',
+      name: t('我的设定条目', 'My lore entries'),
+      hint: t('聊到触发词才注入的角色设定与世界观。', 'Character lore injected when a trigger word appears.'),
+      items: lore,
+    })
+  }
+  return groups
+})
 
 // 恢复默认协议包：用户删掉/改坏协议条目后的一键救援（后端按 source_key 幂等重建）
 async function restoreProtocolPack() {
@@ -831,14 +914,22 @@ function confirmDelete(id) {
   color: var(--text-muted, #909399);
 }
 
-/* 协议包说明：与普通设定条目区分开，避免用户以为这是自己加的设定 */
-.wb-desc--protocol {
-  margin-top: 6px;
-  padding: 7px 9px;
-  border-radius: 8px;
-  border: 1px solid var(--border-color, rgba(0, 0, 0, .08));
-  background: var(--surface-hover, rgba(0, 0, 0, .03));
-  color: var(--text-muted, #909399);
+/* 标题右侧的条目总数 */
+.wb-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 9px;
+  background: var(--surface-hover, rgba(0, 0, 0, .05));
+  color: var(--text-secondary, #606266);
+  vertical-align: middle;
+}
+
+.wb-head-text {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .wb-head-ops {
@@ -869,38 +960,72 @@ function confirmDelete(id) {
 .wb-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-height: 34vh;
-  overflow-y: auto;
+  gap: 8px;
 }
 
 .wb-item {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
   border: 1px solid var(--border-color, #e4e7ed);
   border-radius: 10px;
   background: var(--bg, #ffffff);
+  overflow: hidden;
 }
 
-.wb-item-main {
-  min-width: 0;
-  flex: 1;
+/* 停用的条目整体压暗，但仍可操作（不必进二级菜单才能恢复） */
+.wb-item.is-off {
+  opacity: .62;
 }
 
-.wb-item-title {
+.wb-item-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 4px;
+  padding: 9px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.wb-item-head:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, .03));
+}
+
+.wb-caret {
+  flex: none;
+  width: 12px;
+  font-size: 11px;
+  color: var(--text-muted, #909399);
+  transition: transform .15s ease;
+}
+
+.wb-caret.open {
+  transform: rotate(90deg);
 }
 
 .wb-name {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary, #303133);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46%;
+}
+
+/* 收起时的一行摘要，让用户不展开也知道里面是什么 */
+.wb-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-muted, #909399);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wb-size {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-muted, #909399);
+  font-variant-numeric: tabular-nums;
 }
 
 .wb-tag {
@@ -918,34 +1043,76 @@ function confirmDelete(id) {
   color: #fff;
 }
 
+/* 「按需」用描边而非填充：与「常驻」的品牌色实心形成强弱对比 */
+.wb-tag.is-demand {
+  background: transparent;
+  border: 1px solid var(--border-color, #dcdfe6);
+  color: var(--text-muted, #909399);
+}
+
 .wb-tag.is-off {
   background: #fde2e2;
   color: #f56c6c;
 }
 
-/* 「协议」标记：用深色描边与「常驻/按需」的品牌色填充区分开（两条会同时出现） */
+/* 「协议」标记：深色描边，与「常驻/按需」区分（两条会同时出现） */
 .wb-tag.is-proto {
   background: transparent;
   color: var(--text-primary, #303133);
   border: 1px solid currentColor;
 }
 
-.wb-kw {
-  font-size: 12px;
-  color: var(--text-secondary, #606266);
-  margin-bottom: 4px;
+.wb-item-body {
+  padding: 2px 12px 12px 32px;
+  border-top: 1px dashed var(--border-color, #e4e7ed);
 }
 
-.wb-content {
-  font-size: 12px;
-  line-height: 1.6;
+.wb-kw-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.wb-kw-label {
+  font-size: 11px;
   color: var(--text-muted, #909399);
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+}
+
+.wb-kw-chip {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 9px;
+  background: var(--surface-hover, rgba(0, 0, 0, .04));
+  color: var(--text-secondary, #606266);
+}
+
+.wb-kw-none {
+  font-size: 11px;
+  color: var(--text-muted, #909399);
+}
+
+/* 正文用 pre 保留换行，展开后完整可读、可滚动，不再挤压成三行截断 */
+.wb-content {
+  margin: 0;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface, #f5f7fa);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-secondary, #606266);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.wb-source {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted, #909399);
 }
 
 .wb-ops {
@@ -953,6 +1120,46 @@ function confirmDelete(id) {
   display: flex;
   align-items: center;
   gap: 2px;
+  margin-left: auto;
+}
+
+/* ===== 世界书分组（协议包 / 我的设定条目） ===== */
+.wb-group + .wb-group {
+  margin-top: 16px;
+}
+
+.wb-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-left: 8px;
+  border-left: 3px solid var(--brand, #c98a5a);
+}
+
+.wb-group-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #303133);
+  flex: none;
+}
+
+.wb-group-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted, #909399);
+}
+
+.wb-group-count {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 9px;
+  background: var(--brand, #c98a5a);
+  color: #fff;
 }
 
 /* ===== 移动端响应式 ===== */
@@ -966,6 +1173,14 @@ function confirmDelete(id) {
     flex-wrap: wrap;
     justify-content: flex-end;
   }
+  /* 世界书条目：窄屏下名字与操作分行，摘要不再挤在一行 */
+  .wb-item-head {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .wb-name { max-width: 100%; }
+  .wb-preview { flex-basis: 100%; }
+  .wb-ops { margin-left: 0; }
   .persona-card {
     flex-wrap: wrap;
     align-items: flex-start;

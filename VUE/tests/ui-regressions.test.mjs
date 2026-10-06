@@ -132,7 +132,7 @@ console.log('\n[6] 后端：开关默认值与自动关闭逻辑')
     !chat.includes('_multi_character_block') && !chat.includes('【角色阵容】'))
 }
 
-console.log('\n[7] 协议包 UI：卡片里能看见、能恢复')
+console.log('\n[7] 协议包 UI：卡片里能看见、能恢复、排版分组')
 {
   const panel = readFileSync(join(src, 'components', 'PersonaPanel.vue'), 'utf8')
   const api = readFileSync(join(src, 'utils', 'resAi.js'), 'utf8')
@@ -150,6 +150,16 @@ console.log('\n[7] 协议包 UI：卡片里能看见、能恢复')
   ok('缺失的 .form-hint 已补样式', /\.form-hint\s*\{/.test(panel))
   ok('对话设置里说明协议条目位置',
     conv.includes('协议条目在「人物卡 → 世界书」里') || conv.includes('Protocol entries live in Persona'))
+  // 世界书排版：分组 + 默认收起 + 展开看全文
+  ok('世界书按「协议包 / 我的设定条目」分组',
+    panel.includes('wbGroups') && panel.includes("t('协议包', 'Protocol pack')")
+    && panel.includes("t('我的设定条目', 'My lore entries')"))
+  ok('条目默认收起，点击展开（不再是一屏文字墙）',
+    /isWbExpanded/.test(panel) && /toggleWbExpand/.test(panel) && /v-if="isWbExpanded\(e\)"/.test(panel))
+  ok('收起态显示摘要与字数', /function wbPreview/.test(panel) && /e\.content\.length/.test(panel))
+  ok('触发词渲染为标签', /wbKeywordList/.test(panel) && /wb-kw-chip/.test(panel))
+  ok('展开正文可滚动（长规范不撑爆面板）', /\.wb-content\s*\{[\s\S]{0,200}?max-height/.test(panel))
+  ok('列表不再有 34vh 硬限制（改为分组滚动）', !/max-height: 34vh/.test(panel))
 }
 
 console.log('\n[8] 广场世界书编辑器：上限与键稳定性')
@@ -165,6 +175,28 @@ console.log('\n[8] 广场世界书编辑器：上限与键稳定性')
       .match(/weight: Number\(e\.weight\) \|\| 0/g)?.length >= 2)
   ok('打开发布对话框会重置草稿', /function openPublishDialog\(\)/.test(
     readFileSync(join(src, 'components', 'PersonaMarketplace.vue'), 'utf8')))
+}
+
+console.log('\n[9] 长期免登录：启动时用 refresh token 静默续期')
+{
+  const api = readFileSync(join(src, 'utils', 'resAi.js'), 'utf8')
+  const home = readFileSync(join(src, 'views', 'Home.vue'), 'utf8')
+  const store = readFileSync(join(src, 'utils', 'tokenStore.js'), 'utf8')
+  ok('导出 ensureSession / hasStoredSession（且不重复导出）',
+    /export async function ensureSession/.test(api) && /export function hasStoredSession/.test(api)
+    && !/\n  ensureSession,/.test(api))
+  ok('启动时：没有 access 但有 refresh 就静默续期',
+    /if \(!token && tokenStore\.getRefresh\(\)\)[\s\S]{0,200}?await ensureSession\(\)/.test(home))
+  ok('续期失败只按未登录处理，不清掉 refresh token（网络抖动不该踢人）',
+    /catch \(e\) \{\s*\n\s*logger\.warn\('启动续期失败/.test(home))
+  ok('只有服务端说 token 无效（401/403/422）才清 refresh',
+    /status === 401 \|\| status === 403 \|\| status === 422/.test(api)
+    && !/if \(status === 401\) \{\s*\n\s*\/\/[^\n]*\n\s*const hadToken[\s\S]{0,120}?tokenStore\.clear\(\)/.test(api))
+  ok('access token 仍在 sessionStorage、refresh 在 localStorage（安全策略不变）',
+    /safeSet\(sessionStorage, ACCESS_KEY, token\)/.test(store)
+    && /return safeGet\(localStorage, REFRESH_KEY\)/.test(store))
+  ok('接近过期（5 分钟内）也提前续期',
+    /5 \* 60 \* 1000/.test(api))
 }
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)

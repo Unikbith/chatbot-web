@@ -4,7 +4,8 @@ import logger from '@/utils/logger';
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ZoomIn, ChatLineRound } from '@element-plus/icons-vue'
 import {
-  authApi, providersApi, personaApi, settingsApi, conversationApi, chatApi, marketplaceApi, supportApi
+  authApi, providersApi, personaApi, settingsApi, conversationApi, chatApi, marketplaceApi, supportApi,
+  ensureSession,
 } from '../utils/resAi'
 import { applyTheme, bindSystemThemeListener } from '../utils/theme'
 import { tokenStore } from '../utils/tokenStore'
@@ -437,7 +438,18 @@ onMounted(async () => {
   window.addEventListener('focus', loadSupportUnread)
   document.addEventListener('visibilitychange', handleSupportVisibility)
 
-  const token = tokenStore.getAccess()
+  // 启动时先尝试恢复登录态：access token 存在 sessionStorage，关掉浏览器就没了，
+  // 但 refresh token 在 localStorage（默认 30 天有效）。老实现只看 access token，
+  // 取不到就直接当未登录 —— 于是"关一次浏览器就要重新登录"。
+  // ensureSession() 会在需要时用 refresh token 静默换一个新的 access token。
+  let token = tokenStore.getAccess()
+  if (!token && tokenStore.getRefresh()) {
+    try {
+      token = await ensureSession()
+    } catch (e) {
+      logger.warn('启动续期失败，按未登录处理', e)
+    }
+  }
   if (token) {
     try {
       await loadUserInfo()

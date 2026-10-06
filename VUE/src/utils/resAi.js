@@ -36,10 +36,55 @@ async function tryRefreshToken() {
         if (newToken) tokenStore.setAccess(newToken);
         return newToken || null;
       })
-      .catch(() => null)
+      .catch((err) => {
+        // 只有「服务端明确说这个 refresh token 无效/过期」时才清掉它；
+        // 网络抖动、502、断网等情况保留 refresh token，下次打开还能再试，
+        // 否则一次网络问题就会把用户踢回登录页。
+        const status = err?.response?.status;
+        if (status === 401 || status === 403 || status === 422) {
+          tokenStore.clear();
+        }
+        return null;
+      })
       .finally(() => { refreshPromise = null; });
   }
   return refreshPromise;
+}
+
+/** 解析 JWT 的过期时间（秒）；解析失败返回 0（此时会退化成"尝试续期一次"，安全） */
+function tokenExp(token) {
+  try {
+    const payload = String(token).split('.')[1];
+    if (!payload) return 0;
+    const json = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+    return Number(json.exp) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * 应用启动时恢复登录态。
+ *
+ * 背景：access token 存在 sessionStorage（关掉浏览器就没了），而 refresh token
+ * 存在 localStorage（默认 30 天）。老实现启动时只看 access token，取不到就当成未登录，
+ * 于是「关一次浏览器就要重新登录」——refresh token 明明还有效。
+ *
+ * 这里在启动时补上一步静默续期：有 refresh token 就换一个新的 access token。
+ * @returns {Promise<string|null>} 可用的 access token
+ */
+export async function ensureSession() {
+  const existing = tokenStore.getAccess();
+  // access token 还在、且距过期还有 5 分钟以上 → 直接用
+  if (existing && tokenExp(existing) * 1000 - Date.now() > 5 * 60 * 1000) return existing;
+  if (!tokenStore.getRefresh()) return existing || null;
+  const refreshed = await tryRefreshToken();
+  return refreshed || tokenStore.getAccess() || null;
+}
+
+// 用户是否还有效登录态（供启动判断用，不触发网络请求）
+export function hasStoredSession() {
+  return !!(tokenStore.getAccess() || tokenStore.getRefresh());
 }
 
 resAi.interceptors.request.use(
@@ -71,7 +116,9 @@ resAi.interceptors.response.use(
     if (status === 401) {
       // 仅当发请求时确实持有 token 才视为「登录过期」；未登录(无 token)的 401 不弹误导提示
       const hadToken = !!tokenStore.getAccess();
-      tokenStore.clear();
+      // 走到这里说明续期也失败了：refresh token 失效才清（tryRefreshToken 里已按状态码清理），
+      // 这里不再无条件 clear，避免网络问题把可用登录态一并抹掉
+      if (!tokenStore.getRefresh()) tokenStore.clear();
       if (hadToken) notifyAuthExpired();
     } else {
       logger.error("请求错误", error);
@@ -748,6 +795,7 @@ export {
   fetchStream,
   fetchStreamFormData,
   readStream,
+  // ensureSession / hasStoredSession 已在上面用 export function 导出，这里不再重复列出
   authApi,
   providersApi,
   personaApi,
