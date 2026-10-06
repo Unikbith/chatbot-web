@@ -118,6 +118,12 @@
               placeholder="详细的角色设定，指导 AI 如何扮演这个角色...（这是 AI 真正遵循的系统提示词。角色名称会作为身份提示一并发送；简介不会。）"
               maxlength="10000"
             />
+            <!-- 这段提示词每轮都会原样发给模型，是固定成本：提醒用户别把协议正文抄进来 -->
+            <div class="form-hint">
+              这段设定每轮都会发送给模型，越长越费 token —— 建议控制在几百字：写清身份、性格、外貌、说话方式就够，
+              不要把协议条目（创作/结构/玩法规范）的正文复制进来，那些由「对话设置」的开关控制。
+              <span v-if="promptLenHint" class="form-hint__len">当前 {{ promptLenHint }} 字</span>
+            </div>
           </el-form-item>
           <!-- 玩家侧设定：与 AI 提示词同卡绑定，换卡即换整套角色关系 -->
           <el-form-item label="玩家设定">
@@ -443,6 +449,9 @@ function wbKeywordList(entry) {
     .map(s => s.trim())
     .filter(Boolean)
 }
+
+// AI 角色设定的字数提示（`0` 表示没填，不显示）
+const promptLenHint = computed(() => (form.system_prompt || '').trim().length)
 
 // 三条核心协议（输出结构 / 创作与内容 / 剧情推进）已经不靠「常驻」注入，
 // 而是由会话设置里的开关控制（兜底 / 界面标记 + 丰富面板内容），
@@ -941,6 +950,13 @@ function confirmDelete(id) {
   font-size: 12px;
   line-height: 1.6;
   color: var(--text-muted, #909399);
+}
+
+/* 「AI 角色设定」字数提示：超过建议长度时变暖色，提醒这属于每轮固定成本 */
+.form-hint__len {
+  margin-left: 6px;
+  color: var(--brand, #c98a5a);
+  white-space: nowrap;
 }
 
 /* 标题右侧的条目总数 */

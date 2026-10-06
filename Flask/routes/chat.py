@@ -1881,11 +1881,13 @@ def prompt_tool_generate():
 
     # 审计：记录本次使用（谁、用了什么模型、输入与产出），供后台追溯。
     # 只在生成成功时记录；写日志失败不能影响用户正常使用，故单独 try。
+    # provider 可能是免费 API（FreeAPIProvider，没有 id 字段）——用 getattr 兜住，
+    # 否则这条审计记录会永远写不进去，只在日志里留一串 traceback。
     try:
         db.session.add(PromptToolLog(
             user_id=user_id,
             category=category,
-            provider_id=provider.id,
+            provider_id=getattr(provider, 'id', None),
             model=model,
             custom_prompt=custom_prompt or None,
             base_info=base_info or None,
