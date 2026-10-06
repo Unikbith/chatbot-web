@@ -988,28 +988,54 @@ def _world_book_block(user_id, persona_id, recent_texts):
     )
 
 
+# ---------------------------------------------------------------------------
+# 协议条目（世界书里 category='protocol'）的注入：谁控制谁
+# ---------------------------------------------------------------------------
+# 两层开关（**都要开才注入**）：
+#   ① 对话设置 = 总开关，管"所有人物卡"的世界书条目：
+#        · 提示词兜底  → 只控制「② 创作与内容协议」（内容就是 GLOBAL_APPEND_PROMPT 的破甲提示词）
+#        · 界面标记 + 丰富面板内容 → 只控制「① 输出结构协议」
+#      （对话设置里的开关是"全局闸门"：开关关着，任何卡的条目都不注入）
+#   ② 人物卡 → 世界书 = 只管"这一张卡"：
+#        每条自己的开关，关掉某条就只是这张卡不注入那一条
+#   常驻不受对话开关影响的：③ 剧情推进与体验协议（默认开、每轮注入）、玩法包（默认开、关键词命中才注入）
+# ---------------------------------------------------------------------------
+STRUCTURE_MARK = '【每轮输出结构'   # 用于判断"本轮是否注入了结构协议"
+
+
+# 精简版排版约定：结构协议（世界书条目）里已经有【排版硬要求】，
+# 两处都在讲"不要 HTML / 怎么换行"就是每轮白付一遍，所以结构协议在的时候只补它没讲的两条。
+COMPACT_FORMAT_RULE = (
+    "\n\n【输出格式约定】\n"
+    "1. 只输出正文，不要写「好的」「以下是」这类开场白或结尾客套；\n"
+    "2. 不要输出 HTML 标签（如 <div>/<span>/<br>）或 style/CSS —— 排版按上面的结构规范来。"
+)
+
+
+def _format_rule_for(protocol_block):
+    """按本轮是否注入了结构协议，选完整版或精简版排版约定（避免重复说同一件事）。"""
+    if protocol_block and STRUCTURE_MARK in protocol_block:
+        return COMPACT_FORMAT_RULE
+    return OUTPUT_FORMAT_RULE
+
+
 def _protocol_block(user_id, persona_id, recent_texts, conv=None):
     """注入协议条目：输出结构 / 创作与内容 / 剧情推进 / 玩法扩展包。
 
     这些条目默认由「新建人物卡时种入」，存在于该卡的世界书里，用户可自行编辑 /
-    停用 / 删除 —— 后端不再无条件硬注入规范（这是把硬约束改造成世界书的核心目的）。
+    停用 / 删除 —— 后端不再无条件硬注入规范。
 
-    两层开关（**都要开才注入**，默认全关）：
-      · 对话设置的总开关（控制"全部"）：
-        – 「提示词兜底」append_prompt_enabled —— 控制创作与内容、剧情推进与体验，以及玩法包；
-        – 「界面标记」rich_marker_enabled + 「丰富面板内容」enhance —— 控制输出结构协议；
-      · 人物卡世界书里条目自己的开关（控制"单独"）：enabled=False 的那条不注入。
-    三条核心协议都**不再是"常驻"**：不打开开关就完全不注入，默认每轮比之前省约 8k 字；
-    内容一个字都没删，只是不再无条件带上，用户按需在卡片里逐条打开。
-
-    分区注入：开关打开的协议放【输出、创作与推进协议（必须遵守）】，
-    按需命中的玩法包放【本轮的玩法要求】—— 语义上分开，遵循度更高。
-    「回复长度」对应的篇幅要求随协议一起追加（没注入任何协议时也不注入，
-    保证"全关"状态每轮一个字都不多付）。
+    门控：
+      · ① 输出结构协议 ← 「界面标记」rich_marker_enabled（同时决定前端渲染）
+        + 「丰富面板内容」enhance，两个都开才注入（面板格式默认只开前两轮）；
+      · ② 创作与内容协议 ← 「提示词兜底」append_prompt_enabled，默认**关**
+        （这段就是后端 GLOBAL_APPEND_PROMPT 的破甲提示词，几千字，能正常输出就不必开）；
+      · ③ 剧情推进与体验协议 —— **常驻**：不看对话开关，卡片里开着就每轮注入；
+      · 玩法扩展包 —— 关键词命中才注入（聊到才付这份 token），同样受卡片条目开关控制。
 
     conv=None（脚本 / 诊断）时按"开关全开"处理，只为查看完整协议包内容。
     """
-    # 「提示词兜底」：NULL / False 都视为关（新默认），只有显式开启才注入内容类协议
+    # 「提示词兜底」：NULL / False 都视为关（默认），只影响「创作与内容协议」
     append_on = True if conv is None else bool(getattr(conv, 'append_prompt_enabled', None))
 
     try:
@@ -1044,17 +1070,19 @@ def _protocol_block(user_id, persona_id, recent_texts, conv=None):
             continue
         kind = e.kind or ''
         if kind == 'structure':
-            # 结构协议：总开关是「界面标记 + 丰富面板内容」，两个都开才注入
+            # ① 输出结构协议：总开关是「界面标记 + 丰富面板内容」，两个都开才注入
             if not (structure_on and enhance):
                 continue
             fixed.append((e, body))
             continue
-        # 其余协议（创作与内容 / 剧情推进与体验 / 玩法包）都归「提示词兜底」总闸管：
-        # 总闸关着时一律不注入 —— 对话设置控制"全部"，卡片里的条目开关控制"单独"
-        # （条目 enabled=False 的在查询时就已经被过滤掉了）。
-        if not append_on:
+        if kind == 'content':
+            # ② 创作与内容协议 = 后端 GLOBAL_APPEND_PROMPT 的破甲提示词：由「提示词兜底」控制
+            if not append_on:
+                continue
+            fixed.append((e, body))
             continue
-        if kind in ('content', 'experience'):
+        if kind == 'experience':
+            # ③ 剧情推进与体验协议：常驻（不看对话开关，卡片条目开着就注入）
             fixed.append((e, body))
             continue
         # 玩法包与用户自建的协议条目：关键词命中才注入
@@ -1486,25 +1514,28 @@ def chat():
     final_prompt = final_prompt + _world_book_block(
         user_id, effective_persona_id, recent_texts
     )
-    # 协议包：输出结构 / 创作与内容 / 剧情推进（常驻）+ 玩法扩展包（命中才注入）。
+    # 协议包：输出结构 / 创作与内容 / 剧情推进 + 玩法扩展包（命中才注入）。
     # 这些规范现在以「世界书条目」的形式存在每张人物卡上，用户可自行编辑 / 停用 / 删除，
     # 后端不再无条件硬注入（见 protocol_pack.py 的说明）。
-    final_prompt = final_prompt + _protocol_block(
+    protocol_block = _protocol_block(
         user_id, effective_persona_id, recent_texts, conv
     )
+    final_prompt = final_prompt + protocol_block
 
-    # 规范文本（输出结构 / 创作 / 剧情体验）已随协议包从世界书注入，
-    # 这里只保留很轻的排版约定：不含它就等于允许模型输出 HTML 把渲染层搞乱。
+    # 排版约定：结构协议在的时候它已经把「换行 / 不要 HTML」讲过了，
+    # 这里换精简版，避免同一件事每轮说两遍（省 token 也不互相打架）。
+    fmt_rule = _format_rule_for(protocol_block)
+
     if final_prompt and (not formatted_messages or formatted_messages[0].get('role') != 'system'):
         formatted_messages.insert(0, {
             'role': 'system',
-            'content': final_prompt + OUTPUT_FORMAT_RULE
+            'content': final_prompt + fmt_rule
         })
     elif formatted_messages and formatted_messages[0].get('role') == 'system':
         # 前端已自带 system（续写等场景）：同样补上格式约定，保持排版一致
         formatted_messages[0]['content'] = (
             formatted_messages[0].get('content') or ''
-        ) + OUTPUT_FORMAT_RULE
+        ) + fmt_rule
 
     # 滑动窗口截断，控制上下文长度
     formatted_messages = _apply_context_window(formatted_messages)

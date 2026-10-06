@@ -43,8 +43,9 @@
           </el-select>
         </section>
 
-        <!-- 提示词兜底 = 协议包总开关（控制"全部"）：协议条目存在人物卡的世界书里，
-             条目自己的开关控制"单独"，两层都开才会注入 -->
+        <!-- 提示词兜底 = 只控制「创作与内容协议」（后端 GLOBAL_APPEND_PROMPT 的破甲提示词）；
+             对话设置里的开关是"全局闸门"（管所有人物卡的世界书条目），
+             人物卡 → 世界书里的条目开关只管那一张卡 -->
         <section class="cv-panel">
           <header class="cv-panel__head">
             <span class="cv-tick" aria-hidden="true"></span>
@@ -52,19 +53,23 @@
           </header>
           <div class="cv-toggle">
             <div class="cv-toggle__text">
-              <span class="cv-toggle__label">{{ t('注入协议包', 'Inject protocol pack') }}</span>
+              <span class="cv-toggle__label">{{ t('注入创作与内容协议', 'Inject the writing & content protocol') }}</span>
               <span class="cv-toggle__hint">
-                {{ t('注入协议条目控制输出内容，关掉后每轮更省 token',
-                  'Injects the protocol entries that control output; turning it off saves tokens every turn') }}
+                {{ t('控制输出内容，如果能够正常输出则不需要开，减少 token 消耗',
+                  'Controls the output-content rules; if replies already look right you can leave it off to save tokens') }}
               </span>
             </div>
             <el-switch v-model="form.append_prompt_enabled" />
           </div>
           <p class="cv-panel__hint">
-            {{ t('总开关（控制全部）：创作与内容 / 剧情推进与体验 / 玩法包都归它管；输出结构协议由下面的「丰富面板内容」单独控制。',
-              'Master switch (controls all): writing & content, pacing, and play packs. The output-structure protocol is controlled separately by “Rich Panel Content” below.') }}
+            {{ t('只控制人物卡里的「② 创作与内容协议」这一条（内容多的那一段）。剧情推进协议是常驻，玩法包按触发词，两者都不受这里影响。',
+              'Only controls the “② writing & content protocol” entry on the persona card. The pacing protocol is always on, and play packs load on trigger words — neither is affected here.') }}
           </p>
-          <!-- 两层开关的第二层在人物卡里：总开关开了但条目没开时，注入仍然是 0 —— 明确提示并给一键入口 -->
+          <p class="cv-panel__hint">
+            {{ t('这里的开关是全局闸门（对所有人物的世界书生效）；人物卡 → 世界书里的条目开关只管那一张卡。两层都开才会真的注入。',
+              'This switch is the global gate for every persona card’s worldbook; the per-entry switches in Persona → Worldbook only affect that one card. Both layers must be on.') }}
+          </p>
+          <!-- 第二层在人物卡里：总开关开了但条目没开时注入仍然是 0 —— 明确提示并给一键入口 -->
           <p
             v-if="form.append_prompt_enabled && appendStats.total"
             class="cv-panel__hint cv-panel__hint--stat"
@@ -72,8 +77,8 @@
           >
             {{ t('该人物卡已启用', 'Persona card enabled') }}
             <b>{{ appendStats.enabled }}/{{ appendStats.total }}</b>
-            {{ t('条内容类条目（总开关 + 卡片条目开关都要开才会注入）',
-              'content entries (both the master switch and the per-entry switch in the card must be on)') }}
+            {{ t('条创作与内容协议（总开关 + 卡片条目开关都要开才会注入）',
+              'writing & content entry (both the master switch and the per-entry switch must be on)') }}
             <el-button
               v-if="appendStats.enabled < appendStats.total"
               size="small"
@@ -82,7 +87,7 @@
               :loading="protoBusy"
               @click="toggleProtocolEntries('append', true)"
             >
-              {{ t('一键开启该卡条目', 'Enable all on card') }}
+              {{ t('一键开启该卡条目', 'Enable on card') }}
             </el-button>
             <el-button
               v-else
@@ -91,8 +96,14 @@
               :loading="protoBusy"
               @click="toggleProtocolEntries('append', false)"
             >
-              {{ t('全部关闭', 'Disable all') }}
+              {{ t('关闭', 'Disable') }}
             </el-button>
+          </p>
+          <p v-if="alwaysStats.total" class="cv-panel__hint">
+            {{ t('常驻与按需条目（不受本开关影响）：', 'Always-on / on-demand entries (not affected by this switch):') }}
+            <b>{{ alwaysStats.enabled }}/{{ alwaysStats.total }}</b>
+            {{ t('条已启用 —— 剧情推进协议常驻，玩法包命中触发词才注入。在人物卡 → 世界书里可单独开关。',
+              'enabled — the pacing protocol is always on, play packs load on trigger words. Toggle them individually in Persona → Worldbook.') }}
           </p>
         </section>
 
@@ -141,8 +152,8 @@
             >
               {{ t('该人物卡已启用', 'Persona card enabled') }}
               <b>{{ structureStats.enabled }}/{{ structureStats.total }}</b>
-              {{ t('条结构协议条目（总开关 + 卡片条目开关都要开才会注入）',
-                'structure entries (both the master switch and the per-entry switch in the card must be on)') }}
+              {{ t('条输出结构协议（总开关 + 卡片条目开关都要开才会注入）',
+                'structure entry (both the master switch and the per-entry switch in the card must be on)') }}
               <el-button
                 v-if="structureStats.enabled < structureStats.total"
                 size="small"
@@ -151,16 +162,7 @@
                 :loading="protoBusy"
                 @click="toggleProtocolEntries('structure', true)"
               >
-                {{ t('一键开启该卡条目', 'Enable all on card') }}
-              </el-button>
-              <el-button
-                v-else
-                size="small"
-                text
-                :loading="protoBusy"
-                @click="toggleProtocolEntries('structure', false)"
-              >
-                {{ t('全部关闭', 'Disable all') }}
+                {{ t('一键开启该卡条目', 'Enable on card') }}
               </el-button>
             </p>
 
@@ -565,22 +567,25 @@ function resetForm() {
 //   两层都开才会注入。这里显示第一条的统计，并提供一键批量开关的入口。
 // ---------------------------------------------------------------------------
 const EMPTY_STATS = () => ({ enabled: 0, total: 0 })
-const protocolStats = ref({ append: EMPTY_STATS(), structure: EMPTY_STATS() })
+const protocolStats = ref({ append: EMPTY_STATS(), structure: EMPTY_STATS(), always: EMPTY_STATS() })
 const protoBusy = ref(false)
 
 const appendStats = computed(() => protocolStats.value.append || EMPTY_STATS())
 const structureStats = computed(() => protocolStats.value.structure || EMPTY_STATS())
+const alwaysStats = computed(() => protocolStats.value.always || EMPTY_STATS())
 
 async function loadProtocolStats() {
   const id = props.conversation?.id
-  protocolStats.value = { append: EMPTY_STATS(), structure: EMPTY_STATS() }
+  protocolStats.value = { append: EMPTY_STATS(), structure: EMPTY_STATS(), always: EMPTY_STATS() }
   if (!id) return
   try {
     const res = await conversationApi.protocolStats(id)
     if (res.code === 200) {
+      const s = res.data?.stats || {}
       protocolStats.value = {
-        append: { ...EMPTY_STATS(), ...(res.data?.stats?.append || {}) },
-        structure: { ...EMPTY_STATS(), ...(res.data?.stats?.structure || {}) },
+        append: { ...EMPTY_STATS(), ...(s.append || {}) },
+        structure: { ...EMPTY_STATS(), ...(s.structure || {}) },
+        always: { ...EMPTY_STATS(), ...(s.always || {}) },
       }
     }
   } catch (e) {

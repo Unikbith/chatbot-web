@@ -161,7 +161,7 @@
               </div>
               <div class="wb-desc">
                 {{ t('只在聊到相关词时才加载的设定，省 token 也能写更多内容。', 'Lore loaded only when relevant — saves tokens, holds more.') }}
-                <b>{{ t('常驻', 'Always') }}</b>{{ t('＝每轮都注入；其余按触发词命中才注入。协议条目默认是关的：先在这里打开单条，再到「对话设置」打开对应的总开关，两层都开才会注入。', ' = injected every turn; others load when a trigger word appears. Protocol entries are off by default: turn the entry on here and the matching master switch in Conversation Settings — both are required.') }}
+                <b>{{ t('常驻', 'Always') }}</b>{{ t('＝每轮都注入（如「③ 剧情推进与体验协议」）；其余按触发词命中才注入。② 创作与内容协议默认关，由「对话设置 → 提示词兜底」控制；这里关掉某条只影响这张卡。', ' = injected every turn (e.g. the pacing protocol); others load when a trigger word appears. The writing & content entry is off by default and gated by the “Fallback Prompt” switch in Conversation Settings; turning an entry off here only affects this card.') }}
                 <span v-if="!editingPersona" class="wb-draft-note">{{ t('新建模式下条目会随人物卡一起保存。', 'In create mode, entries are saved with the card.') }}</span>
               </div>
             </div>
@@ -453,16 +453,19 @@ function wbKeywordList(entry) {
 // AI 角色设定的字数提示（`0` 表示没填，不显示）
 const promptLenHint = computed(() => (form.system_prompt || '').trim().length)
 
-// 三条核心协议（输出结构 / 创作与内容 / 剧情推进）已经不靠「常驻」注入，
-// 而是由会话设置里的开关控制（兜底 / 界面标记 + 丰富面板内容），
-// 所以它们的角标显示「开关控制」而不是「常驻 / 按需」，避免误导。
+// 三条核心协议（输出结构 / 创作与内容 / 剧情推进）的注入方式各不相同：
+//   ① 输出结构 ← 对话设置里的「界面标记 + 丰富面板内容」
+//   ② 创作与内容 ← 对话设置里的「提示词兜底」（默认关）
+//   ③ 剧情推进 ← 常驻（每轮注入，不看对话开关）
+// 所以角标显示「开关控制」「常驻」而不是统一的「常驻 / 按需」，避免误导。
 const CORE_PROTOCOL_KINDS = ['structure', 'content', 'experience']
 function isCoreProtocol(entry) {
   return entry.category === 'protocol' && CORE_PROTOCOL_KINDS.includes(entry.kind)
 }
 
-// 角标文案：核心协议 → 开关控制；玩法包 → 按触发词；其余按 always_on
+// 角标文案：常驻协议 → 常驻；开关控制的协议 → 开关控制；玩法包 → 按需
 function wbTagText(entry) {
+  if (entry.category === 'protocol' && entry.kind === 'experience') return t('常驻', 'Always')
   if (isCoreProtocol(entry)) return t('开关控制', 'By switch')
   if (entry.category === 'protocol' || !entry.always_on) return t('按需', 'On demand')
   return t('常驻', 'Always')
@@ -480,8 +483,8 @@ const wbGroups = computed(() => {
     groups.push({
       key: 'protocol',
       name: t('协议包', 'Protocol pack'),
-      hint: t('默认关闭。两层开关都要开才会注入：这里打开单条 + 「对话设置」里的总开关（提示词兜底 / 界面标记 + 丰富面板内容）。玩法包按触发词命中才注入。',
-        'Off by default. Two switches must both be on: the entry here, plus the master switch in Conversation Settings. Play packs load on trigger words.'),
+      hint: t('这里的开关只影响这一张卡。对话设置里的开关是全局闸门（对所有人物的世界书生效），两层都开才会注入。常驻＝每轮注入；玩法包按触发词命中才注入。',
+        'These switches only affect this card. Switches in Conversation Settings are the global gate for every card; both layers must be on. “Always” = injected every turn; play packs load on trigger words.'),
       items: protocol,
     })
   }

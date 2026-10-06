@@ -102,13 +102,16 @@ console.log('\n[5] 会话设置：两个总开关（兜底默认关、面板默�
   ok('丰富面板内容回填时默认开启（只开前两轮）',
     /function readPromptEnhance[\s\S]{0,300}?return true/.test(vue))
   ok('丰富面板内容表单默认 true', /prompt_enhance:\s*true/.test(vue))
-  ok('提示词兜底文案说明「注入协议条目控制输出内容，关掉后每轮更省 token」',
-    vue.includes('注入协议条目控制输出内容，关掉后每轮更省 token'))
+  ok('提示词兜底文案说明「控制输出内容，如果能够正常输出则不需要开，减少 token 消耗」',
+    vue.includes('控制输出内容，如果能够正常输出则不需要开，减少 token 消耗'))
+  ok('说明"对话设置=全局闸门 / 世界书=单张卡"',
+    vue.includes('这里的开关是全局闸门') && vue.includes('只管那一张卡'))
+  ok('统计区分「兜底 / 结构 / 常驻按需」三组',
+    vue.includes('appendStats') && vue.includes('structureStats') && vue.includes('alwaysStats'))
   ok('新对话默认模板里 enhance=true（前两轮）',
     /enhance:\s*true/.test(read('utils/replyTemplates.js')))
   ok('总开关旁显示卡片里条目的启用情况（两层开关提示）',
-    vue.includes('appendStats') && vue.includes('structureStats')
-    && vue.includes("t('一键开启该卡条目', 'Enable all on card')"))
+    vue.includes("t('一键开启该卡条目', 'Enable on card')"))
 }
 
 console.log('\n[6] 后端：开关默认值与门控逻辑')
@@ -123,24 +126,29 @@ console.log('\n[6] 后端：开关默认值与门控逻辑')
     /append_on = True if conv is None else bool\(getattr\(conv, 'append_prompt_enabled', None\)\)/.test(chat))
   ok('协议包：硬注入已移除（_get_system_prompt 不再拼兜底词）',
     !/_append_global_prompt\(body/.test(chat))
-  ok('协议包：三条核心协议都不是常驻条目（改由会话开关控制）',
-    /'source_key': 'protocol:structure'[\s\S]{0,220}?'always_on': False/.test(pack)
-    && /'source_key': 'protocol:content'[\s\S]{0,220}?'always_on': False/.test(pack)
-    && /'source_key': 'protocol:experience'[\s\S]{0,220}?'always_on': False/.test(pack))
+  ok('协议包：结构与内容协议改由会话开关控制（不是世界书常驻）',
+    /'source_key': 'protocol:structure'[\s\S]{0,240}?'always_on': False/.test(pack)
+    && /'source_key': 'protocol:content'[\s\S]{0,240}?'always_on': False/.test(pack))
   ok('协议包：结构协议由「界面标记 + 丰富面板内容」门控',
     /'gate': 'enhance'/.test(pack)
     && /if not \(structure_on and enhance\):\s*\n\s*continue/.test(chat))
-  ok('协议包：创作/体验/玩法都归「提示词兜底」总闸管',
+  ok('协议包：创作与内容协议只由「提示词兜底」门控',
     /'gate': 'append'/.test(pack)
-    && /if not append_on:\s*\n\s*continue/.test(chat))
-  ok('协议包：三个开关全关时一个字都不注入', 
+    && /if kind == 'content':[\s\S]{0,200}?if not append_on:\s*\n\s*continue/.test(chat))
+  ok('协议包：剧情推进是常驻（不看对话开关）',
+    /'kind': 'experience',\s*\n\s*'gate': 'always',\s*\n\s*'always_on': True/.test(pack)
+    && /if kind == 'experience':[\s\S]{0,200}?fixed\.append\(\(e, body\)\)/.test(chat))
+  ok('协议包：三条核心协议都不是"世界书常驻"以外的注入路径',
     /if not fixed_bodies and not play_bodies:\s*\n\s*return ''/.test(chat))
+  ok('协议包：卡片默认值 结构=开 / 内容=关 / 剧情常驻=开',
+    /'source_key': 'protocol:structure'[\s\S]{0,240}?'default_enabled': True/.test(pack)
+    && /'source_key': 'protocol:content'[\s\S]{0,240}?'default_enabled': False/.test(pack)
+    && /'source_key': 'protocol:experience'[\s\S]{0,240}?'default_enabled': True/.test(pack))
+  ok('排版约定在结构协议已注入时改用精简版（不重复说同一件事）',
+    /COMPACT_FORMAT_RULE/.test(chat) && /def _format_rule_for/.test(chat)
+    && /fmt_rule/.test(chat))
   ok('协议包：玩法扩展包是按需触发（关键词命中才注入）',
     /'kind': 'play',\s*\n\s*'gate': 'play',\s*\n\s*'always_on': False/.test(pack))
-  ok('协议包：卡片里结构条目默认开、内容/体验默认关',
-    /'source_key': 'protocol:structure'[\s\S]{0,220}?'default_enabled': True/.test(pack)
-    && /'source_key': 'protocol:content'[\s\S]{0,220}?'default_enabled': False/.test(pack)
-    && /'source_key': 'protocol:experience'[\s\S]{0,220}?'default_enabled': False/.test(pack))
   ok('丰富面板内容：第 2 轮后自动关闭并下发事件',
     /ENHANCE_ROUNDS_BEFORE_OFF = 2/.test(chat)
     && /def _maybe_disable_enhance/.test(chat)

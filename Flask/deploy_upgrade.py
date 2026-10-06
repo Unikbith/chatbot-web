@@ -7,16 +7,14 @@
     应用启动时的 `_ensure_schema_columns` 只负责「表/列/索引」，不做这些业务数据迁移，
     所以线上需要执行一次本脚本。
 
-新版开关语义（重要）
-    「对话设置」里两层的总开关（控制"全部"）：
-      · 提示词兜底（append_prompt_enabled）—— 控制创作与内容、剧情推进与体验、玩法包；
-        默认**关闭**；
-      · 界面标记 + 丰富面板内容（rich_marker_enabled / enhance）—— 控制「输出结构协议」；
-        默认**开前两轮**：前两轮把面板格式"教"给模型，第 2 轮结束后 chat.py
-        自动关掉（前端弹窗提示，用户想要常开可在设置里再打开）。
-    人物卡世界书里的每条协议条目还有自己的开关（控制"单独"）：**两层都开才会注入**。
-      ① 输出结构协议 = 默认开（配合上面两轮）；② 创作内容 / ③ 剧情体验 = 默认关；
-      玩法包 = 默认开（只有关键词命中才真的注入，平时不花 token）。
+    两层开关语义（谁控制谁）
+      · 对话设置 = 总开关，管"所有人物卡"的世界书条目：
+        – 提示词兜底 → 只控制「② 创作与内容协议」（= 后端 GLOBAL_APPEND_PROMPT 的破甲提示词），默认关；
+        – 界面标记 + 丰富面板内容 → 只控制「① 输出结构协议」，默认开前两轮（之后 chat.py 自动关）；
+      · 人物卡 → 世界书 = 只管"这一张卡"：每条自己的开关。
+      · ③ 剧情推进与体验协议 = **常驻**（默认开、每轮注入，不受对话开关影响）；
+        玩法包 = 默认开、关键词命中才注入。
+    default_enabled：① 输出结构 = True、② 创作与内容 = False、③ 剧情体验 = True、玩法包 = True。
 
     一次性的破坏性步骤用 deploy_markers 表打标记，**重复执行不会覆盖用户后来的选择**
     （比如用户自己打开的开关，第二次跑脚本不会被再关掉）。
@@ -67,6 +65,7 @@ DUP_CHECK = '--dup-check' in sys.argv
 MARK_SWITCHES_OFF = 'switches_default_off_v1'
 MARK_ENTRIES_OFF = 'protocol_entries_default_off_v1'
 MARK_STRUCTURE_ON = 'structure_entry_default_on_v1'
+MARK_EXPERIENCE_ON = 'experience_entry_always_on_v1'
 
 app = create_app()
 
@@ -316,6 +315,31 @@ with app.app_context():
             mark_done(MARK_STRUCTURE_ON)
         else:
             print('       （dry-run：未打标记，正式执行时才生效）')
+
+    # 1d. ③ 剧情推进与体验协议：改成常驻（一次性）
+    # 它是"每轮都在"的推进规范，不受对话设置里的开关控制，所以条目默认开。
+    if marker_done(MARK_EXPERIENCE_ON):
+        print('\n[1d] 剧情推进与体验协议（常驻）—— 已执行过（跳过）')
+    else:
+        print('\n[1d] 剧情推进与体验协议：改成常驻（默认开启、每轮注入）')
+        rows = WorldBookEntry.query.filter(
+            WorldBookEntry.category == 'protocol',
+            WorldBookEntry.kind == 'experience',
+        ).all()
+        report('剧情推进条目总数', len(rows))
+        report('其中当前是关闭的（将被开启）', sum(1 for r in rows if not r.enabled))
+        if not DRY:
+            for row in rows:
+                row.enabled = True
+                row.always_on = True
+            mark_done(MARK_EXPERIENCE_ON)
+        else:
+            print('       （dry-run：未打标记，正式执行时才生效）')
+        # 标题也换成「（常驻）」，避免界面上还写着由开关控制
+        if not DRY:
+            for row in rows:
+                if row.title and '常驻' not in row.title:
+                    row.title = '③ 剧情推进与体验协议（常驻）'
 
     # ---------- 2. 会话开关：一次性刷成新默认（历史会话都关，省 token） ----------
     print('\n[2] 一次性：历史会话的开关刷成默认关闭（提示词兜底 / 丰富面板内容）')

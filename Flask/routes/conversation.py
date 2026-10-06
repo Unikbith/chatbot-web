@@ -184,8 +184,11 @@ def create_conversation():
 #   这里提供「这张卡上有多少条已启用」的统计与批量开关，供设置面板提示用户。
 # ---------------------------------------------------------------------------
 PROTOCOL_SCOPES = {
-    'structure': ('structure',),                 # 由「界面标记 + 丰富面板内容」控制
-    'append': ('content', 'experience', 'play'),  # 由「提示词兜底」控制
+    # 对话设置里的开关 = 管"所有人物卡"的世界书条目（全局闸门）
+    'append': ('content',),                    # 由「提示词兜底」控制：创作与内容协议（破甲提示词）
+    'structure': ('structure',),               # 由「界面标记 + 丰富面板内容」控制
+    # 不受对话开关控制的常驻/按需条目（这里只做展示与批量开关）
+    'always': ('experience', 'play'),
 }
 
 
@@ -232,10 +235,11 @@ def get_protocol_stats(conv_id):
 def enable_protocol_entries(conv_id):
     """一键开关该对话人物卡上的协议条目（「对话设置」里的便捷入口）。
 
-    请求体：{scope: 'append' | 'structure' | 'all', enabled: true|false}
-      · append    → 创作与内容 / 剧情推进与体验 / 玩法包
-      · structure → 输出结构协议
-    总开关仍然有效：这里只是替用户去卡片里把条目开关批量打开/关掉，
+    请求体：{scope: 'append' | 'structure' | 'always' | 'all', enabled: true|false}
+      · append    → 创作与内容协议（由「提示词兜底」控制）
+      · structure → 输出结构协议（由「界面标记 + 丰富面板内容」控制）
+      · always    → 常驻与按需条目：剧情推进与体验（常驻）、玩法包（关键词命中才注入）
+    对话设置里的开关是"全局闸门"，这里只是替用户去卡片里把条目开关批量打开/关掉，
     避免「开了总开关却因为条目没开而没反应」的困惑。
     """
     user_id = int(get_jwt_identity())

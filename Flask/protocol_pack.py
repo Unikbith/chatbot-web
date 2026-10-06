@@ -188,14 +188,15 @@ def protocol_entries():
 
     每条都自带 source_key：同 key 视为同一条，重复种入只会更新内容，不会产生副本。
 
-    两层开关（都要开才注入）：
-      · 对话设置里的总开关（提示词兜底 / 界面标记 + 丰富面板内容）—— 控制"这一整类"；
-      · 卡片里条目自己的开关（WorldBookEntry.enabled）—— 控制"这一条"。
+    两条开关（**都要开才注入**）：
+      · 对话设置 = 总开关，管"所有人物卡"的世界书条目：
+        – 提示词兜底 → 只控制「② 创作与内容协议」（= 后端 GLOBAL_APPEND_PROMPT 的破甲提示词）
+        – 界面标记 + 丰富面板内容 → 只控制「① 输出结构协议」
+      · 人物卡 → 世界书 = 只管"这一张卡"：每条自己的开关
     default_enabled 的取值理由：
-      · ① 输出结构协议 = True —— 它的总开关（丰富面板内容）默认开前两轮，
-        条目必须是开的，那两轮才真的注入到结构规范（之后总开关自动关闭）；
-      · ② 创作与内容 / ③ 剧情推进与体验 = False —— 总开关（提示词兜底）默认关闭，
-        条目也默认关，用户想要创作规范时自己在卡片里逐条打开；
+      · ① 输出结构协议 = True —— 它的总开关默认开前两轮（之后自动关），条目得是开的；
+      · ② 创作与内容协议 = False —— 破甲提示词几千字，默认关；用户想要时开总开关 + 开条目；
+      · ③ 剧情推进与体验协议 = True —— **常驻**，不看对话开关，开着就每轮注入；
       · 玩法包 = True —— 本来就只有关键词命中才注入，平时不花 token。
     """
     # 结构协议 = 标记词表 + 每轮输出结构（**不含篇幅档**）：
@@ -221,7 +222,7 @@ def protocol_entries():
             'title': '② 创作与内容协议（由「对话设置 → 提示词兜底」控制）',
             'kind': 'content',
             'gate': 'append',
-            'always_on': False,   # 不再常驻：默认关闭，由会话开关决定是否注入
+            'always_on': False,   # 由「提示词兜底」开关控制，默认关（几千字，能正常输出就不必开）
             'default_enabled': False,
             'keywords': '',
             'weight': 90,
@@ -229,11 +230,11 @@ def protocol_entries():
         },
         {
             'source_key': 'protocol:experience',
-            'title': '③ 剧情推进与体验协议（由「对话设置 → 提示词兜底」控制）',
+            'title': '③ 剧情推进与体验协议（常驻）',
             'kind': 'experience',
-            'gate': 'append',
-            'always_on': False,   # 同上
-            'default_enabled': False,
+            'gate': 'always',
+            'always_on': True,    # 常驻：每轮注入，不受对话设置里的开关影响
+            'default_enabled': True,
             'keywords': '',
             'weight': 80,
             'content': _EXPERIENCE,
