@@ -33,7 +33,9 @@ DEFAULT_REPLY_TEMPLATE = json.dumps({
     'name': '脸红',
     'protocol': 'full',
     'length': 'medium',
-    'enhance': False,
+    # 提示词增强默认开启：关掉它只剩标记词表、没有「每轮输出结构」，
+    # 新建对话的界面构件就会缺斤少两（面板/状态/记忆时有时无）。
+    'enhance': True,
 }, ensure_ascii=False)
 
 
@@ -148,7 +150,7 @@ def create_conversation():
         persona_id=persona_id,
         system_prompt=system_prompt,
         temperature=temperature,
-        append_prompt_enabled=bool(data.get('append_prompt_enabled', False)),
+        append_prompt_enabled=bool(data.get('append_prompt_enabled', True)),
         rich_marker_enabled=bool(data.get('rich_marker_enabled', True)),
         reply_template=data.get('reply_template') or DEFAULT_REPLY_TEMPLATE,
     )
@@ -304,38 +306,10 @@ def update_conversation(conv_id):
         else:
             return jsonify({'code': 400, 'message': '渲染模板格式不正确'}), 400
     if 'conversation_directives' in data:
-        raw_directives = data.get('conversation_directives') or {}
-        if not isinstance(raw_directives, dict):
-            return jsonify({'code': 400, 'message': '对话发展设置格式不正确'}), 400
-        allowed = {
-            'goal', 'tone', 'pace', 'initiative', 'boundaries',
-            'role_mode', 'cast', 'focus_rule', 'romance_style',
-        }
-        directives = {}
-        for key in allowed:
-            value = raw_directives.get(key)
-            if value is None:
-                continue
-            if key == 'boundaries':
-                if isinstance(value, list):
-                    value = '\n'.join(str(v).strip() for v in value if str(v).strip())
-                value = str(value).strip()[:2000]
-            elif key == 'cast':
-                value = str(value).strip()[:4000]
-            elif key in {'role_mode', 'romance_style'}:
-                value = str(value).strip()[:100]
-            else:
-                value = str(value).strip()[:1000]
-            if key == 'role_mode' and value not in {'single', 'ensemble'}:
-                continue
-            if value:
-                directives[key] = value
-        try:
-            settings_data = json.loads(conv.settings) if conv.settings else {}
-        except (TypeError, ValueError):
-            settings_data = {}
-        settings_data['conversation_directives'] = directives
-        conv.settings = json.dumps(settings_data, ensure_ascii=False)
+        # 「角色阵容」（单角色 / 多角色 + 阵容 + 回应焦点）已下线：
+        # 单角色与多角色都直接写在人物卡的系统提示词里，不再需要会话级的一份副本。
+        # 老会话 settings 里可能还留着这份数据，注入侧已不再读取（保持数据不动，不做破坏性清理）。
+        pass
 
     conv.updated_at = local_now()
     db.session.commit()

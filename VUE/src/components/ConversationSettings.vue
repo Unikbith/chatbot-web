@@ -14,47 +14,6 @@
       </div>
 
       <template v-else>
-        <section class="cv-panel">
-          <header class="cv-panel__head">
-            <span class="cv-tick" aria-hidden="true"></span>
-            <h3 class="cv-panel__title">{{ t('对话发展', 'Conversation Direction') }}</h3>
-          </header>
-          <p class="cv-panel__hint">{{ t('明确告诉 AI 你希望剧情或交流如何发展；这里的要求优先于人物卡。', 'Tell the AI how you want this chat to develop. These instructions take priority over the persona.') }}</p>
-          <el-input v-model="form.directive_goal" type="textarea" :rows="3" maxlength="1000" show-word-limit :placeholder="t('例如：先建立信任，不要立刻推进恋爱关系；围绕当前事件慢慢展开。', 'Example: build trust first; do not rush the relationship.')" />
-          <div class="cv-directive-grid">
-            <el-select v-model="form.directive_tone" :placeholder="t('语气', 'Tone')" clearable>
-              <el-option :label="t('温柔', 'Gentle')" value="温柔、尊重用户感受" />
-              <el-option :label="t('直接', 'Direct')" value="直接、清晰，不绕弯" />
-              <el-option :label="t('幽默', 'Playful')" value="轻松幽默，但不轻浮" />
-            </el-select>
-            <el-select v-model="form.directive_pace" :placeholder="t('节奏', 'Pace')" clearable>
-              <el-option :label="t('慢慢推进', 'Slow')" value="慢节奏，重大转折前先铺垫并确认" />
-              <el-option :label="t('正常推进', 'Normal')" value="正常节奏，根据用户反馈推进" />
-              <el-option :label="t('快速推进', 'Fast')" value="较快推进，减少重复铺垫" />
-            </el-select>
-            <el-select v-model="form.directive_initiative" :placeholder="t('主动程度', 'Initiative')" clearable>
-              <el-option :label="t('少主动', 'Low')" value="低主动：等待用户决定关键行动" />
-              <el-option :label="t('适度主动', 'Balanced')" value="适度主动：提供推动，但把关键决定交给用户" />
-              <el-option :label="t('更主动', 'High')" value="高主动：主动创造事件与话题，但不替用户决定" />
-            </el-select>
-            <el-select v-model="form.directive_role_mode" :placeholder="t('扮演模式', 'Role mode')" clearable>
-              <el-option :label="t('单角色', 'Single character')" value="single" />
-              <el-option :label="t('多角色', 'Multiple characters')" value="ensemble" />
-            </el-select>
-            <el-select v-model="form.directive_romance_style" :placeholder="t('互动风格', 'Interaction style')" clearable>
-              <el-option :label="t('含蓄暧昧', 'Subtle chemistry')" value="含蓄暧昧：通过语气、距离和细节自然表达，不急于挑明" />
-              <el-option :label="t('明显调情', 'Expressive flirting')" value="明显调情：更主动地表达吸引与试探，同时尊重回应和拒绝" />
-              <el-option :label="t('浪漫亲密', 'Romantic intimacy')" value="浪漫亲密：重视情绪、信任、同意和关系推进" />
-              <el-option :label="t('亲密场景淡出', 'Fade to black')" value="亲密场景淡出：营造亲密氛围，在露骨细节前自然转场" />
-            </el-select>
-          </div>
-          <template v-if="form.directive_role_mode === 'ensemble'">
-            <p class="cv-panel__hint">{{ t('请写清每个角色的姓名、身份、性格差异、与用户及彼此的关系。', 'List each character’s name, identity, personality, and relationships.') }}</p>
-            <el-input v-model="form.directive_cast" type="textarea" :rows="4" maxlength="4000" show-word-limit :placeholder="t('例如：顾言——冷静克制的医生；陆川——外向直接的摄影师。两人知道的信息与情绪彼此独立。', 'Example: Alex — reserved doctor; Ryan — outgoing photographer. Keep their knowledge and emotions separate.')" />
-            <el-input v-model="form.directive_focus_rule" class="cv-field" maxlength="1000" show-word-limit :placeholder="t('镜头偏好，例如：优先回应用户点名或正在互动的角色。', 'Focus rule, e.g. prioritize the named or currently engaged character.')" />
-          </template>
-          <el-input v-model="form.directive_boundaries" type="textarea" :rows="2" maxlength="2000" show-word-limit :placeholder="t('边界或禁区，例如：不要替我说话；重大转折前先询问。', 'Boundaries, e.g. never speak for me; ask before major turns.')" />
-        </section>
         <!-- 人物设定 -->
         <section class="cv-panel">
           <header class="cv-panel__head">
@@ -84,7 +43,6 @@
           </el-select>
         </section>
 
-        <!-- 提示词兜底：默认关闭，开启才会把后端写死的兜底词接在人物设定后面 -->
         <section class="cv-panel">
           <header class="cv-panel__head">
             <span class="cv-tick" aria-hidden="true"></span>
@@ -92,9 +50,9 @@
           </header>
           <div class="cv-toggle">
             <div class="cv-toggle__text">
-              <span class="cv-toggle__label">{{ t('生成失败后才开启', 'Enable only when generation fails') }}</span>
+              <span class="cv-toggle__label">{{ t('追加全局约定', 'Append global instructions') }}</span>
               <span class="cv-toggle__hint">
-                {{ t('稳定生成内容后可关闭，减少token消耗', 'Enable only when the AI cannot produce what you want; turn it off once generation is stable to save tokens') }}
+                {{ t('默认开启：接上世界观、语气与禁区等全局约定，角色更不容易跳出设定；在意 token 时可关闭', 'On by default: appends global world/tone/limits so the character stays in setting. Turn off to save tokens') }}
               </span>
             </div>
             <el-switch v-model="form.append_prompt_enabled" />
@@ -419,14 +377,14 @@ function readTemplateId(raw) {
   }
 }
 
-/** 取回「丰富面板内容」开关：老数据没有该字段时默认关闭 */
+/** 取回「提示词增强」开关：未存过时默认开启（与后端注入侧的默认一致） */
 function readPromptEnhance(raw) {
-  if (!raw) return false
+  if (!raw) return true
   try {
     const data = typeof raw === 'string' ? JSON.parse(raw) : raw
-    return data && data.enhance === true ? true : false
+    return data && data.enhance === false ? false : true
   } catch (e) {
-    return false
+    return true
   }
 }
 
@@ -470,18 +428,16 @@ const form = reactive({
   temperature: null, frequency_penalty: null, presence_penalty: null,
   auto_play_voice: false,
   summary_threshold: 7,
-  append_prompt_enabled: false,
+  // 提示词兜底：默认开启（全局约定能显著降低角色跳出设定的概率）
+  append_prompt_enabled: true,
   // 界面标记默认开启（与后端 RICH_MESSAGE_ENABLED 默认值一致）
   rich_marker_enabled: true,
-  // 回复渲染模板：默认使用脸红（不再有"不使用"这一档）
+  // 回复渲染模板：默认使用档案风（不再有"不使用"这一档）
   reply_template_id: DEFAULT_TEMPLATE_ID,
-  // 丰富面板内容：默认关闭，开启后把「每轮输出结构」接进系统提示词
-  prompt_enhance: false,
-  // 回复长度：默认短文
+  // 提示词增强：默认开启（关掉就不再有「每轮输出结构」，界面构件会时有时无）
+  prompt_enhance: true,
+  // 回复长度：默认长文
   reply_length_id: DEFAULT_LENGTH,
-  directive_goal: '', directive_tone: '', directive_pace: '',
-  directive_initiative: '', directive_boundaries: '', directive_role_mode: '',
-  directive_cast: '', directive_focus_rule: '', directive_romance_style: '',
 })
 
 // 参数微调的量表定义：模板用 v-for 渲染，避免三段结构重复
@@ -518,7 +474,9 @@ function resetForm() {
   form.presence_penalty = (conv.presence_penalty != null && conv.presence_penalty !== '') ? conv.presence_penalty : null
   form.auto_play_voice = !!conv.auto_play_voice
   form.summary_threshold = (conv.summary_threshold != null && conv.summary_threshold !== '') ? Number(conv.summary_threshold) : 7
-  form.append_prompt_enabled = conv.append_prompt_enabled == null ? false : !!conv.append_prompt_enabled
+  // 提示词兜底默认开启：未存过（NULL，老数据）也显示为开启，
+  // 后端 _get_system_prompt 对 NULL 同样是"按开启处理"，两边保持一致
+  form.append_prompt_enabled = conv.append_prompt_enabled == null ? true : !!conv.append_prompt_enabled
   // 未存过（null/undefined）按全局默认「开启」处理：
   // 后端 resolve_rich_marker_enabled 对 NULL 也是回落到全局开关，
   // 这里若按 !!null 显示成关闭，就会出现「界面显示关、实际在注入」的不一致。
@@ -526,16 +484,6 @@ function resetForm() {
   form.reply_template_id = readTemplateId(conv.reply_template)
   form.prompt_enhance = readPromptEnhance(conv.reply_template)
   form.reply_length_id = readLengthId(conv.reply_template)
-  const directives = conv.conversation_directives || {}
-  form.directive_goal = directives.goal || ''
-  form.directive_tone = directives.tone || ''
-  form.directive_pace = directives.pace || ''
-  form.directive_initiative = directives.initiative || ''
-  form.directive_boundaries = directives.boundaries || ''
-  form.directive_role_mode = directives.role_mode || ''
-  form.directive_cast = directives.cast || ''
-  form.directive_focus_rule = directives.focus_rule || ''
-  form.directive_romance_style = directives.romance_style || ''
   // 让本轮回填引起的 watch 在同一微任务里被忽略，下一轮才恢复自动保存
   nextTick(() => { suppressAuto = false })
 }
@@ -614,12 +562,8 @@ function buildPayload() {
     append_prompt_enabled: !!form.append_prompt_enabled,
     rich_marker_enabled: !!form.rich_marker_enabled,
     reply_template: buildReplyTemplate(),
-    conversation_directives: {
-      goal: form.directive_goal, tone: form.directive_tone, pace: form.directive_pace,
-      initiative: form.directive_initiative, boundaries: form.directive_boundaries,
-      role_mode: form.directive_role_mode, cast: form.directive_cast,
-      focus_rule: form.directive_focus_rule, romance_style: form.directive_romance_style,
-    },
+    // 不再提交 conversation_directives：「角色阵容」功能已下线，
+    // 单角色/多角色都直接写在人物卡的系统提示词里
   }
 }
 
@@ -678,15 +622,6 @@ watch(form, () => {
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.015);
   /* 顶部一道极细高光，制造面板的「金属边」而非纸片感 */
   overflow: hidden;
-}
-.cv-directive-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin: 10px 0;
-}
-@media (max-width: 560px) {
-  .cv-directive-grid { grid-template-columns: 1fr; }
 }
 .cv-panel::before {
   content: '';

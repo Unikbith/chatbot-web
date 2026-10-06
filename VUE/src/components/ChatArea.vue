@@ -74,10 +74,6 @@ const emit = defineEmits([
   'modelChange',
   // 本轮回复结束：父组件借此刷新长期记忆（记忆回廊）等派生数据
   'reply-done',
-  // 后端在流中自动关闭了「提示词兜底」：通知父组件同步开关状态
-  'fallback-disabled',
-  // 后端在流中自动关闭了「丰富面板内容」：通知父组件同步开关状态
-  'prompt-enhance-disabled',
   'toggleSidebar',
   'openMemoryTransfer'
 ]);
@@ -577,8 +573,6 @@ const handleSend = async () => {
     const response = await chatApi.stream(requestBody, { signal: ctrl.signal });
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
-      if (data.choices?.[0]?.delta?.append_prompt_enabled === false) emit('fallback-disabled', convId);
-      if (data.choices?.[0]?.delta?.prompt_enhance_disabled === true) emit('prompt-enhance-disabled', convId);
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; applyRichRawStreaming(aiMsg); }
       if (tokens) aiMsg.tokens = tokens;
@@ -864,8 +858,6 @@ const handleVisionChat = async (text) => {
     const response = await chatApi.vision(formData, { signal: ctrl.signal });
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
-      if (data.choices?.[0]?.delta?.append_prompt_enabled === false) emit('fallback-disabled', convId);
-      if (data.choices?.[0]?.delta?.prompt_enhance_disabled === true) emit('prompt-enhance-disabled', convId);
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; applyRichRawStreaming(aiMsg); }
       if (tokens) aiMsg.tokens = tokens;
@@ -1085,8 +1077,6 @@ const regenerate = async (assistantIndex = null) => {
     const response = await chatApi.stream(requestBody, { signal: ctrl.signal });
     await readStream(response, (data) => {
       const { reasoning_content: reasoning = '', content = '', html = '', tokens = null } = data.choices?.[0]?.delta || {};
-      if (data.choices?.[0]?.delta?.append_prompt_enabled === false) emit('fallback-disabled', convId);
-      if (data.choices?.[0]?.delta?.prompt_enhance_disabled === true) emit('prompt-enhance-disabled', convId);
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; applyRichRawStreaming(aiMsg); }
       if (tokens) aiMsg.tokens = tokens;

@@ -356,10 +356,11 @@ class Conversation(db.Model):
     # 用户导入的长期记忆（记忆档案原文）：与滚动摘要分开存，避免被压缩器改写成 200 字短摘要。
     # 滚动摘要是「自动压缩、刻意有损」的，而导入记忆是用户明确指定的档案，必须原样长期保留。
     imported_memory = db.Column(db.Text, nullable=True)
-    # 提示词兜底：开启后，后端写死的 GLOBAL_APPEND_PROMPT 才会接在人物设定之后。
-    # 默认关闭 —— 那段兜底词有几千 token，默认带上会显著抬高每轮输入成本，
-    # 只有在「AI 生成不出想要的内容」时才由用户自行打开。
-    append_prompt_enabled = db.Column(db.Boolean, default=False, nullable=True)
+    # 提示词兜底：开启后，后端写死的 GLOBAL_APPEND_PROMPT（世界观/语气/禁区等全局约定）
+    # 会接在人物设定之后。
+    # 默认开启 —— 产品按「开箱就有完整表现」定位：关掉它角色更容易跳出设定。
+    # 那段兜底词有几千 token，在意成本可在「对话设置 → 提示词兜底」里单独关掉。
+    append_prompt_enabled = db.Column(db.Boolean, default=True, nullable=True)
     # 界面标记（富消息）：开启后把「【状态】【进度】【选项】」等标记约定接在系统提示词后，
     # 模型输出的标记由前端 RichMessage.vue 渲染成状态栏/进展条/可点选项。
     # 默认值跟随全局开关 RICH_MESSAGE_ENABLED（见 rich_marker.py）：
@@ -416,7 +417,11 @@ class Conversation(db.Model):
             'summary': self.summary,
             'summary_upto_id': self.summary_upto_id,
             'imported_memory': self.imported_memory,
-            'append_prompt_enabled': bool(self.append_prompt_enabled),
+            'append_prompt_enabled': (
+                bool(self.append_prompt_enabled)
+                if self.append_prompt_enabled is not None
+                else True          # NULL 视为默认开启，与注入侧 _get_system_prompt 一致
+            ),
             # NULL 与「未存过」同义：回落到全局默认值，
             # 与 rich_marker.resolve_rich_marker_enabled 的判定保持一致，
             # 避免前端显示成关闭、实际却按全局开关在注入。
@@ -426,7 +431,8 @@ class Conversation(db.Model):
                 else RICH_MESSAGE_ENABLED
             ),
             'reply_template': self.reply_template,
-            'conversation_directives': settings_data.get('conversation_directives', {}),
+            # 「角色阵容」已下线：老数据里可能还留着 conversation_directives，
+            # 这里不再下发给前端（注入侧也不再读取），避免界面上残留已删除的功能。
             'persona_name': self.persona.name if self.persona else None,
             'persona_avatar': self.persona.avatar if self.persona else None,
             'created_at': iso_time(self.created_at),

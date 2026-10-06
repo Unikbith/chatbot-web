@@ -86,5 +86,41 @@ console.log('\n[4] 世界书编辑器自身：条目可选、有上限')
   ok('说明可不填', wb.includes('可不填'))
 }
 
+console.log('\n[5] 会话设置：「角色阵容」已下线，两个开关默认开启')
+{
+  const vue = read('components/ConversationSettings.vue')
+  // 注释里会提到"角色阵容已下线"，所以只断言界面上不再有这个面板标题
+  ok('不再有「角色阵容」面板',
+    !vue.includes("t('角色阵容'") && !vue.includes("'Character Cast'"))
+  ok('不再有单角色/多角色选择', !vue.includes('role_mode') && !vue.includes('ensemble'))
+  ok('不再有阵容与回应焦点输入', !vue.includes('role_cast') && !vue.includes('role_focus_rule'))
+  ok('不再提交 conversation_directives（只留一条说明性注释）',
+    !/conversation_directives:\s*\{/.test(vue))
+  ok('提示词兜底表单默认 true', /append_prompt_enabled:\s*true/.test(vue))
+  ok('提示词兜底回填时 NULL 视为开启',
+    /form\.append_prompt_enabled = conv\.append_prompt_enabled == null \? true/.test(vue))
+  ok('提示词增强回填时默认开启', /function readPromptEnhance[\s\S]{0,200}?return true/.test(vue))
+  ok('提示词增强表单默认 true', /prompt_enhance:\s*true/.test(vue))
+  ok('文案改成「默认开启」而不是「生成失败后才开启」',
+    vue.includes('默认开启') && !vue.includes('生成失败后才开启'))
+}
+
+console.log('\n[6] 后端：开关默认值与自动关闭逻辑')
+{
+  const models = readFileSync(join(here, '..', '..', 'Flask', 'models.py'), 'utf8')
+  const chat = readFileSync(join(here, '..', '..', 'Flask', 'routes', 'chat.py'), 'utf8')
+  const rich = readFileSync(join(here, '..', '..', 'Flask', 'rich_marker.py'), 'utf8')
+  ok('模型默认 append_prompt_enabled=True',
+    /append_prompt_enabled = db\.Column\(db\.Boolean, default=True/.test(models))
+  ok('注入侧 NULL 视为开启',
+    /enabled = True if flag is None else bool\(flag\)/.test(chat))
+  ok('enhance 未设置时按开启处理',
+    /enhance = opts\.get\('enhance'\) is not False/.test(rich))
+  ok('不再有「聊满三轮自动关闭提示词兜底」', !chat.includes('提示词兜底已自动关闭'))
+  ok('不再有「聊满两轮自动关闭丰富面板内容」', !chat.includes('已自动关闭，以减少后续 Token 消耗'))
+  ok('多角色注入函数已移除',
+    !chat.includes('_multi_character_block') && !chat.includes('【角色阵容】'))
+}
+
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
 process.exit(fail ? 1 : 0)

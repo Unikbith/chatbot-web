@@ -751,32 +751,10 @@ function onReplyDone(convId) {
   loadLongTermMemory()
 }
 
-// 后端在三轮后自动关闭「提示词兜底」，同步当前会话对象，让设置抽屉里的开关跟着关闭
-function onFallbackDisabled(convId) {
-  if (convId != null && convId != currentConvId.value) return
-  if (currentConv.value) currentConv.value.append_prompt_enabled = false
-}
-
-// 后端在一轮后自动关闭「丰富面板内容」，同步当前会话对象并弹窗提示
-function onPromptEnhanceDisabled(convId) {
-  if (convId != null && convId != currentConvId.value) return
-  if (currentConv.value) {
-    // 更新 reply_template 中的 enhance 字段
-    try {
-      const tpl = typeof currentConv.value.reply_template === 'string'
-        ? JSON.parse(currentConv.value.reply_template)
-        : currentConv.value.reply_template || {}
-      tpl.enhance = false
-      currentConv.value.reply_template = JSON.stringify(tpl)
-    } catch (e) { /* ignore */ }
-  }
-  // 弹窗提示用户
-  ElMessageBox.alert(
-    '已完成一轮对话，「丰富面板内容」已自动关闭，以减少后续 Token 消耗。',
-    '功能已自动关闭',
-    { confirmButtonText: '知道了', type: 'info' }
-  )
-}
+// 说明：后端原本会在「聊满 3 轮」时自动关闭提示词兜底、在「聊满 2 轮」时自动关闭
+// 提示词增强，前端这里曾有两个回调同步开关状态并弹窗。两个自动关闭都已移除
+// （会让用户刚打开的开关自己关掉；且关掉增强后输出结构规范不再注入，界面结构会漂移），
+// 因此这两个回调及其事件接线一并删除。
 
 async function loadLongTermMemory() {
   if (!currentConvId.value) { longTermMemory.value = []; return }
@@ -1422,8 +1400,6 @@ async function handleConvoSettingsSaved(payload) {
       :reply-template="replyTemplate"
       :long-term-memory="longTermMemory"
       @reply-done="onReplyDone"
-      @fallback-disabled="onFallbackDisabled"
-      @prompt-enhance-disabled="onPromptEnhanceDisabled"
       :is-free-api="chatStatus.is_free"
       :logged-in="isLoggedIn"
       :persona-greeting="currentPersona?.greeting || ''"
