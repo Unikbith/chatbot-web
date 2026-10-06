@@ -1,5 +1,5 @@
 """角色模板路由 - 人设提示词管理"""
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
 from models import PersonaTemplate, MarketplaceAdopt, WorldBookEntry, local_now
@@ -80,7 +80,9 @@ def list_personas():
 def get_persona(persona_id):
     """获取角色详情"""
     user_id = int(get_jwt_identity())
-    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first()
+    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).filter(
+        PersonaTemplate.deleted_at.is_(None)
+    ).first()
     
     if not persona:
         return jsonify({'code': 404, 'message': '角色不存在'}), 404
@@ -169,7 +171,13 @@ def create_persona():
     # 协议包：默认给每张卡种入一份（输出结构 / 创作与内容 / 剧情体验 + 玩法扩展包）。
     # 只种入协议条目，用户提交的世界书草稿不受影响；种入后用户可在卡片面板里
     # 自行编辑 / 停用 / 删除 —— 后端不再无条件硬注入规范。
-    seeded, _ = seed_protocol_entries(user_id, persona.id)
+    # 种入失败不能连累建卡：捕获后照常保存人物卡，用户之后点「恢复默认协议包」即可补
+    try:
+        seeded, _ = seed_protocol_entries(user_id, persona.id)
+    except Exception:
+        db.session.rollback()
+        seeded = 0
+        current_app.logger.warning('[协议包] 建卡时种入失败，已跳过', exc_info=True)
     db.session.commit()
     
     return jsonify({
@@ -186,7 +194,9 @@ def create_persona():
 def update_persona(persona_id):
     """更新角色模板"""
     user_id = int(get_jwt_identity())
-    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first()
+    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).filter(
+        PersonaTemplate.deleted_at.is_(None)
+    ).first()
     
     if not persona:
         return jsonify({'code': 404, 'message': '角色不存在'}), 404
@@ -290,7 +300,9 @@ def delete_persona(persona_id):
 def set_default(persona_id):
     """设为默认角色"""
     user_id = int(get_jwt_identity())
-    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first()
+    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).filter(
+        PersonaTemplate.deleted_at.is_(None)
+    ).first()
     
     if not persona:
         return jsonify({'code': 404, 'message': '角色不存在'}), 404
@@ -315,7 +327,7 @@ def set_default(persona_id):
 # 聊天时后端自动按关键词命中注入，聊天用户无需任何操作。
 MAX_WB_TITLE_LEN = 200
 MAX_WB_KEYWORDS_LEN = 1000
-MAX_WB_CONTENT_LEN = 4000
+MAX_WB_CONTENT_LEN = 8000   # 协议条目「创作与内容协议」正文就有 ~3800 字，4000 上限会导致它无法在卡片面板保存
 MAX_WB_ENTRIES_PER_PERSONA = 50
 
 
@@ -364,12 +376,33 @@ def _wb_entry_of(entry_id, user_id):
     return WorldBookEntry.query.filter_by(id=entry_id, user_id=user_id).first()
 
 
+# 用户可自建的协议类型白名单：只开放「玩法包」。
+# 输出结构 / 创作与内容 / 剧情推进这三条是骨架，只能由系统种入与「恢复默认协议包」维护，
+# 允许用户随手新建会让结构规范变得不可控。
+WB_USER_PROTOCOL_KINDS = ('play',)
+
+
+def _wb_category_of(data):
+    """解析用户提交的 category：只有玩法包允许写成 protocol，其余一律 lore。"""
+    kind = (data.get('kind') or '').strip()
+    if (data.get('category') or '').strip() == 'protocol' and kind in WB_USER_PROTOCOL_KINDS:
+        return 'protocol'
+    return 'lore'
+
+
+def _wb_kind_of(data):
+    kind = (data.get('kind') or '').strip()
+    return kind if kind in WB_USER_PROTOCOL_KINDS else ''
+
+
 @persona_bp.route('/<int:persona_id>/worldbook', methods=['GET'])
 @jwt_required()
 def list_worldbook(persona_id):
     """列出某角色的世界书条目（含该用户的全局条目）"""
     user_id = int(get_jwt_identity())
-    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first()
+    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).filter(
+        PersonaTemplate.deleted_at.is_(None)
+    ).first()
     if not persona:
         return jsonify({'code': 404, 'message': '角色不存在'}), 404
 
@@ -400,7 +433,9 @@ def restore_protocol_pack(persona_id):
       不传则整包恢复（缺失的补建、已有的重置为默认正文并重新启用）。
     """
     user_id = int(get_jwt_identity())
-    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first()
+    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).filter(
+        PersonaTemplate.deleted_at.is_(None)
+    ).first()
     if not persona:
         return jsonify({'code': 404, 'message': '角色不存在'}), 404
 
@@ -435,11 +470,17 @@ def restore_protocol_pack(persona_id):
 def create_worldbook_entry(persona_id):
     """新增世界书条目"""
     user_id = int(get_jwt_identity())
-    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).first()
+    persona = PersonaTemplate.query.filter_by(id=persona_id, user_id=user_id).filter(
+        PersonaTemplate.deleted_at.is_(None)
+    ).first()
     if not persona:
         return jsonify({'code': 404, 'message': '角色不存在'}), 404
 
-    count = WorldBookEntry.query.filter_by(user_id=user_id, persona_id=persona_id).count()
+    # 只统计用户自己写的设定条目：协议条目由系统种入，不该占用用户额度
+    # （否则建卡时可提交 50 条 + 自动种入 10 条协议 = 60 条，之后再也加不了条目）
+    count = WorldBookEntry.query.filter_by(
+        user_id=user_id, persona_id=persona_id, category='lore'
+    ).count()
     if count >= MAX_WB_ENTRIES_PER_PERSONA:
         return jsonify({
             'code': 400,
@@ -468,6 +509,8 @@ def create_worldbook_entry(persona_id):
         always_on=bool(data.get('always_on', False)),
         enabled=bool(data.get('enabled', True)),
         weight=int(data.get('weight') or 0),
+        category=_wb_category_of(data),
+        kind=_wb_kind_of(data),
     )
     db.session.add(entry)
     db.session.commit()
@@ -481,7 +524,9 @@ def update_worldbook_entry(persona_id, entry_id):
     """修改世界书条目"""
     user_id = int(get_jwt_identity())
     entry = _wb_entry_of(entry_id, user_id)
-    if not entry or entry.persona_id != persona_id:
+    # 全局条目（persona_id 为空）对所有卡生效，因此在任意一张卡的列表里都能看到、
+    # 也必须能被编辑/删除 —— 否则前端开关点了只会弹「操作失败」（实测 404）
+    if not entry or entry.persona_id not in (persona_id, None):
         return jsonify({'code': 404, 'message': '条目不存在'}), 404
 
     data = request.get_json() or {}
@@ -509,6 +554,10 @@ def update_worldbook_entry(persona_id, entry_id):
             entry.weight = int(data.get('weight') or 0)
         except (TypeError, ValueError):
             pass
+    # 允许把自建条目改成玩法包（或从玩法包改回普通设定），同样只开放 play 这一种
+    if 'category' in data or 'kind' in data:
+        entry.category = _wb_category_of(data) if 'category' in data else (entry.category or 'lore')
+        entry.kind = _wb_kind_of(data) if 'kind' in data else (entry.kind or '')
 
     db.session.commit()
     return jsonify({'code': 200, 'message': '已保存', 'data': entry.to_dict()})
@@ -520,7 +569,7 @@ def delete_worldbook_entry(persona_id, entry_id):
     """删除世界书条目"""
     user_id = int(get_jwt_identity())
     entry = _wb_entry_of(entry_id, user_id)
-    if not entry or entry.persona_id != persona_id:
+    if not entry or entry.persona_id not in (persona_id, None):
         return jsonify({'code': 404, 'message': '条目不存在'}), 404
 
     db.session.delete(entry)

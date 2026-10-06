@@ -132,5 +132,40 @@ console.log('\n[6] 后端：开关默认值与自动关闭逻辑')
     !chat.includes('_multi_character_block') && !chat.includes('【角色阵容】'))
 }
 
+console.log('\n[7] 协议包 UI：卡片里能看见、能恢复')
+{
+  const panel = readFileSync(join(src, 'components', 'PersonaPanel.vue'), 'utf8')
+  const api = readFileSync(join(src, 'utils', 'resAi.js'), 'utf8')
+  const conv = readFileSync(join(src, 'components', 'ConversationSettings.vue'), 'utf8')
+  ok('协议条目标记按 category 渲染', panel.includes("e.category === 'protocol'"))
+  ok('协议条目有专属样式（左侧刻度 + 描边标记）',
+    /\.wb-item\.is-protocol\s*\{/.test(panel) && /\.wb-tag\.is-proto\s*\{/.test(panel))
+  ok('有「恢复默认协议包」按钮与确认框',
+    panel.includes('restoreProtocolPack') && panel.includes("t('恢复默认协议包', 'Restore protocol pack')"))
+  ok('恢复接口已定义且路径正确',
+    /restoreProtocol\(personaId, sourceKeys = null\)[\s\S]{0,200}?restore-protocol/.test(api))
+  ok('删除条目失败会提示（不再静默）',
+    /personaApi\.removeWorldBook[\s\S]{0,300}?ElMessage\.error/.test(panel))
+  ok('世界书表头有窄屏适配', /@media \(max-width: 768px\) \{[\s\S]{0,200}?\.wb-head/.test(panel))
+  ok('缺失的 .form-hint 已补样式', /\.form-hint\s*\{/.test(panel))
+  ok('对话设置里说明协议条目位置',
+    conv.includes('协议条目在「人物卡 → 世界书」里') || conv.includes('Protocol entries live in Persona'))
+}
+
+console.log('\n[8] 广场世界书编辑器：上限与键稳定性')
+{
+  const editor = readFileSync(join(src, 'components', 'MarketplaceWorldbookEditor.vue'), 'utf8')
+  ok('达到上限时按钮禁用（不再静默无反应）',
+    /:disabled="list\.length >= MAX_ENTRIES"/.test(editor))
+  ok('达到上限有文字提示', editor.includes('已达上限'))
+  ok('新增条目带稳定 uid（避免索引 key 串行）',
+    /uid: `wb_/.test(editor) && /:key="entry\.uid \|\| i"/.test(editor))
+  ok('广场卡片的 weight/enabled 往返不丢',
+    readFileSync(join(src, 'components', 'PersonaMarketplace.vue'), 'utf8')
+      .match(/weight: Number\(e\.weight\) \|\| 0/g)?.length >= 2)
+  ok('打开发布对话框会重置草稿', /function openPublishDialog\(\)/.test(
+    readFileSync(join(src, 'components', 'PersonaMarketplace.vue'), 'utf8')))
+}
+
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
 process.exit(fail ? 1 : 0)

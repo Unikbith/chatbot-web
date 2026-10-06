@@ -4,7 +4,9 @@
        条目全可选 —— 一条都不填也能发布，只是没有按需注入的设定。
        常驻=每次都注入；非常驻=对话里出现关键词才注入。 -->
   <div class="mk-wb">
-    <div v-for="(entry, i) in list" :key="i" class="mk-wb-item">
+    <!-- :key 用条目自带的 uid：用索引当 key 时，删除中间一条会让后面条目的
+         输入框错位复用（Element 内部状态跟着串行） -->
+    <div v-for="(entry, i) in list" :key="entry.uid || i" class="mk-wb-item">
       <div class="mk-wb-head">
         <el-input
           v-model="entry.title"
@@ -49,10 +51,19 @@
     </div>
 
     <div class="mk-wb-foot">
-      <el-button size="small" :icon="Plus" @click="add">{{ t('添加条目', 'Add entry') }}</el-button>
+      <el-button
+        size="small"
+        :icon="Plus"
+        :disabled="list.length >= MAX_ENTRIES"
+        @click="add"
+      >
+        {{ t('添加条目', 'Add entry') }}
+      </el-button>
       <span class="mk-wb-tip">
-        {{ t('可不填。世界书只在与剧情相关时才占用上下文，适合写世界观、称呼、习惯等设定。',
-          'Optional. Lorebook entries only consume context when relevant.') }}
+        {{ list.length >= MAX_ENTRIES
+          ? t(`已达上限 ${MAX_ENTRIES} 条`, `Limit reached (${MAX_ENTRIES})`)
+          : t('可不填。世界书只在与剧情相关时才占用上下文，适合写世界观、称呼、习惯等设定。',
+              'Optional. Lorebook entries only consume context when relevant.') }}
       </span>
     </div>
   </div>
@@ -71,13 +82,16 @@ const emit = defineEmits(['update:modelValue'])
 // 最多 20 条（与后端 PUB_WORLDBOOK_MAX 一致），避免发布时报错才发现
 const MAX_ENTRIES = 20
 
+// 说明：条目内部的字段编辑走 v-model 直接作用于父组件传入的响应式对象
+// （父组件用 reactive 数组，能正常工作）；结构性增删才 emit 新数组。
+// 若将来父组件改成浅拷贝/computed，字段编辑会静默失效 —— 那时应改用 defineModel。
 const list = computed(() => props.modelValue || [])
 
 function add() {
   if (list.value.length >= MAX_ENTRIES) return
   emit('update:modelValue', [
     ...list.value,
-    { title: '', keywords: '', content: '', always_on: false },
+    { uid: `wb_${Date.now()}_${list.value.length}`, title: '', keywords: '', content: '', always_on: false },
   ])
 }
 

@@ -280,6 +280,17 @@ def _ensure_schema_columns(app):
                     if 'source_key' not in wb_cols:
                         conn.execute(text('ALTER TABLE worldbook_entries ADD COLUMN source_key VARCHAR(80)'))
                         app.logger.info('[迁移] 已为 worldbook_entries 增加 source_key 字段')
+                    # source_key 的索引：模型里声明了 index=True，但 ALTER 不会建索引，
+                    # 老库因此缺一个索引（幂等：IF NOT EXISTS）
+                    conn.execute(text(
+                        'CREATE INDEX IF NOT EXISTS ix_worldbook_entries_source_key '
+                        'ON worldbook_entries (source_key)'))
+                    # 协议条目的唯一性：同一张卡的同名协议条目只允许一条，
+                    # 并发点「恢复默认协议包」时不会插出重复条目
+                    conn.execute(text(
+                        'CREATE UNIQUE INDEX IF NOT EXISTS ux_worldbook_persona_source '
+                        'ON worldbook_entries (user_id, persona_id, source_key) '
+                        'WHERE source_key IS NOT NULL'))
             # marketplace_worldbook_entries — 广场卡片随卡分享的世界书条目
             if 'marketplace_worldbook_entries' not in inspector.get_table_names():
                 db.create_all()
@@ -526,6 +537,13 @@ def _init_default_data(app):
             weight=100
         )
         db.session.add(persona)
+        db.session.flush()
+        # 协议包：默认卡同样要带，否则这个账号的对话没有结构 / 创作规范
+        try:
+            from services.protocol_seed import seed_protocol_entries
+            seed_protocol_entries(default_user.id, persona.id)
+        except Exception as e:
+            app.logger.warning('[初始化] 默认角色协议包种入失败: %s', e)
         app.logger.info("[初始化] 创建默认角色: 加藤惠")
 
     # 旧版默认人物卡提示词一次性升级（幂等：新版含【与用户的关系】章节即跳过）

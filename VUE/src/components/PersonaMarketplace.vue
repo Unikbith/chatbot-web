@@ -57,7 +57,7 @@
             <el-option :label="t('点赞最多', 'Most likes')" value="most_likes" />
             <el-option :label="t('评论最多', 'Most comments')" value="most_comments" />
           </el-select>
-          <el-button type="primary" size="small" @click="showPublishDialog = true">
+          <el-button type="primary" size="small" @click="openPublishDialog">
             <el-icon><Plus /></el-icon> {{ t('发布卡片', 'Publish Card') }}
           </el-button>
         </div>
@@ -658,6 +658,8 @@ function openEditDialog() {
       keywords: e.keywords || '',
       content: e.content || '',
       always_on: !!e.always_on,
+      enabled: e.enabled === undefined ? true : !!e.enabled,
+      weight: Number(e.weight) || 0,
     })),
   })
   showEditDialog.value = true
@@ -746,6 +748,20 @@ const publishForm = reactive({
   worldbook: [],
 })
 
+// 清空发布草稿：取消或发布后都要清，否则下次打开还带着上一次的正文与刚加的世界书条目
+function resetPublishForm() {
+  Object.assign(publishForm, {
+    name: '', description: '', system_prompt: '', greeting: '', avatar: '',
+    gender: '', genderCustom: '', user_prompt: '', worldbook: [],
+  })
+}
+
+// 打开发布对话框：先重置，避免残留草稿被误当成新卡内容发出去
+function openPublishDialog() {
+  resetPublishForm()
+  showPublishDialog.value = true
+}
+
 // 提交前把世界书条目洗一遍：正文为空的整条丢掉（后端也会丢，这里先过滤少一次往返）
 function cleanWorldbook(entries) {
   return (entries || [])
@@ -755,6 +771,9 @@ function cleanWorldbook(entries) {
       keywords: (e.keywords || '').trim(),
       content: (e.content || '').trim(),
       always_on: !!e.always_on,
+      // weight / enabled 也要带上：后端是整表替换，缺失就等于把这两项重置
+      enabled: e.enabled === undefined ? true : !!e.enabled,
+      weight: Number(e.weight) || 0,
     }))
 }
 
@@ -1077,10 +1096,7 @@ async function handlePublish() {
     if (res.code === 200) {
       ElMessage.success(t('发布成功', 'Published'))
       showPublishDialog.value = false
-      Object.assign(publishForm, {
-        name: '', description: '', system_prompt: '', greeting: '', avatar: '',
-        gender: '', genderCustom: '', user_prompt: '', worldbook: [],
-      })
+      resetPublishForm()
       loadList()
       // 新卡片可能带来新的自定义性别，刷新下拉选项
       loadCustomGenders()

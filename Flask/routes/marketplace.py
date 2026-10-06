@@ -875,8 +875,13 @@ def adopt_persona(pid):
 
     # 协议包：采用来的卡同样默认带一份（输出结构 / 创作与内容 / 剧情体验 + 玩法扩展包），
     # 采用者可在自己的卡片面板里自由编辑 / 停用 / 删除
-    from services.protocol_seed import seed_protocol_entries
-    seed_protocol_entries(user_id, tp.id)
+    # 种入失败不能连累采用流程（之后可用「恢复默认协议包」补）
+    try:
+        from services.protocol_seed import seed_protocol_entries
+        seed_protocol_entries(user_id, tp.id)
+    except Exception:
+        db.session.rollback()
+        current_app.logger.warning('[协议包] 采用卡片时种入失败，已跳过', exc_info=True)
 
     db.session.commit()
     data = tp.to_dict()

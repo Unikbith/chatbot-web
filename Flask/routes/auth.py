@@ -299,6 +299,16 @@ def _create_random_default_persona(user_id, gender='神秘'):
     )
     db.session.add(persona)
     db.session.flush()
+    # 协议包：注册路径建的卡也必须带（输出结构 / 创作与内容 / 剧情推进 + 玩法扩展包），
+    # 否则新用户唯一的卡没有协议条目，聊天既没有结构规范也没有创作协议。
+    # 种入失败不能连累注册流程（之后可在卡片面板点「恢复默认协议包」补）。
+    try:
+        from services.protocol_seed import seed_protocol_entries
+        seed_protocol_entries(user_id, persona.id)
+    except Exception:
+        db.session.rollback()
+        current_app.logger.warning('[初始化] 默认人物卡协议包种入失败', exc_info=True)
+        persona = PersonaTemplate.query.filter_by(id=persona.id).first() or persona
     # 建立「已添加」关联，使这张卡在广场里显示为已采用
     db.session.add(MarketplaceAdopt(
         persona_id=picked.id, user_id=user_id, template_id=persona.id

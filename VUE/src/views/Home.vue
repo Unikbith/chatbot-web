@@ -1078,7 +1078,7 @@ async function handleConvoSettingsSaved(payload) {
       ...(payload.summary_threshold != null
         ? { summary_threshold: Number(payload.summary_threshold) }
         : {}),
-      // 提示词兜底：关闭时不再把后端写死的追加提示词拼到人物设定后面
+      // 提示词兜底：关闭时不再注入人物卡里的协议条目（输出结构 / 创作 / 剧情推进 / 玩法包）
       ...(payload.append_prompt_enabled != null
         ? { append_prompt_enabled: !!payload.append_prompt_enabled }
         : {}),

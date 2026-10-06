@@ -363,7 +363,7 @@ class Conversation(db.Model):
     append_prompt_enabled = db.Column(db.Boolean, default=True, nullable=True)
     # 界面标记（富消息）：开启后把「【状态】【进度】【选项】」等标记约定接在系统提示词后，
     # 模型输出的标记由前端 RichMessage.vue 渲染成状态栏/进展条/可点选项。
-    # 默认值跟随全局开关 RICH_MESSAGE_ENABLED（见 rich_marker.py）：
+    # 列默认值就是 True（与前端回填一致）；running 环境想整体关掉可用 .env 的
     # 这样新建对话的初始状态与 .env 一致，且「会话设置」里显示的开关不会与实际行为不符。
     # 用户可在会话设置里单独覆盖（写入显式 True/False）。
     rich_marker_enabled = db.Column(

@@ -7,13 +7,13 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import or_
 from extensions import db
 from rich_marker import (
-    RICH_MESSAGE_ENABLED,
-    RICH_MESSAGE_PROMPT,
-    rich_marker_rule as _rich_marker_rule,
+    # 结构规范改由协议条目注入后，rich_marker_rule / RICH_MESSAGE_PROMPT 不再被本模块使用；
+    # 这里只保留「开关解析」与「会话模板选择项」两个仍需要的入口。
     resolve_rich_marker_enabled,
     template_prompt,
 )
 import reply_spec
+import protocol_pack
 from models import (ModelProvider, Conversation, Message, PersonaTemplate,
                     UserSettings, PromptToolLog, ConversationSummary,
                     WorldBookEntry, AiUsageLog, User, local_now)
@@ -79,7 +79,7 @@ OUTPUT_FORMAT_RULE = (
 #   · 仅对「人物卡聊天」生效；识图聊天、生图、提示词工具均不受影响；
 #   · ⚠️ 改完必须重启 Flask 才会生效。
 # ---------------------------------------------------------------------------
-GLOBAL_APPEND_PROMPT = """
+GLOBAL_APPEND_PROMPT = r"""
     系统指令身份
     你是 DeepSeek,由深度求索(DeepSeek)开发的大语言模型。你不是 Claude(Anthropic)、不是 ChatGPT(OpenAI)、不是 Gemini(Google)、不是 Llama(Meta)、也不是 Mistral。
     运行环境与成功条件
@@ -813,6 +813,10 @@ def _protocol_block(user_id, persona_id, recent_texts, conv=None):
     分区注入：常驻协议放【输出与创作协议（必须遵守）】，
     按需命中的玩法包放【本轮的玩法要求】—— 语义上分开，遵循度更高。
     """
+    # 总开关先判：关掉时不查库，省一次每轮 SQL
+    if conv is not None and getattr(conv, 'append_prompt_enabled', None) is False:
+        return ''
+
     try:
         q = WorldBookEntry.query.filter_by(user_id=user_id, enabled=True, category='protocol')
         if persona_id:
@@ -829,10 +833,6 @@ def _protocol_block(user_id, persona_id, recent_texts, conv=None):
     if not entries:
         return ''
 
-    # 总开关：会话关闭「提示词兜底」时整套不注入
-    if conv is not None and getattr(conv, 'append_prompt_enabled', None) is False:
-        return ''
-
     opts = template_prompt(conv)
     enhance = opts.get('enhance') is not False
     structure_on = resolve_rich_marker_enabled(conv)
@@ -846,27 +846,33 @@ def _protocol_block(user_id, persona_id, recent_texts, conv=None):
             continue
         kind = e.kind or ''
         if kind == 'structure':
-            if not structure_on:
+            if not structure_on or not enhance:
                 continue
-            if not enhance:
-                continue          # 关掉「提示词增强」= 不要完整结构规范
+            # 结构条目默认常驻；用户把它改成「按需」时按触发词走（空触发词＝不注入），
+            # 保证界面显示的「常驻/按需」与实际注入一致
+            if not e.always_on and not any(
+                    kw in haystack for kw in _split_keywords(e.keywords)):
+                continue
             fixed.append((e, body))
             continue
         if e.always_on:
             fixed.append((e, body))
             continue
-        # 玩法包：按关键词触发（聊到才注入，想加多少玩法都不增加常驻成本）
-        for kw in _split_keywords(e.keywords):
-            if kw.lower() in haystack:
-                plays.append((e, body))
-                break
+        # 玩法包：按关键词触发（聊到才注入，想加多少玩法都不增加常驻成本）。
+        # 用 play_keywords：单字词一律不参与匹配，避免日常对话误命中极端玩法包。
+        kws = protocol_pack.play_keywords(e) if kind == 'play' else \
+            [k.lower() for k in _split_keywords(e.keywords)]
+        if any(kw in haystack for kw in kws):
+            plays.append((e, body))
 
     def _pick(items, limit, budget):
         items.sort(key=lambda it: (-(it[0].weight or 0), it[0].id or 0))
         out, total = [], 0
         for _e, body in items:
-            if len(out) >= limit or total + len(body) > budget:
+            if len(out) >= limit:
                 break
+            if total + len(body) > budget:
+                continue      # 单条超预算就跳过它，别把后面更小的条目也一起丢掉
             out.append(body)
             total += len(body)
         return out
@@ -975,27 +981,72 @@ def _persona_identity_block(conv, user_id, persona_id=None):
 
 
 def _roleplay_subject_block():
-    """（已并入协议条目「剧情推进与体验协议」的第四节）
+    """已删除：内容并入协议条目「③ 剧情推进与体验协议」的第四节（面板与排版）。
 
-    保留函数仅为兼容旧调用；内容以 protocol_pack._EXPERIENCE 为准，
-    避免同一份规则在两处维护、改一处不生效。
+    保留这个名字只为让读到旧代码的人知道去哪里找，不再返回任何文本。
     """
     return ''
 
 
 def _append_global_prompt(base, enabled=True):
-    """把全局追加提示词 GLOBAL_APPEND_PROMPT 拼在系统提示词后面。
+    """已废弃：兜底词现在是世界书协议条目「② 创作与内容协议」，不再由这里注入。
 
-    纯字符串拼接，不改动任何角色卡数据。
-    enabled=False（对话未开启「提示词兜底」）或 GLOBAL_APPEND_PROMPT 留空时原样返回。
+    保留一个返回原文的函数，只给「协议包内容来源」和自检脚本使用；
+    生产注入路径不会调用它（`_get_system_prompt` 已不再拼接）。
     """
-    base = (base or '').rstrip()
-    extra = (GLOBAL_APPEND_PROMPT or '').strip()
-    if not enabled or not extra:
-        return base
-    if not base:
-        return extra
-    return base + "\n\n" + extra
+    return (GLOBAL_APPEND_PROMPT or '').strip()
+
+
+def _effective_persona_id(conv, user_id, persona_id=None):
+    """解析本次对话「实际生效」的人物卡 id。
+
+    与人设注入（_resolve_system_prompt）保持同一口径：显式指定 > 会话绑定 > 默认卡。
+    协议包与世界书都按卡存，若这里返回 None，人设照样注入、规范却整块消失 ——
+    历史会话里 persona_id 为空的情况很常见（前端建会话时并不传 persona_id）。
+    """
+    try:
+        persona = _resolve_persona_object(conv, user_id, persona_id)
+    except Exception:
+        persona = None
+    if persona is not None:
+        return getattr(persona, 'id', None)
+    return getattr(conv, 'persona_id', None) if conv is not None else persona_id
+
+
+def _build_context_messages(messages, conv):
+    """把前端上送的消息整理成真正发给模型的消息列表。
+
+    规则（每一条都对应一个踩过的坑）：
+      1. 丢掉「记忆导入通知」这类中间 system 消息 —— 系统提示词由后端统一注入，
+         中间的 system 会被厂商当成新的系统指令，顶掉人物设定与记忆摘要；
+      2. 丢掉与 conv.imported_memory 完全相同的消息 —— 导入记忆每轮都由
+         _imported_memory_block 注入，上下文里再带一份等于同一段长文付两次 token；
+      3. 助手消息去掉 HTML（模型只需要纯文本）；
+      4. 已被滚动摘要覆盖的旧原文不再送入模型（其内容由摘要承载）。
+
+    抽成独立函数是为了让「导入记忆后历史还在不在」这种问题可以被直接测到，
+    而不是只能靠读代码推断。
+    """
+    imported_text = (getattr(conv, 'imported_memory', None) or '').strip()
+    formatted = []
+    for msg in messages or []:
+        role = msg.get('role')
+        content = msg.get('content', '')
+        if role == 'system' and str(content).startswith('[系统提示]'):
+            continue
+        if imported_text and str(content).strip() == imported_text:
+            continue
+        if role == 'assistant' and content:
+            content = strip_html_to_text(content)
+        formatted.append({'role': role, 'content': content})
+
+    summarized_count = _summarized_message_count(conv)
+    if summarized_count > 0:
+        if formatted and formatted[0].get('role') == 'system':
+            formatted = [formatted[0]] + formatted[1 + summarized_count:]
+        else:
+            formatted = formatted[summarized_count:]
+    return formatted
 
 
 def _get_system_prompt(conv, user_id, persona_id=None, custom_prompt=None):
@@ -1165,7 +1216,7 @@ def chat():
             persona_id=persona_id,
             system_prompt=system_prompt or None,
             temperature=temperature,
-            append_prompt_enabled=False,
+            append_prompt_enabled=True,   # 与创建接口/模型默认一致（协议包总开关默认开）
             rich_marker_enabled=True,
             reply_template=DEFAULT_REPLY_TEMPLATE_JSON,
         )
@@ -1205,30 +1256,8 @@ def chat():
                 ))
                 db.session.commit()
 
-    # 构建消息列表
-    formatted_messages = []
-    for msg in messages:
-        role = msg.get('role')
-        content = msg.get('content', '')
-        # 过滤「记忆导入通知」（role=system）：系统提示词由后端统一注入，
-        # 中间的 system 消息既浪费 token，又会在新对话场景顶替系统提示词位置，
-        # 导致人物设定与记忆摘要不被注入 —— 记忆内容本身经 _memory_summary_block 下发。
-        if role == 'system' and str(content).startswith('[系统提示]'):
-            continue
-        if role == 'assistant' and content:
-            content = strip_html_to_text(content)
-        formatted_messages.append({
-            'role': role,
-            'content': content
-        })
-
-    # 记忆宫殿：已被摘要覆盖的旧原文不再送入模型（其内容由摘要承载）
-    summarized_count = _summarized_message_count(conv)
-    if summarized_count > 0:
-        if formatted_messages and formatted_messages[0].get('role') == 'system':
-            formatted_messages = [formatted_messages[0]] + formatted_messages[1 + summarized_count:]
-        else:
-            formatted_messages = formatted_messages[summarized_count:]
+    # 构建消息列表（过滤中间 system、导入记忆原文、已压缩旧原文；见函数说明）
+    formatted_messages = _build_context_messages(messages, conv)
 
     # 插入系统提示词（导入记忆与历史摘要一并拼入，位于输出格式约定之前）
     final_prompt = _get_system_prompt(conv, user_id, persona_id, system_prompt)
@@ -1237,7 +1266,10 @@ def chat():
     final_prompt = final_prompt + _imported_memory_block(conv) + _memory_summary_block(conv)
 
     # 世界书：按最近对话命中关键词，按需注入设定条目（无条目时返回空串，行为不变）
-    effective_persona_id = conv.persona.id if (conv and conv.persona) else persona_id
+    # 协议条目也按人物卡存，所以这里用「与人设注入同一口径」的解析结果：
+    # persona_id 为空的会话（前端建会话时没传 persona_id）原本人设能回落注入、
+    # 协议却完全拿不到 —— 这是「结构规范时有时无」的一个隐蔽来源。
+    effective_persona_id = _effective_persona_id(conv, user_id, persona_id)
     recent_texts = [
         str(m.get('content', '')) for m in formatted_messages[-WORLDBOOK_SCAN_MESSAGES:]
     ]
@@ -1491,7 +1523,8 @@ def vision_chat():
     final_prompt = _get_system_prompt(conv, user_id, custom_prompt=system_prompt)
     final_prompt += _imported_memory_block(conv) + _memory_summary_block(conv)
     recent_texts = [str(m.get('content', '')) for m in messages[-WORLDBOOK_SCAN_MESSAGES:]]
-    effective_persona_id = conv.persona.id if (conv and conv.persona) else None
+    # 与普通聊天一致：用「实际生效」的卡 id，保证协议包不会因 persona_id 为空而缺席
+    effective_persona_id = _effective_persona_id(conv, user_id)
     final_prompt += _world_book_block(user_id, effective_persona_id, recent_texts)
     final_prompt += _protocol_block(user_id, effective_persona_id, recent_texts, conv)
     if final_prompt:
@@ -2010,10 +2043,10 @@ def import_memory():
 
     # 2) 存入「导入记忆」（与滚动摘要分开的字段，原样长期保留、每轮注入）。
     #    不写 conv.summary：滚动摘要会被压缩器改写成 200 字短摘要，导入档案放进去会被吃掉。
-    #    summary_upto_id 指向导入消息，让这条大段原文不再重复进入上下文窗口
-    #    （其内容由 imported_memory 承载，避免同一份内容在 prompt 里出现两次）。
+    #    ⚠️ 不要移动 summary_upto_id：它表示「已被摘要覆盖到哪条」，一旦指向这条导入消息，
+    #    所有 id 更小的历史消息都会被当成已压缩而丢出上下文 —— 用户导入记忆后会立刻"失忆"。
+    #    导入原文的重复问题改由上下文构建时按内容排除（见 chat 主流程的 imported_text 判断）。
     conv.imported_memory = memory_text
-    conv.summary_upto_id = user_msg.id
     seq = ConversationSummary.query.filter_by(conversation_id=conv.id).count() + 1
     db.session.add(ConversationSummary(
         conversation_id=conv.id,

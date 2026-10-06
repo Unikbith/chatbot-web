@@ -750,11 +750,11 @@ async function confirmDelete() {
   font-variant-numeric: tabular-nums;
 }
 
-/* 头像区域（明显位置，用户/AI 单独设置）
-   抽屉宽度上限 500px，减掉内外边距后内容区只有 ~420px：
-   两块并排时每块只剩 ~198px，而「头像 60 + 间距 + 更换/清除 两个按钮 ~104」
+/* 账号头像区（现在是单块：AI 头像已移到「对话设置」里按对话配置）
+   抽屉宽度上限 500px，减掉内外边距后内容区约 420px：
+   早先两块并排时每块只剩 ~198px，而「头像 60 + 间距 + 更换/清除 两个按钮 ~104」
    装不下 —— 表现为按钮溢出、文字换行、整块被压变形。
-   改为自动换行网格：装得下就并排，装不下各自独占一行，永远不会挤。 */
+   仍保留自动换行网格（将来再加块也不用改样式），并给单块限宽，避免被拉成一整条。 */
 .avatar-section .avatar-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -767,6 +767,7 @@ async function confirmDelete() {
   gap: 14px;
   padding: 14px 16px;
   min-width: 0;              /* 允许内部文字省略，而不是把整块撑破 */
+  max-width: 420px;          /* 单块时不要拉满整行 */
   border: 1px solid var(--border-color);
   border-radius: 10px;
   background: var(--surface);

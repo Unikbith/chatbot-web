@@ -120,6 +120,18 @@ def create_conversation():
         if not persona:
             persona_id = None
 
+    # 没指定（或指定的卡已失效）时兜底绑一张：协议包是按人物卡存的，
+    # 会话没有卡就查不到协议条目 —— 输出结构、创作与玩法规范会整块消失。
+    # 这里优先用默认卡，其次任意一张 AI 卡。
+    if not persona_id:
+        fallback = PersonaTemplate.query.filter_by(
+            user_id=user_id, persona_type='ai', is_default=True
+        ).first() or PersonaTemplate.query.filter_by(
+            user_id=user_id, persona_type='ai'
+        ).order_by(PersonaTemplate.id).first()
+        if fallback:
+            persona_id = fallback.id
+
     # 对话上限10条：超出时返回提示，前端确认后带 force_delete=true 重新请求
     MAX_CONVERSATIONS = 10
     existing_count = Conversation.query.filter_by(user_id=user_id).filter(
@@ -281,13 +293,14 @@ def update_conversation(conv_id):
         if thr < 1 or thr > 20:
             return jsonify({'code': 400, 'message': '压缩轮数必须在 1-20 之间'}), 400
         conv.summary_threshold = thr
-    # 提示词兜底：默认关闭，开启后才会把后端写死的追加提示词接在人物设定之后
+    # 提示词兜底（现为「协议包总开关」）：默认开启，控制该会话是否注入人物卡里的协议条目
+    # （输出结构 / 创作与内容 / 剧情推进 / 玩法包）。关掉可省 token，但结构规范也会一起消失。
     if 'append_prompt_enabled' in data:
         conv.append_prompt_enabled = bool(data['append_prompt_enabled'])
-    # 界面标记（富消息）：默认关闭，开启后把标记约定接在系统提示词后
+    # 界面标记（富消息）：默认开启，控制结构类协议条目（输出结构）是否注入
     if 'rich_marker_enabled' in data:
         conv.rich_marker_enabled = bool(data['rich_marker_enabled'])
-    # 回复渲染模板：JSON 文本（前端按 preset 解析版式，后端只取 prompt 注入）
+    # 回复渲染模板：JSON 文本（前端按 preset 解析版式；注入内容由后端 reply_spec 组合）
     if 'reply_template' in data:
         raw_tpl = data['reply_template']
         if raw_tpl in (None, ''):

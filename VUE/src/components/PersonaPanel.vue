@@ -146,10 +146,10 @@
         </div>
 
         <!-- 世界书：编辑时立即保存；新建时先作为草稿，随人物卡一起提交 -->
-        <div class="form-card wb-card">
+        <div class="form-card">
           <div class="wb-head">
             <div>
-              <div class="wb-title">世界书（设定条目 + 协议包）</div>
+              <div class="wb-title">{{ t('世界书（设定条目 + 协议包）', 'Worldbook (lore + protocol pack)') }}</div>
               <div class="wb-desc">
                 把只在特定话题才用得上的设定拆成条目，聊到相关词才加载 —— 省 token，还能写更多设定。
                 <b>常驻</b>条目每次都加载（放核心人设）；其余按触发词命中才加载。
@@ -157,9 +157,9 @@
                 <span v-if="!editingPersona" class="wb-draft-note">新建模式下，条目会随人物卡一起保存。</span>
               </div>
               <div class="wb-desc wb-desc--protocol">
-                标记 <span class="wb-tag is-proto">协议</span> 的是系统默认种入的协议条目：
-                ①②③ 常驻（输出结构 / 创作与内容 / 剧情推进），玩法包按触发词加载。
-                都可以<b>停用、改写或删除</b> —— 删掉就不再注入，省 token 的开关就在你手里。
+                {{ t('标记', 'Entries tagged') }} <span class="wb-tag is-proto">{{ t('协议', 'Protocol') }}</span> {{ t('的是系统默认种入的协议条目：', 'are protocol entries seeded by default:') }}
+                {{ t('①②③ 常驻（输出结构 / 创作与内容 / 剧情推进），玩法包按触发词加载。', '①②③ always on (output structure / writing & content / story pacing); play packs load on trigger words.') }}
+                {{ t('都可以', 'All of them can be') }}<b>{{ t('停用、改写或删除', ' disabled, rewritten or deleted') }}</b>{{ t(' —— 删掉就不再注入，省 token 的开关就在你手里。', ' — deleting one stops its injection, so token saving is in your hands.') }}
               </div>
             </div>
             <div class="wb-head-ops">
@@ -170,17 +170,17 @@
                 :loading="protocolRestoring"
                 @click="restoreProtocolPack"
               >
-                恢复默认协议包
+                {{ t('恢复默认协议包', 'Restore protocol pack') }}
               </el-button>
               <el-button size="small" type="primary" plain @click="openWbCreate">
-                <el-icon><Plus /></el-icon> 添加条目
+                <el-icon><Plus /></el-icon> {{ t('添加条目', 'Add entry') }}
               </el-button>
             </div>
           </div>
 
           <div v-if="wbLoading" class="wb-empty">加载中…</div>
           <div v-else-if="!wbEntries.length" class="wb-empty">
-            {{ editingPersona ? '暂无条目 —— 协议包与设定都为空，AI 将没有输出结构与创作规范（可点「恢复默认协议包」一键补回）' : '暂无条目，可先添加触发词和设定内容，新建人物卡时会一起保存' }}
+            {{ editingPersona ? t('暂无条目 —— 协议包与设定都为空，AI 将没有输出结构与创作规范（可点「恢复默认协议包」一键补回）', 'No entries — neither protocol pack nor lore. The AI will have no structure or writing rules (use Restore protocol pack).') : t('暂无条目，可先添加触发词和设定内容，新建人物卡时会一起保存', 'No entries yet. Add trigger words and content; they are saved with the new card.') }}
           </div>
           <div v-else class="wb-list">
             <div v-for="e in wbEntries" :key="e.id" class="wb-item" :class="{ 'is-protocol': e.category === 'protocol' }">
@@ -246,7 +246,7 @@
             :autosize="false"
             resize="none"
             placeholder="命中触发词后才注入的设定正文…"
-            maxlength="4000"
+            maxlength="8000"
           />
         </el-form-item>
         <el-form-item>
@@ -267,6 +267,7 @@ import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { MagicStick, Upload, Plus } from '@element-plus/icons-vue'
 import { personaApi, uploadApi } from '../utils/resAi'
+import { t } from '../i18n'
 
 const props = defineProps({
   modelValue: Boolean,
@@ -379,9 +380,9 @@ async function restoreProtocolPack() {
   if (!editingPersona.value) return
   try {
     await ElMessageBox.confirm(
-      '将把协议条目（输出结构 / 创作与内容 / 剧情推进 / 玩法扩展包）恢复成默认内容并重新启用，你改写过的协议条目会被覆盖。继续？',
-      '恢复默认协议包',
-      { type: 'warning', confirmButtonText: '恢复', cancelButtonText: '取消' }
+      t('将把协议条目（输出结构 / 创作与内容 / 剧情推进 / 玩法扩展包）恢复成默认内容并重新启用，你改写过的协议条目会被覆盖。继续？', 'This restores all protocol entries to their defaults and re-enables them. Your edits to protocol entries will be overwritten. Continue?'),
+      t('恢复默认协议包', 'Restore protocol pack'),
+      { type: 'warning', confirmButtonText: t('恢复', 'Restore'), cancelButtonText: t('取消', 'Cancel') }
     )
   } catch (e) {
     return // 用户取消
@@ -390,13 +391,13 @@ async function restoreProtocolPack() {
   try {
     const res = await personaApi.restoreProtocol(editingPersona.value.id)
     if (res.code === 200) {
-      ElMessage.success(res.message || '已恢复默认协议包')
+      ElMessage.success(res.message || t('已恢复默认协议包', 'Protocol pack restored'))
       loadWorldBook()
     } else {
-      ElMessage.warning(res.message || '恢复失败')
+      ElMessage.warning(res.message || t('恢复失败', 'Restore failed'))
     }
   } catch (e) {
-    ElMessage.error(e.response?.data?.message || '恢复失败')
+    ElMessage.error(e.response?.data?.message || t('恢复失败', 'Restore failed'))
   } finally {
     protocolRestoring.value = false
   }
@@ -501,29 +502,40 @@ async function toggleWb(entry, val) {
     await personaApi.updateWorldBook(editingPersona.value.id, entry.id, { enabled: !!val })
   } catch (e) {
     entry.enabled = !val
-    ElMessage.error('操作失败')
+    ElMessage.error(t('操作失败', 'Operation failed'))
   }
 }
 
 async function removeWb(entry) {
   try {
-    await ElMessageBox.confirm(`确定删除条目「${entry.title || '未命名条目'}」吗？`, '确认删除', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-    })
+    await ElMessageBox.confirm(
+      t(`确定删除条目「${entry.title || '未命名条目'}」吗？`, `Delete entry "${entry.title || 'Untitled'}"?`),
+      t('确认删除', 'Confirm delete'),
+      {
+        type: 'warning',
+        confirmButtonText: t('删除', 'Delete'),
+        cancelButtonText: t('取消', 'Cancel'),
+      })
   } catch (e) {
     return
   }
   if (!editingPersona.value || entry._draft) {
     wbEntries.value = wbEntries.value.filter(item => item !== entry)
-    ElMessage.success('草稿已删除')
+    ElMessage.success(t('草稿已删除', 'Draft removed'))
     return
   }
-  const res = await personaApi.removeWorldBook(editingPersona.value.id, entry.id)
-  if (res.code === 200) {
-    ElMessage.success('已删除')
-    loadWorldBook()
+  // 协议条目可能被删空（模板里明说了「删掉就不再注入」），失败必须让用户看见，
+  // 否则会出现"以为删了、其实还在注入"的静默状态
+  try {
+    const res = await personaApi.removeWorldBook(editingPersona.value.id, entry.id)
+    if (res.code === 200) {
+      ElMessage.success(t('已删除', 'Deleted'))
+      loadWorldBook()
+    } else {
+      ElMessage.error(res.message || t('删除失败', 'Delete failed'))
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || t('删除失败', 'Delete failed'))
   }
 }
 
@@ -810,6 +822,15 @@ function confirmDelete(id) {
   font-weight: 600;
 }
 
+/* 表单字段下方的辅助说明。此前只引用了类名却没在本组件定义样式，
+   提示文字会按正文渲染 —— 这里补上统一样式（与 ProviderPanel 的观感一致）。 */
+.form-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted, #909399);
+}
+
 /* 协议包说明：与普通设定条目区分开，避免用户以为这是自己加的设定 */
 .wb-desc--protocol {
   margin-top: 6px;
@@ -936,6 +957,15 @@ function confirmDelete(id) {
 
 /* ===== 移动端响应式 ===== */
 @media (max-width: 768px) {
+  /* 世界书表头：窄屏下按钮组（恢复协议包 + 添加条目）会把说明列挤成窄柱 */
+  .wb-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .wb-head-ops {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
   .persona-card {
     flex-wrap: wrap;
     align-items: flex-start;

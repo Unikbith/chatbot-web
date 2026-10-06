@@ -98,12 +98,3 @@ def restore_protocol_entry(user_id, persona_id, source_key):
         row.always_on = bool(spec['always_on'])
         row.enabled = True
     return row
-
-
-def persona_has_protocol(user_id, persona_id):
-    """该卡是否已有启用的协议条目（用于提示用户"这张卡没有协议包"）。"""
-    if not persona_id:
-        return False
-    return WorldBookEntry.query.filter_by(
-        user_id=user_id, persona_id=persona_id, category='protocol', enabled=True
-    ).count() > 0
