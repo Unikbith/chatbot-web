@@ -66,21 +66,24 @@ console.log('\n[4] 教程内容与文档一致')
 const stepTitles = [...stepsFile.matchAll(/title:\s*'([^']+)'/g)].map(m => m[1])
 ok('共 9 步', stepTitles.length === 9, `实际 ${stepTitles.length}`)
 ok('第 1 步是配置 API', stepTitles[0].includes('API'))
-ok('第 8 步讲生图/改图与次数限制',
-  stepsFile.includes('生图与改图') && /没配置生图模型前有次数限制/.test(stepsFile))
-ok('最后一步是反馈入口', stepTitles[stepTitles.length - 1].includes('建议'))
-ok('教程标题强调必须配置自己的 API', tutorialDialog.includes('一定要配置自己的 API'))
-const step3 = stepsFile.split('title: \'创建并保存 Key\'')[1]?.split('title:')[0] || ''
+ok('第 8 步讲生图与次数限制',
+  stepTitles[7].includes('生图') && /未配置生图模型前有次数限制/.test(stepsFile), stepTitles[7])
+ok('最后一步是反馈 / 更多玩法入口',
+  /反馈|更多玩法/.test(stepTitles[stepTitles.length - 1]), stepTitles[stepTitles.length - 1])
+ok('教程标题强调必须配置自己的 API',
+  /首次使用请先配置自己的 API|一定要配置自己的 ?API/.test(tutorialDialog),
+  (tutorialDialog.match(/tutorial-intro[\s\S]{0,120}/) || [''])[0].replace(/\s+/g, ' ').slice(0, 100))
+const step3 = stepsFile.split("title: '创建并保存 Key'")[1]?.split('title:')[0] || ''
 ok('第 3 步区分电脑端与手机端（3 张图）',
-  step3.includes('电脑端') && step3.includes('手机端获取（一）') && step3.includes('手机端获取（二）'),
+  step3.includes('电脑端获取方式') && step3.includes('手机端获取方式（一）') && step3.includes('手机端获取方式（二）'),
   step3.replace(/\s+/g, ' ').slice(0, 120))
-ok('有反馈入口那一步', stepsFile.includes('帮助和反馈'))
+ok('最后一步说明了反馈方式', /反馈/.test(stepsFile) && /管理员/.test(stepsFile))
 ok('文案里没有真人姓名等隐私内容', !/廖祯斌/.test(stepsFile + tutorialDialog))
 
 console.log('\n[5] 教程配图真实存在')
 const assets = join(src, 'assets', 'tutorial')
 for (const f of ['step1.png', 'step2.png', 'step3-pc.png', 'step3-phone1.png', 'step3-phone2.png',
-  'step4.png', 'step5.png', 'step6.png', 'step7.png', 'step8.png']) {
+  'step4.png', 'step5.png', 'step6.png', 'step7.png', 'step8.png', 'step9.png']) {
   ok(`assets/tutorial/${f}`, existsSync(join(assets, f)))
 }
 ok('教程弹窗支持一步多图', tutorialDialog.includes('v-for="(img, j) in step.images"'))

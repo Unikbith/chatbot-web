@@ -9,7 +9,7 @@
     @close="handleClose"
   >
     <p class="tutorial-intro">
-      {{ t('一定要配置自己的 API，不然只能跟免费模型聊 —— 它又慢又呆、限制多。跟着下面几步走完就能畅聊；点图片可放大查看。', 'Use your own API — the free model is slow and restricted. Follow the steps below; click an image to zoom in.') }}
+      {{ t('首次使用请先配置自己的 API：默认免费模型仅适合体验，对话能力受限、无法畅聊。跟着下面几步走完就能畅聊；点图片可放大查看。', 'Configure your own API first: the default free model is only for a quick try, limited and unable to chat freely. Follow the steps below; click an image to zoom in.') }}
     </p>
 
     <div class="tutorial-steps">
