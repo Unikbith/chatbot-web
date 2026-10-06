@@ -5,7 +5,7 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
 from models import (Conversation, Message, ModelProvider, PersonaTemplate,
-                    local_now, ConversationMediaLog, ConversationSummary)
+                    local_now, ConversationMediaLog, ConversationSummary, AiUsageLog)
 from services.media_log import log_media
 
 
@@ -303,6 +303,30 @@ def update_conversation(conv_id):
             conv.reply_template = raw_tpl
         else:
             return jsonify({'code': 400, 'message': '渲染模板格式不正确'}), 400
+    if 'conversation_directives' in data:
+        raw_directives = data.get('conversation_directives') or {}
+        if not isinstance(raw_directives, dict):
+            return jsonify({'code': 400, 'message': '对话发展设置格式不正确'}), 400
+        allowed = {'goal', 'tone', 'pace', 'initiative', 'boundaries'}
+        directives = {}
+        for key in allowed:
+            value = raw_directives.get(key)
+            if value is None:
+                continue
+            if key == 'boundaries':
+                if isinstance(value, list):
+                    value = '\n'.join(str(v).strip() for v in value if str(v).strip())
+                value = str(value).strip()[:2000]
+            else:
+                value = str(value).strip()[:1000]
+            if value:
+                directives[key] = value
+        try:
+            settings_data = json.loads(conv.settings) if conv.settings else {}
+        except (TypeError, ValueError):
+            settings_data = {}
+        settings_data['conversation_directives'] = directives
+        conv.settings = json.dumps(settings_data, ensure_ascii=False)
 
     conv.updated_at = local_now()
     db.session.commit()
@@ -403,6 +427,52 @@ def clear_messages(conv_id):
         'code': 200,
         'message': '已清空'
     })
+
+
+@conversation_bp.route('/<int:conv_id>/messages/<int:message_id>/branch', methods=['DELETE'])
+@jwt_required()
+def delete_message_branch(conv_id, message_id):
+    """删除指定 AI 回复及其后的废弃分支，供“重新生成”使用。"""
+    user_id = int(get_jwt_identity())
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).filter(
+        Conversation.deleted_at.is_(None)
+    ).first()
+    if not conv:
+        return jsonify({'code': 404, 'message': '对话不存在'}), 404
+    target = Message.query.filter_by(
+        id=message_id, conversation_id=conv_id, role='assistant'
+    ).first()
+    if not target:
+        return jsonify({'code': 404, 'message': '回复不存在或已被替换'}), 404
+    later_message = Message.query.filter(
+        Message.conversation_id == conv_id, Message.id > target.id
+    ).first()
+    if later_message:
+        return jsonify({'code': 409, 'message': '只能重新生成当前最后一条回复'}), 409
+
+    removed_ids = [mid for (mid,) in db.session.query(Message.id).filter(
+        Message.conversation_id == conv_id, Message.id >= target.id
+    ).all()]
+    if removed_ids:
+        AiUsageLog.query.filter(AiUsageLog.message_id.in_(removed_ids)).update(
+            {AiUsageLog.message_id: None}, synchronize_session=False
+        )
+    ConversationSummary.query.filter(
+        ConversationSummary.conversation_id == conv_id,
+        ConversationSummary.msg_to >= target.id,
+    ).delete(synchronize_session=False)
+    Message.query.filter(
+        Message.conversation_id == conv_id, Message.id >= target.id
+    ).delete(synchronize_session=False)
+
+    latest_summary = ConversationSummary.query.filter_by(
+        conversation_id=conv_id, user_id=user_id
+    ).order_by(ConversationSummary.seq.desc()).first()
+    conv.summary = latest_summary.content if latest_summary else None
+    conv.summary_upto_id = latest_summary.msg_to if latest_summary else None
+    conv.updated_at = local_now()
+    db.session.commit()
+    return jsonify({'code': 200, 'message': '旧回复分支已删除'})
 
 
 # ---------------------------------------------------------------------------

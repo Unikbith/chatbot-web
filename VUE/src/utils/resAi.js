@@ -381,6 +381,9 @@ const conversationApi = {
   async clear(id) {
     return resAi.delete(`/api/conversations/${id}/messages`);
   },
+  async deleteBranch(id, messageId) {
+    return resAi.delete(`/api/conversations/${id}/messages/${messageId}/branch`);
+  },
   async replaceMemory(id, memoryText) {
     return resAi.put(`/api/conversations/${id}/memory`, { memory_text: memoryText });
   },
@@ -679,6 +682,12 @@ const marketplaceApi = {
     if (gender) url += `&gender=${encodeURIComponent(gender)}`;
     return resAi.get(url);
   },
+  publicList(sort = 'hot', page = 1, keyword = '', gender = '', perPage = 12) {
+    let url = `/api/marketplace/public?sort=${sort}&page=${page}&per_page=${perPage}`;
+    if (keyword) url += `&q=${encodeURIComponent(keyword)}`;
+    if (gender) url += `&gender=${encodeURIComponent(gender)}`;
+    return resAi.get(url);
+  },
   // 广场中实际存在的自定义性别值，用于筛选下拉动态渲染
   genders() {
     return resAi.get('/api/marketplace/genders');
@@ -688,6 +697,9 @@ const marketplaceApi = {
   },
   get(id) {
     return resAi.get(`/api/marketplace/${id}`);
+  },
+  publicGet(id) {
+    return resAi.get(`/api/marketplace/public/${id}`);
   },
   publish(data) {
     return resAi.post('/api/marketplace', data);

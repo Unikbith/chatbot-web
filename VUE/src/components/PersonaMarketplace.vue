@@ -122,7 +122,13 @@
         </div>
 
         <div v-if="!loading && items.length === 0" class="mp-empty">
-          {{ t('暂无卡片', 'No cards yet') }}
+          <template v-if="listError">
+            <div>{{ listError }}</div>
+            <el-button size="small" type="primary" plain @click="loadList(false)">
+              {{ t('重新加载', 'Try again') }}
+            </el-button>
+          </template>
+          <template v-else>{{ t('暂无卡片', 'No cards yet') }}</template>
         </div>
       </div>
 
@@ -582,6 +588,8 @@ const genderOptions = computed(() => {
 const currentPage = ref(1)
 const pageSize = 12
 const total = ref(0)
+const listError = ref('')
+const usingPublicFallback = ref(false)
 // 列表请求令牌：排序/筛选切换时作废在途请求，防止旧响应污染新列表
 let listReqSeq = 0
 const hasMore = computed(() => items.value.length < total.value)
@@ -802,12 +810,28 @@ async function loadList(append = false) {
   // 否则旧排序的响应回来后会 push 进已重置的列表，导致同一批卡片重复出现
   const reqToken = ++listReqSeq
   loading.value = true
+  listError.value = ''
   try {
     const page = append ? currentPage.value : 1
-    const res = await marketplaceApi.list(sortMode.value, page, searchKeyword.value.trim(), genderFilter.value, pageSize)
+    let res
+    try {
+      res = await marketplaceApi.list(sortMode.value, page, searchKeyword.value.trim(), genderFilter.value, pageSize)
+      usingPublicFallback.value = false
+    } catch (personalizedError) {
+      logger.warn('个性化卡片列表不可用，尝试公开列表', personalizedError)
+      res = await marketplaceApi.publicList(
+        sortMode.value, page, searchKeyword.value.trim(), genderFilter.value, pageSize
+      )
+      usingPublicFallback.value = true
+    }
     if (reqToken !== listReqSeq) return   // 已被更新的请求取代
     if (res.code === 200) {
-      const newItems = res.data.items || []
+      const newItems = (res.data.items || []).map(item => ({
+        user_vote: null,
+        is_adopted: false,
+        can_edit: false,
+        ...item,
+      }))
       total.value = res.data.total || 0
       if (append) {
         // 按 id 去重：分页边界可能因排序变动而重叠
@@ -818,7 +842,10 @@ async function loadList(append = false) {
       }
     }
   } catch (e) {
-    if (reqToken === listReqSeq) logger.error('加载卡片广场失败', e)
+    if (reqToken === listReqSeq) {
+      logger.error('加载卡片广场失败', e)
+      listError.value = t('卡片加载失败，请检查网络后重试', 'Failed to load cards. Check your connection and try again.')
+    }
   } finally {
     if (reqToken === listReqSeq) loading.value = false
   }
@@ -855,7 +882,15 @@ onUnmounted(() => {
 
 async function openDetail(item) {
   try {
-    const res = await marketplaceApi.get(item.id)
+    let res
+    try {
+      res = usingPublicFallback.value
+        ? await marketplaceApi.publicGet(item.id)
+        : await marketplaceApi.get(item.id)
+    } catch (personalizedError) {
+      logger.warn('个性化卡片详情不可用，尝试公开详情', personalizedError)
+      res = await marketplaceApi.publicGet(item.id)
+    }
     if (res.code === 200) {
       detailData.value = res.data
       detailVisible.value = true
@@ -1308,6 +1343,10 @@ function formatDate(ts) {
   color: var(--text-muted);
   padding: 60px 20px;
   font-size: 14px;
+}
+
+.mp-empty .el-button {
+  margin-top: 14px;
 }
 
 .mp-pagination {

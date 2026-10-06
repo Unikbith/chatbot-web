@@ -884,7 +884,8 @@ def _append_global_prompt(base, enabled=True):
 
 def _get_system_prompt(conv, user_id, persona_id=None, custom_prompt=None):
     """最终系统提示词 = 解析出的本体 + 玩家设定 + 全局追加提示词（受「提示词兜底」开关控制）"""
-    body = _resolve_system_prompt(conv, user_id, persona_id, custom_prompt)
+    body = _conversation_directives_block(conv)
+    body += _resolve_system_prompt(conv, user_id, persona_id, custom_prompt)
     body = (body or '') + _persona_identity_block(conv, user_id, persona_id)
     # 玩家设定紧跟 AI 提示词之后：先立住 AI 是谁，再交代玩家是谁
     body = (body or '') + _user_persona_block(conv, user_id, persona_id)
@@ -894,6 +895,31 @@ def _get_system_prompt(conv, user_id, persona_id=None, custom_prompt=None):
     enabled = False if flag is None else bool(flag)
     body = _append_global_prompt(body, enabled=enabled)
     return body
+
+
+def _conversation_directives_block(conv):
+    """把用户明确指定的对话方向放在人物卡之前，作为本会话最高优先级约束。"""
+    if not conv or not conv.settings:
+        return ''
+    try:
+        directives = (json.loads(conv.settings) or {}).get('conversation_directives') or {}
+    except (TypeError, ValueError):
+        return ''
+    if not isinstance(directives, dict):
+        return ''
+    labels = {
+        'goal': '希望的发展方向', 'tone': '语气', 'pace': '推进节奏',
+        'initiative': 'AI 主动程度', 'boundaries': '边界与禁区',
+    }
+    lines = [f"- {labels[k]}：{str(directives[k]).strip()}"
+             for k in labels if str(directives.get(k) or '').strip()]
+    if not lines:
+        return ''
+    return (
+        '【用户明确指定的对话方向（最高优先级）】\n'
+        + '\n'.join(lines)
+        + '\n遵循用户本轮最新明确要求；不要替用户决定重大行动，不要擅自推进越过边界。\n\n'
+    )
 
 
 def _save_ai_message(conversation_id, user_id, content, reasoning=None,
@@ -952,8 +978,10 @@ def _save_ai_message(conversation_id, user_id, content, reasoning=None,
             status='success',
         ))
         db.session.commit()
+        return ai_msg.id
     except Exception as e:
         current_app.logger.error('保存消息失败: %s: %s', type(e).__name__, e)
+        return None
 
 @chat_bp.route('/status', methods=['GET'])
 @jwt_required()
@@ -1241,7 +1269,7 @@ def chat():
             # 先落库再下发最终事件：客户端收到 [DONE] 即断开连接，
             # 若在最后一个 yield 之后才写库，生成器不再被推进，AI 回复会丢失（并发实测出现）
             if conversation_id:
-                _save_ai_message(
+                saved_message_id = _save_ai_message(
                     conversation_id, user_id, full_content,
                     reasoning=reasoning_holder[0],
                     model_name=model_holder[0] or model_name,
@@ -1254,6 +1282,8 @@ def chat():
                     is_free_api=is_free_api,
                 )
                 saved = True
+                if saved_message_id:
+                    yield sse_settings({'message_id': saved_message_id})
                 rounds = Message.query.filter_by(conversation_id=conversation_id, role='user').count()
                 if rounds > 3 and getattr(conv, 'append_prompt_enabled', False):
                     conv.append_prompt_enabled = False
@@ -1366,13 +1396,27 @@ def vision_chat():
     # 模型解析：请求指定 > 对话记忆 > 首个启用模型 > 厂商默认
     model = _resolve_chat_model(provider, conv, raw_model_id or None)
 
-    messages = [
-        {'role': 'user', 'content': text}
-    ]
-    # 识图同样注入人设/图片回应约定（前端按能力拼好）；system 消息会被原样转发给模型
+    messages = []
+    if conv:
+        recent = Message.query.filter_by(conversation_id=conv.id).order_by(
+            Message.id.desc()
+        ).limit(CONTEXT_MIN_KEEP).all()
+        for history in reversed(recent):
+            if history.content:
+                messages.append({'role': history.role, 'content': history.content})
+    messages.append({'role': 'user', 'content': text})
+    # 识图与普通聊天复用同一套人物卡、用户设定、对话方向与长期记忆。
     system_prompt = (raw_sys.strip() if isinstance(raw_sys, str) else '').strip()
-    if system_prompt:
-        messages.insert(0, {'role': 'system', 'content': system_prompt})
+    final_prompt = _get_system_prompt(conv, user_id, custom_prompt=system_prompt)
+    final_prompt += _imported_memory_block(conv) + _memory_summary_block(conv)
+    recent_texts = [str(m.get('content', '')) for m in messages[-WORLDBOOK_SCAN_MESSAGES:]]
+    effective_persona_id = conv.persona.id if (conv and conv.persona) else None
+    final_prompt += _world_book_block(user_id, effective_persona_id, recent_texts)
+    if final_prompt:
+        messages.insert(0, {
+            'role': 'system',
+            'content': final_prompt + OUTPUT_FORMAT_RULE + _rich_marker_rule(conv),
+        })
 
     # 图片落库 URL：前端已上传则沿用；为空时后端自己存盘兜底，
     # 避免前端上传失败（体积/格式/登录态过期）导致聊天记录丢图
@@ -1451,7 +1495,7 @@ def vision_chat():
             )
             # 先落库再下发最终事件（与普通聊天一致，避免客户端断开后生成器不推进导致丢失）
             if conversation_id:
-                _save_ai_message(
+                saved_message_id = _save_ai_message(
                     conversation_id, user_id, full_content_holder[0],
                     reasoning=reasoning_holder[0],
                     model_name=model_holder[0],
@@ -1463,6 +1507,8 @@ def vision_chat():
                     is_free_api=isinstance(provider, FreeAPIProvider),
                 )
                 saved = True
+                if saved_message_id:
+                    yield sse_settings({'message_id': saved_message_id})
                 rounds = Message.query.filter_by(conversation_id=conversation_id, role='user').count()
                 if rounds > 3 and getattr(conv, 'append_prompt_enabled', False):
                     conv.append_prompt_enabled = False

@@ -1,7 +1,7 @@
 """人设广场路由 - 分享、投票、评论"""
 import hashlib
 from datetime import date, datetime, timedelta
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from extensions import db
 from models import (
@@ -579,16 +579,25 @@ def list_marketplace():
         comment_counts = {pid: cnt for pid, cnt in rows}
 
         # 1b) 世界书条数一次性聚合（卡片上要显示「带设定」标记）
-        wb_rows = (
-            db.session.query(
-                MarketplaceWorldbookEntry.persona_id,
-                func.count(MarketplaceWorldbookEntry.id),
+        # 世界书是后加的增强功能。部分线上实例可能在应用已更新、数据库迁移
+        # 尚未完成的短暂窗口内缺少该表；卡片主体不应因此整个返回 500。
+        try:
+            with db.session.begin_nested():
+                wb_rows = (
+                    db.session.query(
+                        MarketplaceWorldbookEntry.persona_id,
+                        func.count(MarketplaceWorldbookEntry.id),
+                    )
+                    .filter(MarketplaceWorldbookEntry.persona_id.in_(page_ids))
+                    .group_by(MarketplaceWorldbookEntry.persona_id)
+                    .all()
+                )
+            wb_counts = {pid: cnt for pid, cnt in wb_rows}
+        except Exception as exc:
+            current_app.logger.warning(
+                '卡片广场世界书统计不可用，已降级为 0 条: %s', exc
             )
-            .filter(MarketplaceWorldbookEntry.persona_id.in_(page_ids))
-            .group_by(MarketplaceWorldbookEntry.persona_id)
-            .all()
-        )
-        wb_counts = {pid: cnt for pid, cnt in wb_rows}
+            wb_counts = {}
 
         # 2) 当前用户在本页卡片的投票一次性取回
         votes = MarketplaceVote.query.filter(

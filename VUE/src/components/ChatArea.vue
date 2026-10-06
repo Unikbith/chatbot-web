@@ -116,7 +116,7 @@ const createMessage = (role, content = '', imageUrl = null) => ({
   // （生成中直接渲染，与成稿排版一致，避免回复结束后空行被抹掉造成跳变）
   // tokens：本次回复的 token 消耗（厂商未返回时为 null，不展示）
   // richRaw：未渲染 Markdown 的原始纯文本，仅当含富标记时保留，供 RichMessage 解析
-  role, content, raw: '', streamHtml: '', streaming: false, reasoning: '', showReasoning: false, imageUrl, tokens: null,
+  id: null, role, content, raw: '', streamHtml: '', streaming: false, reasoning: '', showReasoning: false, imageUrl, tokens: null,
   richRaw: ''
 });
 
@@ -582,6 +582,7 @@ const handleSend = async () => {
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; applyRichRawStreaming(aiMsg); }
       if (tokens) aiMsg.tokens = tokens;
+      if (data.choices?.[0]?.delta?.message_id) aiMsg.id = data.choices[0].delta.message_id;
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 
@@ -868,6 +869,7 @@ const handleVisionChat = async (text) => {
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; applyRichRawStreaming(aiMsg); }
       if (tokens) aiMsg.tokens = tokens;
+      if (data.choices?.[0]?.delta?.message_id) aiMsg.id = data.choices[0].delta.message_id;
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 
@@ -1025,10 +1027,7 @@ const stopSpeaking = () => {
 // 仅“最新一条”AI 消息允许重新生成
 const isLatestAssistant = (index) => {
   if (!messages.value[index] || messages.value[index].role !== 'assistant') return false
-  for (let i = messages.value.length - 1; i > index; i--) {
-    if (messages.value[i].role === 'assistant') return false
-  }
-  return true
+  return index === messages.value.length - 1
 };
 
 // 重新生成
@@ -1051,7 +1050,16 @@ const regenerate = async (assistantIndex = null) => {
   if (!convId) return;
   const list = storeFor(convId);
 
-  // 删除该轮之后的 AI 回复（含该轮）
+  const oldAssistant = list.value[assistantIndex]
+  if (oldAssistant?.id) {
+    try {
+      await conversationApi.deleteBranch(convId, oldAssistant.id)
+    } catch (e) {
+      ElMessage.error(t('旧回复删除失败，请刷新后重试', 'Could not replace the old reply. Refresh and try again.'))
+      return
+    }
+  }
+  // 服务端已删除旧分支后，再同步裁剪本地视图
   list.value = list.value.slice(0, userIndex + 1);
   
   // 重新发送
@@ -1082,6 +1090,7 @@ const regenerate = async (assistantIndex = null) => {
       if (reasoning) aiMsg.reasoning += reasoning;
       if (content) { aiMsg.raw += content; aiMsg.streamHtml = sanitizeHtml(aiMsg.raw); aiMsg.streaming = true; applyRichRawStreaming(aiMsg); }
       if (tokens) aiMsg.tokens = tokens;
+      if (data.choices?.[0]?.delta?.message_id) aiMsg.id = data.choices[0].delta.message_id;
       if (html) { aiMsg.content = sanitizeHtml(html); aiMsg.streaming = false; }
     });
 
@@ -1175,6 +1184,7 @@ defineExpose({
       // 优先用后端渲染好的 HTML（content_html），避免纯文本进 v-html 把段落压成一行；
       // 老数据或渲染失败时回退原 content
       const item = createMessage(m.role, m.content_html || m.content, m.image_url || m.imageUrl);
+      item.id = m.id || null;
       // 历史消息：富标记按原始纯文本重建（content 已是 HTML，无法再解析标记）
       if (m.role === 'assistant' && m.content) {
         item.raw = m.content;

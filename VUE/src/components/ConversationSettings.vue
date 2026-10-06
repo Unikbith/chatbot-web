@@ -14,6 +14,32 @@
       </div>
 
       <template v-else>
+        <section class="cv-panel">
+          <header class="cv-panel__head">
+            <span class="cv-tick" aria-hidden="true"></span>
+            <h3 class="cv-panel__title">{{ t('对话发展', 'Conversation Direction') }}</h3>
+          </header>
+          <p class="cv-panel__hint">{{ t('明确告诉 AI 你希望剧情或交流如何发展；这里的要求优先于人物卡。', 'Tell the AI how you want this chat to develop. These instructions take priority over the persona.') }}</p>
+          <el-input v-model="form.directive_goal" type="textarea" :rows="3" maxlength="1000" show-word-limit :placeholder="t('例如：先建立信任，不要立刻推进恋爱关系；围绕当前事件慢慢展开。', 'Example: build trust first; do not rush the relationship.')" />
+          <div class="cv-directive-grid">
+            <el-select v-model="form.directive_tone" :placeholder="t('语气', 'Tone')" clearable>
+              <el-option :label="t('温柔', 'Gentle')" value="温柔、尊重用户感受" />
+              <el-option :label="t('直接', 'Direct')" value="直接、清晰，不绕弯" />
+              <el-option :label="t('幽默', 'Playful')" value="轻松幽默，但不轻浮" />
+            </el-select>
+            <el-select v-model="form.directive_pace" :placeholder="t('节奏', 'Pace')" clearable>
+              <el-option :label="t('慢慢推进', 'Slow')" value="慢节奏，重大转折前先铺垫并确认" />
+              <el-option :label="t('正常推进', 'Normal')" value="正常节奏，根据用户反馈推进" />
+              <el-option :label="t('快速推进', 'Fast')" value="较快推进，减少重复铺垫" />
+            </el-select>
+            <el-select v-model="form.directive_initiative" :placeholder="t('主动程度', 'Initiative')" clearable>
+              <el-option :label="t('少主动', 'Low')" value="低主动：等待用户决定关键行动" />
+              <el-option :label="t('适度主动', 'Balanced')" value="适度主动：提供推动，但把关键决定交给用户" />
+              <el-option :label="t('更主动', 'High')" value="高主动：主动创造事件与话题，但不替用户决定" />
+            </el-select>
+          </div>
+          <el-input v-model="form.directive_boundaries" type="textarea" :rows="2" maxlength="2000" show-word-limit :placeholder="t('边界或禁区，例如：不要替我说话；重大转折前先询问。', 'Boundaries, e.g. never speak for me; ask before major turns.')" />
+        </section>
         <!-- 人物设定 -->
         <section class="cv-panel">
           <header class="cv-panel__head">
@@ -438,6 +464,8 @@ const form = reactive({
   prompt_enhance: false,
   // 回复长度：默认短文
   reply_length_id: DEFAULT_LENGTH,
+  directive_goal: '', directive_tone: '', directive_pace: '',
+  directive_initiative: '', directive_boundaries: '',
 })
 
 // 参数微调的量表定义：模板用 v-for 渲染，避免三段结构重复
@@ -482,6 +510,12 @@ function resetForm() {
   form.reply_template_id = readTemplateId(conv.reply_template)
   form.prompt_enhance = readPromptEnhance(conv.reply_template)
   form.reply_length_id = readLengthId(conv.reply_template)
+  const directives = conv.conversation_directives || {}
+  form.directive_goal = directives.goal || ''
+  form.directive_tone = directives.tone || ''
+  form.directive_pace = directives.pace || ''
+  form.directive_initiative = directives.initiative || ''
+  form.directive_boundaries = directives.boundaries || ''
   // 让本轮回填引起的 watch 在同一微任务里被忽略，下一轮才恢复自动保存
   nextTick(() => { suppressAuto = false })
 }
@@ -560,6 +594,10 @@ function buildPayload() {
     append_prompt_enabled: !!form.append_prompt_enabled,
     rich_marker_enabled: !!form.rich_marker_enabled,
     reply_template: buildReplyTemplate(),
+    conversation_directives: {
+      goal: form.directive_goal, tone: form.directive_tone, pace: form.directive_pace,
+      initiative: form.directive_initiative, boundaries: form.directive_boundaries,
+    },
   }
 }
 
@@ -618,6 +656,15 @@ watch(form, () => {
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.015);
   /* 顶部一道极细高光，制造面板的「金属边」而非纸片感 */
   overflow: hidden;
+}
+.cv-directive-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+@media (max-width: 560px) {
+  .cv-directive-grid { grid-template-columns: 1fr; }
 }
 .cv-panel::before {
   content: '';

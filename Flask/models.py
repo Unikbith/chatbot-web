@@ -390,6 +390,10 @@ class Conversation(db.Model):
     user_persona = db.relationship('PersonaTemplate', foreign_keys=[user_persona_id])
 
     def to_dict(self):
+        try:
+            settings_data = json.loads(self.settings) if self.settings else {}
+        except (TypeError, ValueError):
+            settings_data = {}
         return {
             'id': self.id,
             'title': self.title,
@@ -422,6 +426,7 @@ class Conversation(db.Model):
                 else RICH_MESSAGE_ENABLED
             ),
             'reply_template': self.reply_template,
+            'conversation_directives': settings_data.get('conversation_directives', {}),
             'persona_name': self.persona.name if self.persona else None,
             'persona_avatar': self.persona.avatar if self.persona else None,
             'created_at': iso_time(self.created_at),
