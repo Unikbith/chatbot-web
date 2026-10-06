@@ -155,7 +155,7 @@
               </div>
               <div class="wb-desc">
                 {{ t('只在聊到相关词时才加载的设定，省 token 也能写更多内容。', 'Lore loaded only when relevant — saves tokens, holds more.') }}
-                <b>{{ t('常驻', 'Always') }}</b>{{ t('＝每轮都注入；其余按触发词命中才注入。', ' = injected every turn; others load when a trigger word appears.') }}
+                <b>{{ t('常驻', 'Always') }}</b>{{ t('＝每轮都注入；其余按触发词命中才注入。协议包的三条核心协议由「对话设置」里的开关控制，不占这里的常驻。', ' = injected every turn; others load when a trigger word appears. The three core protocol entries are controlled by switches in Conversation Settings instead.') }}
                 <span v-if="!editingPersona" class="wb-draft-note">{{ t('新建模式下条目会随人物卡一起保存。', 'In create mode, entries are saved with the card.') }}</span>
               </div>
             </div>
@@ -201,8 +201,11 @@
                   <div class="wb-item-head" @click="toggleWbExpand(e)">
                     <span class="wb-caret" :class="{ open: isWbExpanded(e) }">▸</span>
                     <span v-if="e.category === 'protocol'" class="wb-tag is-proto">{{ t('协议', 'Protocol') }}</span>
-                    <span class="wb-tag" :class="e.always_on ? 'is-on' : 'is-demand'">
-                      {{ e.always_on ? t('常驻', 'Always') : t('按需', 'On demand') }}
+                    <span
+                      class="wb-tag"
+                      :class="isCoreProtocol(e) ? 'is-switch' : (e.always_on ? 'is-on' : 'is-demand')"
+                    >
+                      {{ wbTagText(e) }}
                     </span>
                     <span class="wb-name">{{ e.title || t('未命名条目', 'Untitled') }}</span>
                     <span v-if="!e.enabled" class="wb-tag is-off">{{ t('已停用', 'Disabled') }}</span>
@@ -224,7 +227,9 @@
                     <div v-if="e.keywords" class="wb-kw-row">
                       <span class="wb-kw-label">{{ t('触发词', 'Triggers') }}</span>
                       <span v-for="kw in wbKeywordList(e)" :key="kw" class="wb-kw-chip">{{ kw }}</span>
-                      <span v-if="!wbKeywordList(e).length" class="wb-kw-none">{{ t('（常驻，无需触发词）', '(always on)') }}</span>
+                      <span v-if="!wbKeywordList(e).length" class="wb-kw-none">
+                        {{ isCoreProtocol(e) ? t('（由会话设置里的开关控制，无需触发词）', '(controlled by the switch in Conversation Settings)') : t('（常驻，无需触发词）', '(always on)') }}
+                      </span>
                     </div>
                     <pre class="wb-content">{{ e.content }}</pre>
                     <div v-if="e.source_key" class="wb-source">
@@ -278,7 +283,13 @@
           />
         </el-form-item>
         <el-form-item>
-          <el-checkbox v-model="wbForm.always_on">常驻（每次对话都加载，用于核心人设）</el-checkbox>
+          <!-- 核心协议的注入由会话开关控制，条目自身的「常驻」已无意义：
+               这里换成说明文字，避免用户勾了却发现没效果 -->
+          <div v-if="editingCoreWb" class="wb-core-note">
+            这是协议包的核心条目：要不要注入由「对话设置」里的开关决定（提示词兜底 / 界面标记 + 丰富面板内容），
+            这里不需要设常驻或触发词。
+          </div>
+          <el-checkbox v-else v-model="wbForm.always_on">常驻（每次对话都加载，用于核心人设）</el-checkbox>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -433,6 +444,24 @@ function wbKeywordList(entry) {
     .filter(Boolean)
 }
 
+// 三条核心协议（输出结构 / 创作与内容 / 剧情推进）已经不靠「常驻」注入，
+// 而是由会话设置里的开关控制（兜底 / 界面标记 + 丰富面板内容），
+// 所以它们的角标显示「开关控制」而不是「常驻 / 按需」，避免误导。
+const CORE_PROTOCOL_KINDS = ['structure', 'content', 'experience']
+function isCoreProtocol(entry) {
+  return entry.category === 'protocol' && CORE_PROTOCOL_KINDS.includes(entry.kind)
+}
+
+// 角标文案：核心协议 → 开关控制；玩法包 → 按触发词；其余按 always_on
+function wbTagText(entry) {
+  if (isCoreProtocol(entry)) return t('开关控制', 'By switch')
+  if (entry.category === 'protocol' || !entry.always_on) return t('按需', 'On demand')
+  return t('常驻', 'Always')
+}
+
+// 正在编辑的是不是「协议包核心条目」：是的话不需要填触发词、也没有常驻开关
+const editingCoreWb = computed(() => !!wbEditing.value && isCoreProtocol(wbEditing.value))
+
 // 分组：协议包（系统种入）在前，自己的设定条目在后
 const wbGroups = computed(() => {
   const protocol = wbEntries.value.filter(e => e.category === 'protocol')
@@ -442,8 +471,8 @@ const wbGroups = computed(() => {
     groups.push({
       key: 'protocol',
       name: t('协议包', 'Protocol pack'),
-      hint: t('输出结构 / 创作与内容 / 剧情推进（常驻）＋ 玩法包（按触发词）。可停用、改写或删除。',
-        'Structure / writing & content / pacing (always on) + play packs (on trigger). Editable and removable.'),
+      hint: t('三条核心协议在「对话设置」里用开关控制（提示词兜底 / 界面标记 + 丰富面板内容），玩法包按触发词命中才注入。可停用、改写或删除。',
+        'The three core protocols are controlled by switches in Conversation Settings; play packs load on trigger words. Editable and removable.'),
       items: protocol,
     })
   }
@@ -528,7 +557,7 @@ async function saveWbEntry() {
     ElMessage.warning('请填写设定内容')
     return
   }
-  if (!wbForm.always_on && !wbForm.keywords.trim()) {
+  if (!editingCoreWb.value && !wbForm.always_on && !wbForm.keywords.trim()) {
     ElMessage.warning('非常驻条目请至少填一个触发词（或勾「常驻」）')
     return
   }
@@ -1060,6 +1089,21 @@ function confirmDelete(id) {
   background: transparent;
   color: var(--text-primary, #303133);
   border: 1px solid currentColor;
+}
+
+/* 「开关控制」：三条核心协议不靠常驻注入，由会话设置里的开关决定，
+   用虚线描边区分于实心的「常驻」与实线描边的「按需」 */
+.wb-tag.is-switch {
+  background: transparent;
+  border: 1px dashed var(--brand, #c98a5a);
+  color: var(--brand, #c98a5a);
+}
+
+/* 核心协议编辑弹窗里的说明（替代「常驻」勾选框） */
+.wb-core-note {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary, #606266);
 }
 
 .wb-item-body {

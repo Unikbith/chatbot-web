@@ -65,10 +65,9 @@ def rich_marker_rule(conv=None):
     if not resolve_rich_marker_enabled(conv):
         return ''
     opts = template_prompt(conv)
-    # enhance（前端「提示词增强」）未设置时按**开启**处理，与前端默认值一致：
-    # 关掉它就只剩标记词表、没有「每轮输出结构」，界面构件会时有时无 ——
-    # 这正是「结构不稳定」的来源。要关闭请在会话设置里显式关（会存 enhance=false）。
-    enhance = opts.get('enhance') is not False
+    # enhance（前端「丰富面板内容」）未设置时按**关闭**处理，与前端默认值一致：
+    # 关掉它就只注入标记词表、不强制每轮输出结构（省 token，用户自己按需开）。
+    enhance = opts.get('enhance') is True   # 未设置视为关（与前端默认一致）
     protocol = opts.get('protocol') or reply_spec.DEFAULT_PROTOCOL
     length = opts.get('length') or reply_spec.DEFAULT_LENGTH
     return reply_spec.compose_reply_spec(protocol=protocol, length=length, enhance=enhance)

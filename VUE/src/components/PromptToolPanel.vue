@@ -23,7 +23,9 @@ const defaultPrompt = (cat) => info.value.default_prompts?.[cat] || '';
 
 // 人物设定占位提示：仅展示给用户看，与后端实际下发的系统提示词解耦。
 // 后端 DEFAULT_CHARACTER_PROMPT 可换成真实使用的提示词，前端占位仍显示这份友好说明。
-const CHARACTER_PLACEHOLDER = '你是一位资深的人物设定策划师。请根据用户的需求，产出一份可直接用于角色扮演、小说或剧本创作的人物设定。要求覆盖：姓名、年龄、身份与职业、性格（含优点与缺点）、背景经历、外貌特征、说话风格与口头禅、能力与特长、目标与动机、人际关系与潜在冲突。内容要具体、有层次，避免空洞套话，用分点或分段呈现。只输出设定正文，不要任何额外解释。';
+// 刻意写得简短并写明字数上限：生成结果通常会被贴回「AI 人设」，那段文本每轮都会注入，
+// 越详细每轮越费 token —— 所以默认提示词引导模型产出精简版。
+const CHARACTER_PLACEHOLDER = '你是一位资深的人物设定策划师。请根据用户的需求，产出一份可直接用于角色扮演、小说或剧本创作的、精简够用的人物设定，全文控制在 400 字以内：这段文字会随每轮对话注入，写长会持续消耗 token。覆盖：姓名、年龄、身份与职业、性格（含优点与缺点）、背景经历、外貌特征、说话风格与口头禅、能力与特长、目标与动机、人际关系与潜在冲突。用短句分点呈现，只写扮演时用得上的信息，不必逐项枚举身体细节，避免空洞套话。只输出设定正文，不要任何额外解释。';
 
 // 扁平化的可选模型列表：直接选出「某配置下的某个模型」，无需先选厂商再选模型。
 // 每个选项的 value 编码为 `${providerId}::${modelId}`（免费模型为 `free::${free_model}`），
@@ -225,6 +227,10 @@ onMounted(() => {
             <div class="pt-field-hint">
               （{{ t('只填入人物基础信息，也可以是你复制过来的人物设定，', 'Enter only basic character info or a copied persona.') }}
               <strong>【{{ t('但是需要去掉提示词约束', 'Remove any prompt constraints first') }}】</strong>）
+            </div>
+            <div class="pt-field-hint">
+              {{ t('生成的人设建议保持精简：它会被贴回「AI 人设」，每轮对话都要带上，篇幅越长越费 token。',
+                'Keep the generated persona short: it becomes the AI persona and is sent with every turn, so length costs tokens.') }}
             </div>
           </div>
 

@@ -7,14 +7,18 @@
       · 想省 token 只能整个关掉（连结构一起没了）。
     改成世界书条目后：
       · 默认给每张人物卡种入一份（可在卡片的世界书面板里编辑 / 停用 / 删除）；
-      · 常驻条目（结构 / 创作 / 剧情体验）每轮注入，内容**一个字都不减**；
+      · 注入与否由会话设置里的开关决定（**默认全关**，每轮省下好几千字）；
       · 玩法扩展包按关键词触发 —— 聊到才注入，想加多少种玩法都不增加常驻成本。
 
 条目分类（WorldBookEntry.category / kind）
-    protocol + structure  输出结构协议     常驻
-    protocol + content    创作与内容协议   常驻
-    protocol + experience 剧情推进与体验   常驻
-    protocol + play       玩法扩展包       按关键词触发
+    protocol + structure  输出结构协议     由「界面标记 + 丰富面板内容」控制（默认关）
+    protocol + content    创作与内容协议   由「对话设置 → 提示词兜底」控制（默认关）
+    protocol + experience 剧情推进与体验   由「对话设置 → 提示词兜底」控制（默认关）
+    protocol + play       玩法扩展包       关键词命中才注入（同样要求提示词兜底开着）
+
+    ⚠️ 三条核心协议**都不再是「常驻」条目**（always_on 一律 False）：内容一个字都没删，
+    只是不再无条件注入；用户在「对话设置」里打开开关才会随每轮带上。
+    这样默认每轮不注入任何协议（约省 8k 字），需要面板/创作规范时再打开。
 
 内容来源
     结构协议直接复用 reply_spec（与前端渲染骨架一一对应，不另写一份）；
@@ -32,7 +36,7 @@ import reply_spec
 MIN_PLAY_KEYWORD_LEN = 2
 
 # ---------------------------------------------------------------------------
-# 一、常驻协议条目（每轮注入，内容不减）
+# 一、核心协议条目（内容不减；是否注入由会话设置里的开关决定，默认关）
 # ---------------------------------------------------------------------------
 
 # 剧情推进与用户体验：用户控制节奏 + 顺势推进但不刻意 + 真实感 + 面板主体 + 排版约定。
@@ -65,7 +69,7 @@ _EXPERIENCE = """【剧情推进与体验协议】
   永远是**你正在扮演的 AI 角色**；玩家只有基础玩家信息，不得给玩家生成好感度 / 信任值 / 身体状态面板。
 · 即使玩家的性别或设定与角色不同，也必须按 AI 角色设定决定外貌、性别特征、称呼和反应，禁止把 AI 角色默认写成女性。
 · 面板按角色分块，多角色时必须注明面板所属角色，不得把不同角色的数值或状态合并。
-· 排版由渲染层统一处理：不要输出 HTML 标签（<div>/<span>/<br>）或 style，不要用 <br> 当换行。"""
+· 排版由渲染层统一处理（具体约定见下发的排版规则），不要自己写标签。"""
 
 # 创作与内容协议：逐字保留原 GLOBAL_APPEND_PROMPT（不删减任何一行）
 def _content_protocol():
@@ -192,27 +196,30 @@ def protocol_entries():
     entries = [
         {
             'source_key': 'protocol:structure',
-            'title': '① 输出结构协议（每轮必须遵守）',
+            'title': '① 输出结构协议（由「界面标记 → 丰富面板内容」控制）',
             'kind': 'structure',
-            'always_on': True,
+            'gate': 'enhance',
+            'always_on': False,
             'keywords': '',
             'weight': 100,
             'content': structure,
         },
         {
             'source_key': 'protocol:content',
-            'title': '② 创作与内容协议',
+            'title': '② 创作与内容协议（由「对话设置 → 提示词兜底」控制）',
             'kind': 'content',
-            'always_on': True,
+            'gate': 'append',
+            'always_on': False,   # 不再常驻：默认关闭，由会话开关决定是否注入
             'keywords': '',
             'weight': 90,
             'content': _content_protocol(),
         },
         {
             'source_key': 'protocol:experience',
-            'title': '③ 剧情推进与体验协议',
+            'title': '③ 剧情推进与体验协议（由「对话设置 → 提示词兜底」控制）',
             'kind': 'experience',
-            'always_on': True,
+            'gate': 'append',
+            'always_on': False,   # 同上
             'keywords': '',
             'weight': 80,
             'content': _EXPERIENCE,
@@ -223,7 +230,8 @@ def protocol_entries():
             'source_key': pack['source_key'],
             'title': pack['title'],
             'kind': 'play',
-            'always_on': False,          # 玩法包按需触发
+            'gate': 'play',
+            'always_on': False,          # 玩法包按需触发（关键词命中才注入）
             'keywords': pack['keywords'],
             'weight': 10,
             'content': pack['content'],

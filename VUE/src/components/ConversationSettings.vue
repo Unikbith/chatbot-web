@@ -54,14 +54,15 @@
             <div class="cv-toggle__text">
               <span class="cv-toggle__label">{{ t('注入协议包', 'Inject protocol pack') }}</span>
               <span class="cv-toggle__hint">
-                {{ t('默认开启：注入人物卡里的协议条目（输出结构、创作与内容、剧情推进与玩法）。关掉后每轮更省 token，但界面构件与创作规范会一并消失',
-                  'On by default: injects the persona card’s protocol entries. Turning it off saves tokens per turn — at the cost of structure and writing rules') }}
+                {{ t('注入协议条目控制输出内容，关掉后每轮更省 token',
+                  'Injects the protocol entries that control output; turning it off saves tokens every turn') }}
               </span>
             </div>
             <el-switch v-model="form.append_prompt_enabled" />
           </div>
           <p class="cv-panel__hint">
-            {{ t('协议条目在「人物卡 → 世界书」里，可逐条编辑、停用或删除。', 'Protocol entries live in Persona → Worldbook, and can be edited, disabled or deleted one by one.') }}
+            {{ t('控制「创作与内容协议」「剧情推进与体验协议」两条；面板结构由下面的「丰富面板内容」单独控制。协议条目在「人物卡 → 世界书」里，可逐条编辑、停用或删除。',
+              'Controls the writing/content and pacing protocol entries; the panel structure is controlled separately by “Rich Panel Content” below. Entries live in Persona → Worldbook and can be edited, disabled or deleted one by one.') }}
           </p>
         </section>
 
@@ -96,7 +97,8 @@
             <div class="cv-toggle cv-toggle--sub">
               <div class="cv-toggle__text">
                 <span class="cv-toggle__label">{{ t('丰富面板内容', 'Rich Panel Content') }}</span>
-                <span class="cv-toggle__hint">{{ t('每轮自动带上状态、面板、内心、选项', 'Adds panels every turn') }}</span>
+                <span class="cv-toggle__hint">{{ t('注入「输出结构协议」：每轮自动带上状态、面板、内心、选项（关掉更省 token）',
+                  'Injects the output-structure protocol: panels, status, inner voice and choices every turn (off saves tokens)') }}</span>
               </div>
               <el-switch v-model="form.prompt_enhance" />
             </div>
@@ -383,14 +385,14 @@ function readTemplateId(raw) {
   }
 }
 
-/** 取回「提示词增强」开关：未存过时默认开启（与后端注入侧的默认一致） */
+/** 取回「提示词增强」开关：未存过时默认关闭（关掉每轮更省 token，用户自己按需开） */
 function readPromptEnhance(raw) {
-  if (!raw) return true
+  if (!raw) return false
   try {
     const data = typeof raw === 'string' ? JSON.parse(raw) : raw
-    return data && data.enhance === false ? false : true
+    return data && data.enhance === true
   } catch (e) {
-    return true
+    return false
   }
 }
 
@@ -423,7 +425,7 @@ function buildReplyTemplate() {
     name: preset.name,
     protocol: DEFAULT_PROTOCOL,
     length: form.reply_length_id || DEFAULT_LENGTH,
-    enhance: form.prompt_enhance !== false,
+    enhance: form.prompt_enhance === true,
   })
 }
 
@@ -434,14 +436,14 @@ const form = reactive({
   temperature: null, frequency_penalty: null, presence_penalty: null,
   auto_play_voice: false,
   summary_threshold: 7,
-  // 提示词兜底：默认开启（全局约定能显著降低角色跳出设定的概率）
-  append_prompt_enabled: true,
+  // 提示词兜底：默认关闭（协议包每轮占好几千字，默认注入太费 token）
+  append_prompt_enabled: false,
   // 界面标记默认开启（与后端 RICH_MESSAGE_ENABLED 默认值一致）
   rich_marker_enabled: true,
   // 回复渲染模板：默认使用档案风（不再有"不使用"这一档）
   reply_template_id: DEFAULT_TEMPLATE_ID,
-  // 提示词增强：默认开启（关掉就不再有「每轮输出结构」，界面构件会时有时无）
-  prompt_enhance: true,
+  // 丰富面板内容：默认关闭，由用户自己按需开启
+  prompt_enhance: false,
   // 回复长度：默认长文
   reply_length_id: DEFAULT_LENGTH,
 })
@@ -480,9 +482,9 @@ function resetForm() {
   form.presence_penalty = (conv.presence_penalty != null && conv.presence_penalty !== '') ? conv.presence_penalty : null
   form.auto_play_voice = !!conv.auto_play_voice
   form.summary_threshold = (conv.summary_threshold != null && conv.summary_threshold !== '') ? Number(conv.summary_threshold) : 7
-  // 提示词兜底默认开启：未存过（NULL，老数据）也显示为开启，
-  // 后端 _get_system_prompt 对 NULL 同样是"按开启处理"，两边保持一致
-  form.append_prompt_enabled = conv.append_prompt_enabled == null ? true : !!conv.append_prompt_enabled
+  // 提示词兜底默认关闭：未存过（NULL，老数据）也显示为关闭，
+  // 后端 _protocol_block 对 NULL/False 同样不注入，两边保持一致
+  form.append_prompt_enabled = conv.append_prompt_enabled == null ? false : !!conv.append_prompt_enabled
   // 未存过（null/undefined）按全局默认「开启」处理：
   // 后端 resolve_rich_marker_enabled 对 NULL 也是回落到全局开关，
   // 这里若按 !!null 显示成关闭，就会出现「界面显示关、实际在注入」的不一致。

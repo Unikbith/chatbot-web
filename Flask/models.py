@@ -356,11 +356,11 @@ class Conversation(db.Model):
     # 用户导入的长期记忆（记忆档案原文）：与滚动摘要分开存，避免被压缩器改写成 200 字短摘要。
     # 滚动摘要是「自动压缩、刻意有损」的，而导入记忆是用户明确指定的档案，必须原样长期保留。
     imported_memory = db.Column(db.Text, nullable=True)
-    # 提示词兜底：开启后，后端写死的 GLOBAL_APPEND_PROMPT（世界观/语气/禁区等全局约定）
-    # 会接在人物设定之后。
-    # 默认开启 —— 产品按「开箱就有完整表现」定位：关掉它角色更容易跳出设定。
-    # 那段兜底词有几千 token，在意成本可在「对话设置 → 提示词兜底」里单独关掉。
-    append_prompt_enabled = db.Column(db.Boolean, default=True, nullable=True)
+    # 提示词兜底：协议包总开关 —— 开启才注入「创作与内容协议」「剧情推进与体验协议」
+    # 以及按需命中的玩法包（这些条目存在人物卡的世界书里，用户可逐条编辑/停用/删除）。
+    # 默认关闭（NULL / False 都视为关）——协议包每轮好几千字，默认注入太费 token；
+    # 用户想要完整创作规范与面板时，在「对话设置 → 提示词兜底」里自己打开。
+    append_prompt_enabled = db.Column(db.Boolean, default=False, nullable=True)
     # 界面标记（富消息）：开启后把「【状态】【进度】【选项】」等标记约定接在系统提示词后，
     # 模型输出的标记由前端 RichMessage.vue 渲染成状态栏/进展条/可点选项。
     # 列默认值就是 True（与前端回填一致）；running 环境想整体关掉可用 .env 的
@@ -417,11 +417,7 @@ class Conversation(db.Model):
             'summary': self.summary,
             'summary_upto_id': self.summary_upto_id,
             'imported_memory': self.imported_memory,
-            'append_prompt_enabled': (
-                bool(self.append_prompt_enabled)
-                if self.append_prompt_enabled is not None
-                else True          # NULL 视为默认开启，与注入侧 _get_system_prompt 一致
-            ),
+            'append_prompt_enabled': bool(self.append_prompt_enabled or False),  # NULL 视为关闭（新默认）
             # NULL 与「未存过」同义：回落到全局默认值，
             # 与 rich_marker.resolve_rich_marker_enabled 的判定保持一致，
             # 避免前端显示成关闭、实际却按全局开关在注入。

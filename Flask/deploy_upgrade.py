@@ -3,11 +3,19 @@
 为什么需要它
     老版本部署里没有「协议包」这个概念：
       · 人物卡的世界书是空的 → 新版本聊天拿不到输出结构 / 创作 / 剧情推进 / 玩法规范；
-      · 会话的「提示词兜底」是旧默认（关）→ 协议包整套不注入；
-      · 会话里存过模板的 enhance 是 false（旧版会在聊满两轮后自动关掉）→ 结构规范不注入；
       · 老会话的 persona_id 多为空 → 协议条目按卡存，空值就查不到。
     应用启动时的 `_ensure_schema_columns` 只负责「表/列/索引」，不做这些业务数据迁移，
     所以线上需要执行一次本脚本。
+
+新版开关语义（重要）
+    「对话设置」里的两个开关**默认都是关**，由用户按需打开，避免每轮白付 token：
+      · 提示词兜底（append_prompt_enabled）—— 协议包总开关：控制「创作与内容协议」
+        与「剧情推进与体验协议」，关掉就不注入这两条；
+      · 界面标记 + 丰富面板内容（rich_marker_enabled / enhance）—— 只控制「输出结构协议」，
+        两个都开才注入。
+    玩法包不看这两个开关，靠关键词按需命中（用户点明玩法时才注入）。
+    本脚本会把线上已有的会话统一改成「关」（上一版升级曾把它们改成「开」），
+    协议条目本身不删除，用户随时可以逐条启用或在设置里一键打开。
 
 执行顺序（线上推荐）
     1) 备份数据库：  sqlite3 instance/chatbot.db ".backup 'backup_before_upgrade.db'"
@@ -18,7 +26,8 @@
 用法
     python deploy_upgrade.py                 # 执行（幂等）
     python deploy_upgrade.py --dry-run       # 只报告将要改什么，不写库
-    python deploy_upgrade.py --diagnose      # 只读诊断：逐个会话说明「为什么协议包没生效」
+    python deploy_upgrade.py --diagnose      # 只读诊断：开关状态 + 每轮协议包注入多少字 + 重复文本
+    python deploy_upgrade.py --dup-check     # 只读：找出「卡提示词里抄了世界书正文」的重复消耗
     python deploy_upgrade.py --fix-legacy    # 额外修老会话的「界面标记」开关（见下）
     python deploy_upgrade.py --fill-user-prompt   # 额外给「玩家设定」为空的卡补通用模板
 
@@ -26,9 +35,9 @@
     老版本（升级前）**没有「界面标记」这个开关**，升级后所有老会话该字段为空，
     启动时会被一次性回填成 .env 里的 RICH_MESSAGE_ENABLED（默认 true）。
     若线上 .env 里曾经写过 RICH_MESSAGE_ENABLED=false，老会话就全变成「关」：
-    此时结构协议不注入、前端也不渲染面板 —— 表现就是"世界书里有内容，但对话里没生效"。
-    --fix-legacy 会把这类老会话（判定依据：没有 reply_template，即升级前就存在）的
-    「界面标记」重新打开；新版里用户自己关过的会话（有 reply_template）不动。
+    此时结构协议不注入、前端也不渲染面板。--fix-legacy 会把这类老会话
+    （判定依据：没有 reply_template，即升级前就存在）的「界面标记」重新打开；
+    新版里用户自己关过的会话（有 reply_template）不动。
 """
 import json
 import os
@@ -46,6 +55,7 @@ DRY = '--dry-run' in sys.argv
 DIAGNOSE = '--diagnose' in sys.argv
 FIX_LEGACY = '--fix-legacy' in sys.argv
 FILL_USER_PROMPT = '--fill-user-prompt' in sys.argv
+DUP_CHECK = '--dup-check' in sys.argv
 
 app = create_app()
 summary_rows = []
@@ -57,38 +67,91 @@ def report(label, value):
 
 
 def diagnose_conversations():
-    """逐个会话说明协议包为什么（没）生效 —— 排查"世界书有内容但对话里没生效"用。"""
+    """逐个会话报告「开关状态 + 每轮协议包注入多少字」—— 排查 token 消耗 / 没生效用。
+
+    注意：新默认是关（提示词兜底、丰富面板内容都关），所以"注入 0 字"是正常状态；
+    真正的问题是 ⚠ 标记的那些（没有人物卡、卡里没有启用的协议条目）。
+    """
     from routes.chat import (_effective_persona_id, _protocol_block, template_prompt)
     from rich_marker import resolve_rich_marker_enabled, RICH_MESSAGE_ENABLED
     print(f'  环境变量 RICH_MESSAGE_ENABLED = {RICH_MESSAGE_ENABLED}')
     rows = Conversation.query.order_by(Conversation.id.desc()).limit(40).all()
-    print(f'  最近 {len(rows)} 个会话：')
-    blocked = 0
+    print(f'  最近 {len(rows)} 个会话（新默认：两个开关都是关）：')
+    injecting = 0
     for conv in rows:
-        reasons = []
-        if conv.append_prompt_enabled is False:
-            reasons.append('提示词兜底=关')
+        problems = []
         pid = _effective_persona_id(conv, conv.user_id)
         if not pid:
-            reasons.append('无人物卡可回落')
+            problems.append('无人物卡可回落')
         else:
             cnt = WorldBookEntry.query.filter_by(
                 user_id=conv.user_id, persona_id=pid, category='protocol', enabled=True).count()
             if not cnt:
-                reasons.append(f'卡 #{pid} 没有启用的协议条目')
-        if not resolve_rich_marker_enabled(conv):
-            reasons.append('界面标记=关（结构不注入、前端也不渲染）')
+                problems.append(f'卡 #{pid} 没有启用的协议条目')
         opts = template_prompt(conv)
-        if opts.get('enhance') is False:
-            reasons.append('提示词增强=关（结构不注入）')
+        switches = ' '.join([
+            '兜底=' + ('开' if conv.append_prompt_enabled else '关'),
+            '标记=' + ('开' if resolve_rich_marker_enabled(conv) else '关'),
+            '面板=' + ('开' if opts.get('enhance') is True else '关'),
+        ])
         block = _protocol_block(conv.user_id, pid, [], conv)
-        if not block:
-            blocked += 1
-        state = f'注入 {len(block)} 字' if block else '注入 0 字 ← 没生效'
-        flag = ('  ⚠ ' + '；'.join(reasons)) if reasons else ''
-        print(f'    #{conv.id:<5} 用户{conv.user_id:<3} {state}{flag}')
-    print(f'  未生效的会话：{blocked} 个（有 ⚠ 的就是原因）')
-    return blocked
+        if block:
+            injecting += 1
+        state = f'注入 {len(block):>5} 字' if block else '注入     0 字'
+        flag = ('  ⚠ ' + '；'.join(problems)) if problems else ''
+        print(f'    #{conv.id:<5} 用户{conv.user_id:<3} {state} [{switches}]{flag}')
+    print(f'  当前每轮实际注入协议包的会话：{injecting} / {len(rows)} 个'
+          f'（其余都是开关关着，省 token）')
+    return injecting
+
+
+def check_duplicate_injection():
+    """只读检查：人物卡的提示词里是否**抄了**协议包 / 世界书的正文（每轮重复付费）。
+
+    典型来源：用户把「提示词兜底」的那段全局提示词复制进了人物卡的提示词里。
+    那段文字本来就会由协议包按开关注入，抄进卡里等于每轮付两次 token，
+    而且**开关关掉也省不下来**（人物卡提示词是无条件注入的）。
+
+    判定方式：把每条世界书条目按行切开，统计有多少行能在卡的提示词里原样找到。
+    这是保守的近似（只认整行原样命中），避免把"意思相近"误报成重复。
+    """
+    cards = PersonaTemplate.query.filter_by(persona_type='ai').all()
+    print(f'  扫描 {len(cards)} 张 AI 人物卡的提示词 …')
+    hits = []
+    for card in cards:
+        prompt = card.system_prompt or ''
+        if len(prompt) < 200:
+            continue
+        entries = WorldBookEntry.query.filter_by(
+            user_id=card.user_id, persona_id=card.id).all()
+        dup_chars = 0
+        dup_titles = []
+        for e in entries:
+            body = (e.content or '').strip()
+            if len(body) < 200:
+                continue
+            line_hit = 0
+            for line in body.split('\n'):
+                line = line.strip()
+                if len(line) >= 12 and line in prompt:
+                    line_hit += len(line)
+            # 单条命中超过 300 字才算"抄了一段"，避免零星措辞撞车误报
+            if line_hit >= 300:
+                dup_chars += line_hit
+                dup_titles.append(f'{e.title}({line_hit}字)')
+        if dup_chars:
+            hits.append((card, dup_chars, dup_titles))
+    if not hits:
+        print('  未发现「卡提示词里抄了世界书正文」的情况 ✔')
+        return 0
+    print(f'  发现 {len(hits)} 张卡存在重复文本（建议手动删掉卡里那段，改由协议条目控制）：')
+    for card, chars, titles in sorted(hits, key=lambda x: -x[1]):
+        print(f'    用户{card.user_id} 卡#{card.id}《{card.name or "未命名"}》'
+              f' 提示词 {len(card.system_prompt or "")} 字，其中约 {chars} 字与世界书条目重复')
+        print(f'        重复条目：{"、".join(titles)}')
+    print('  处理建议：在「人物卡 → 提示词」里删掉与协议条目重复的那一段；'
+          '协议包要不要注入交给「对话设置」的开关。')
+    return len(hits)
 
 
 with app.app_context():
@@ -106,7 +169,15 @@ with app.app_context():
     if DIAGNOSE:
         print('\n[诊断] 协议包为什么没生效')
         diagnose_conversations()
+        print('\n[诊断] 重复文本检查（卡提示词里抄了世界书正文？）')
+        check_duplicate_injection()
         print('\n诊断结束（未写入任何改动）')
+        sys.exit(0)
+
+    if DUP_CHECK:
+        print('\n[检查] 人物卡提示词 vs 世界书：是否有重复文本')
+        check_duplicate_injection()
+        print('\n检查结束（未写入任何改动）')
         sys.exit(0)
 
     # ---------- 0. 结构自检（启动迁移应已建好新表/列） ----------
@@ -149,19 +220,34 @@ with app.app_context():
     report('AI 人物卡总数', len(cards))
     report('新增协议条目', created_total)
     report('刷新协议条目正文', updated_total)
+    # 三条核心协议（结构 / 创作与内容 / 剧情推进）不再是世界书里的「常驻」：
+    # 它们由会话开关控制，条目自身的 always_on 已经没有意义，统一清掉以免界面上
+    # 显示成「常驻」误导用户（玩法包仍旧靠关键词按需触发）。
+    core_rows = WorldBookEntry.query.filter(
+        WorldBookEntry.category == 'protocol',
+        WorldBookEntry.kind.in_(['structure', 'content', 'experience']),
+        WorldBookEntry.always_on.is_(True),
+    ).all()
+    report('核心协议条目取消「常驻」标记', len(core_rows))
+    if not DRY:
+        for row in core_rows:
+            row.always_on = False
     protocol_now = WorldBookEntry.query.filter_by(category='protocol').count()
     report('协议条目现有总数', protocol_now)
 
-    # ---------- 2. 会话：提示词兜底 / 提示词增强 跟着新默认走 ----------
-    print('\n[2] 会话开关：提示词兜底（新默认开）、提示词增强（新默认开）')
+    # ---------- 2. 会话开关：跟着新默认走（都关，省 token） ----------
+    print('\n[2] 会话开关：提示词兜底（新默认关）、丰富面板内容（新默认关）')
+    # 上一版把老会话一律改成「开」，协议包每轮无条件注入 ~8k 字，token 消耗偏高。
+    # 新默认改为「关」：由用户在「对话设置」里按需开；协议条目本身仍留在卡的
+    # 世界书里，用户随时可以逐条编辑 / 启用，内容没有被删。
     flag_rows = Conversation.query.filter(
         db.or_(Conversation.append_prompt_enabled.is_(None),
-               Conversation.append_prompt_enabled.is_(False))
+               Conversation.append_prompt_enabled.is_(True))
     ).all()
-    report('提示词兜底需要改为开启', len(flag_rows))
+    report('提示词兜底需要改为关闭', len(flag_rows))
     if not DRY:
         for conv in flag_rows:
-            conv.append_prompt_enabled = True
+            conv.append_prompt_enabled = False
 
     enh_ids = []
     for conv in Conversation.query.filter(Conversation.reply_template.isnot(None)).all():
@@ -169,12 +255,13 @@ with app.app_context():
             tpl = json.loads(conv.reply_template)
         except (TypeError, ValueError):
             continue
-        if isinstance(tpl, dict) and tpl.get('enhance') is False:
-            tpl['enhance'] = True
+        # 缺字段（None）也算「不是关」，一并补成 false —— 与前端默认一致
+        if isinstance(tpl, dict) and tpl.get('enhance') is not False:
+            tpl['enhance'] = False
             enh_ids.append(conv.id)
             if not DRY:
                 conv.reply_template = json.dumps(tpl, ensure_ascii=False)
-    report('提示词增强需要改为开启', len(enh_ids))
+    report('丰富面板内容需要改为关闭', len(enh_ids))
 
     # ---------- 3. 会话：补绑人物卡（协议条目按卡存） ----------
     print('\n[3] 给没绑定人物卡的会话补绑默认卡')

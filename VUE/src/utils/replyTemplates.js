@@ -829,7 +829,7 @@ export function templateMarkers(preset) {
   return Object.keys(preset?.blocks || {})
 }
 
-/** 新对话默认模板：脸红 + 长文 + 提示词增强开启。 */
+/** 新对话默认模板：脸红 + 长文 + 丰富面板内容关闭（省 token，用户自己按需开）。 */
 export function buildDefaultReplyTemplateJson(overrides = {}) {
   const preset = TEMPLATE_PRESETS[DEFAULT_TEMPLATE_ID] || TEMPLATE_PRESET_LIST[0] || {}
   return JSON.stringify({
@@ -837,7 +837,7 @@ export function buildDefaultReplyTemplateJson(overrides = {}) {
     name: preset.name || '脸红',
     protocol: DEFAULT_PROTOCOL,
     length: DEFAULT_LENGTH,
-    enhance: true,
+    enhance: false,
     ...overrides,
   })
 }

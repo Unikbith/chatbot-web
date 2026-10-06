@@ -20,6 +20,9 @@ from models import (
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
+# 管理员令牌有效期（天）：后台不常开，给足 7 天避免反复登录
+ADMIN_TOKEN_DAYS = 7
+
 
 def _arg_int(name, default, *, minimum=None, maximum=None):
     """读取并限制整数 query 参数，非法值回落到默认值。"""
@@ -65,7 +68,12 @@ def admin_login():
     if username != expected_user or password != expected_pass:
         return jsonify({'code': 401, 'message': '管理员账号或密码错误'}), 401
 
-    token = create_access_token(identity='admin', additional_claims={'role': 'admin'})
+    # 管理员后台不常开，token 给 7 天，避免每次进后台都要重新登录（默认只有 2 小时）
+    token = create_access_token(
+        identity='admin',
+        additional_claims={'role': 'admin'},
+        expires_delta=timedelta(days=ADMIN_TOKEN_DAYS),
+    )
     return jsonify({
         'code': 200,
         'message': '登录成功',

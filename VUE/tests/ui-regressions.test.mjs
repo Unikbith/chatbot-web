@@ -86,7 +86,7 @@ console.log('\n[4] 世界书编辑器自身：条目可选、有上限')
   ok('说明可不填', wb.includes('可不填'))
 }
 
-console.log('\n[5] 会话设置：「角色阵容」已下线，两个开关默认开启')
+console.log('\n[5] 会话设置：「角色阵容」已下线，两个开关默认关闭（省 token）')
 {
   const vue = read('components/ConversationSettings.vue')
   // 注释里会提到"角色阵容已下线"，所以只断言界面上不再有这个面板标题
@@ -96,36 +96,49 @@ console.log('\n[5] 会话设置：「角色阵容」已下线，两个开关默�
   ok('不再有阵容与回应焦点输入', !vue.includes('role_cast') && !vue.includes('role_focus_rule'))
   ok('不再提交 conversation_directives（只留一条说明性注释）',
     !/conversation_directives:\s*\{/.test(vue))
-  ok('提示词兜底表单默认 true', /append_prompt_enabled:\s*true/.test(vue))
-  ok('提示词兜底回填时 NULL 视为开启',
-    /form\.append_prompt_enabled = conv\.append_prompt_enabled == null \? true/.test(vue))
-  ok('提示词增强回填时默认开启', /function readPromptEnhance[\s\S]{0,200}?return true/.test(vue))
-  ok('提示词增强表单默认 true', /prompt_enhance:\s*true/.test(vue))
-  ok('文案改成「默认开启」而不是「生成失败后才开启」',
-    vue.includes('默认开启') && !vue.includes('生成失败后才开启'))
+  ok('提示词兜底表单默认 false', /append_prompt_enabled:\s*false/.test(vue))
+  ok('提示词兜底回填时 NULL 视为关闭',
+    /form\.append_prompt_enabled = conv\.append_prompt_enabled == null \? false/.test(vue))
+  ok('丰富面板内容回填时默认关闭', /function readPromptEnhance[\s\S]{0,200}?return false/.test(vue))
+  ok('丰富面板内容表单默认 false', /prompt_enhance:\s*false/.test(vue))
+  ok('提示词兜底文案说明「注入协议条目控制输出内容，关掉后每轮更省 token」',
+    vue.includes('注入协议条目控制输出内容，关掉后每轮更省 token'))
+  ok('新对话默认模板里 enhance=false',
+    /enhance:\s*false/.test(read('utils/replyTemplates.js')))
 }
 
-console.log('\n[6] 后端：开关默认值与自动关闭逻辑')
+console.log('\n[6] 后端：开关默认值与门控逻辑')
 {
   const models = readFileSync(join(here, '..', '..', 'Flask', 'models.py'), 'utf8')
   const chat = readFileSync(join(here, '..', '..', 'Flask', 'routes', 'chat.py'), 'utf8')
   const rich = readFileSync(join(here, '..', '..', 'Flask', 'rich_marker.py'), 'utf8')
   const pack = readFileSync(join(here, '..', '..', 'Flask', 'protocol_pack.py'), 'utf8')
-  ok('模型默认 append_prompt_enabled=True',
-    /append_prompt_enabled = db\.Column\(db\.Boolean, default=True/.test(models))
-  ok('协议包：只有显式关闭才不注入（NULL 视为开启）',
-    /getattr\(conv, 'append_prompt_enabled', None\) is False/.test(chat))
+  ok('模型默认 append_prompt_enabled=False',
+    /append_prompt_enabled = db\.Column\(db\.Boolean, default=False/.test(models))
+  ok('协议包：总开关默认关（NULL/False 都视为关）',
+    /append_on = True if conv is None else bool\(getattr\(conv, 'append_prompt_enabled', None\)\)/.test(chat))
   ok('协议包：硬注入已移除（_get_system_prompt 不再拼兜底词）',
     !/_append_global_prompt\(body/.test(chat))
-  ok('协议包：结构与内容协议都是常驻条目',
-    /'source_key': 'protocol:structure'[\s\S]{0,200}?'always_on': True/.test(pack)
-    && /'source_key': 'protocol:content'[\s\S]{0,200}?'always_on': True/.test(pack))
-  ok('协议包：玩法扩展包是按需触发（不常驻）',
-    /'kind': 'play',\s*\n\s*'always_on': False/.test(pack))
+  ok('协议包：三条核心协议都不是常驻条目（改由会话开关控制）',
+    /'source_key': 'protocol:structure'[\s\S]{0,200}?'always_on': False/.test(pack)
+    && /'source_key': 'protocol:content'[\s\S]{0,200}?'always_on': False/.test(pack)
+    && /'source_key': 'protocol:experience'[\s\S]{0,200}?'always_on': False/.test(pack))
+  ok('协议包：结构协议由「界面标记 + 丰富面板内容」门控',
+    /'gate': 'enhance'/.test(pack)
+    && /if not \(structure_on and enhance\):\s*\n\s*continue/.test(chat))
+  ok('协议包：创作/体验协议由「提示词兜底」门控（与面板开关互相独立）',
+    /'gate': 'append'/.test(pack)
+    && /if kind in \('content', 'experience'\):[\s\S]{0,200}?if not append_on:\s*\n\s*continue/.test(chat))
+  ok('协议包：三个开关全关时一个字都不注入', 
+    /if not fixed_bodies and not play_bodies:\s*\n\s*return ''/.test(chat))
+  ok('协议包：玩法扩展包是按需触发（关键词命中才注入）',
+    /'kind': 'play',\s*\n\s*'gate': 'play',\s*\n\s*'always_on': False/.test(pack))
   ok('协议包含双男主与色情玩法包',
     pack.includes('protocol:play:multi') && pack.includes('protocol:play:sex'))
-  ok('enhance 未设置时按开启处理',
-    /enhance = opts\.get\('enhance'\) is not False/.test(rich))
+  ok('enhance 未设置时按关闭处理',
+    /enhance = opts\.get\('enhance'\) is True/.test(rich))
+  ok('篇幅要求跟着协议一起注入（全关时不多付）',
+    /length_text = reply_spec\.LENGTH_PROMPTS\.get\(length_id\)/.test(chat))
   ok('不再有「聊满三轮自动关闭提示词兜底」', !chat.includes('提示词兜底已自动关闭'))
   ok('不再有「聊满两轮自动关闭丰富面板内容」', !chat.includes('已自动关闭，以减少后续 Token 消耗'))
   ok('多角色注入函数已移除',
@@ -158,6 +171,10 @@ console.log('\n[7] 协议包 UI：卡片里能看见、能恢复、排版分组'
     /isWbExpanded/.test(panel) && /toggleWbExpand/.test(panel) && /v-if="isWbExpanded\(e\)"/.test(panel))
   ok('收起态显示摘要与字数', /function wbPreview/.test(panel) && /e\.content\.length/.test(panel))
   ok('触发词渲染为标签', /wbKeywordList/.test(panel) && /wb-kw-chip/.test(panel))
+  ok('核心协议角标显示「开关控制」而不是「常驻/按需」',
+    /function isCoreProtocol/.test(panel) && panel.includes("t('开关控制', 'By switch')")
+    && /CORE_PROTOCOL_KINDS = \['structure', 'content', 'experience'\]/.test(panel))
+  ok('核心协议编辑时不显示「常驻」勾选（改成开关说明）', /editingCoreWb/.test(panel))
   ok('展开正文可滚动（长规范不撑爆面板）', /\.wb-content\s*\{[\s\S]{0,200}?max-height/.test(panel))
   ok('列表不再有 34vh 硬限制（改为分组滚动）', !/max-height: 34vh/.test(panel))
 }

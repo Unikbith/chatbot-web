@@ -33,9 +33,9 @@ DEFAULT_REPLY_TEMPLATE = json.dumps({
     'name': '脸红',
     'protocol': 'full',
     'length': 'medium',
-    # 提示词增强默认开启：关掉它只剩标记词表、没有「每轮输出结构」，
-    # 新建对话的界面构件就会缺斤少两（面板/状态/记忆时有时无）。
-    'enhance': True,
+    # 丰富面板内容（enhance）默认关闭：开启后才会注入「输出结构协议」，
+    # 每轮固定多几千字。面板要不要常开由用户在「界面标记 → 丰富面板内容」里决定。
+    'enhance': False,
 }, ensure_ascii=False)
 
 
@@ -162,7 +162,7 @@ def create_conversation():
         persona_id=persona_id,
         system_prompt=system_prompt,
         temperature=temperature,
-        append_prompt_enabled=bool(data.get('append_prompt_enabled', True)),
+        append_prompt_enabled=bool(data.get('append_prompt_enabled', False)),
         rich_marker_enabled=bool(data.get('rich_marker_enabled', True)),
         reply_template=data.get('reply_template') or DEFAULT_REPLY_TEMPLATE,
     )
